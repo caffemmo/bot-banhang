@@ -477,6 +477,17 @@ mod tests {
     }
 
     #[test]
+    fn deploy_scripts_copy_i18n_files() {
+        const DEPLOY_SH: &str = include_str!("../deploy.sh");
+        const BOT_CLONE_SH: &str = include_str!("../bot_clone.sh");
+        const BOT_UPDATE_SH: &str = include_str!("../bot_update.sh");
+
+        assert!(DEPLOY_SH.contains("i18n"));
+        assert!(BOT_CLONE_SH.contains("i18n"));
+        assert!(BOT_UPDATE_SH.contains("i18n"));
+    }
+
+    #[test]
     fn localized_commands_use_i18n_descriptions_by_language() {
         let texts = BotTexts::from_language_maps(
             vec![

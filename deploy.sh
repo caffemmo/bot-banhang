@@ -92,7 +92,7 @@ backup_current_install
 sudo cp "${BIN_PATH}" "${INSTALL_DIR}/${APP_NAME}.new"
 sudo mv -f "${INSTALL_DIR}/${APP_NAME}.new" "${INSTALL_DIR}/${APP_NAME}"
 
-echo "==> Copying configs/assets (.env, public/)"
+echo "==> Copying configs/assets (.env, public/, i18n/)"
 if [[ -f .env ]]; then
   sudo cp .env "${INSTALL_DIR}/"
 fi
@@ -102,6 +102,13 @@ if [[ -d public ]]; then
   fi
   sudo rm -rf "${INSTALL_DIR}/public"
   sudo cp -r public "${INSTALL_DIR}/"
+fi
+if [[ -d i18n ]]; then
+  if [[ -d "${INSTALL_DIR}/i18n" ]]; then
+    sudo cp -a "${INSTALL_DIR}/i18n" "${BACKUP_DIR}/i18n.${TIMESTAMP}"
+  fi
+  sudo rm -rf "${INSTALL_DIR}/i18n"
+  sudo cp -r i18n "${INSTALL_DIR}/"
 fi
 
 echo "==> Installing management scripts..."

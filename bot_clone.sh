@@ -64,9 +64,12 @@ mkdir -p "$TARGET_DIR/storage/uploads"
 mkdir -p "$TARGET_DIR/storage/product_files"
 chmod 700 "$TARGET_DIR/storage/product_files"
 
-echo "==> Đang copy file chạy binary và các file giao diện public..."
+echo "==> Đang copy file chạy binary, giao diện public và i18n..."
 cp -a "$MASTER_DIR/botbanhang" "$TARGET_DIR/botbanhang"
 cp -a "$MASTER_DIR/public" "$TARGET_DIR/public"
+if [ -d "$MASTER_DIR/i18n" ]; then
+    cp -a "$MASTER_DIR/i18n" "$TARGET_DIR/i18n"
+fi
 
 echo "==> Đang tạo file cấu hình .env..."
 cat <<EOF > "$TARGET_DIR/.env"

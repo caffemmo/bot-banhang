@@ -825,10 +825,25 @@ async fn credit_paid_order_to_wallet(
 }
 
 use axum::Router;
-use axum::routing::post;
+use axum::routing::get;
 
 pub fn router() -> Router<Arc<crate::app::AppContext>> {
-    Router::new().route("/webhook/payment", post(handle_webhook))
+    Router::new()
+        .route("/webhook/payment", get(webhook_status).post(handle_webhook))
+        .route(
+            "/webhook/payment/",
+            get(webhook_status).post(handle_webhook),
+        )
+}
+
+async fn webhook_status() -> (StatusCode, Json<MessageResponse>) {
+    (
+        StatusCode::OK,
+        Json(MessageResponse {
+            ok: true,
+            message: "webhook endpoint ready; send payment notifications with POST".to_string(),
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -838,7 +853,12 @@ mod tests {
         orders::{models::Order, repo as orders_repo},
         wallet::repo as wallet_repo,
     };
+    use crate::{app::AppContext, config::Config};
+    use axum::{body::Body, http::Request};
     use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+    use std::{collections::HashMap, sync::Arc};
+    use teloxide::Bot;
+    use tower::ServiceExt;
 
     #[test]
     fn extracts_wallet_topup_memo_from_sepay_content() {
@@ -888,6 +908,36 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn webhook_endpoint_allows_get_health_check() {
+        let response = router()
+            .with_state(test_ctx())
+            .oneshot(
+                Request::get("/webhook/payment")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn webhook_endpoint_accepts_trailing_slash_health_check() {
+        let response = router()
+            .with_state(test_ctx())
+            .oneshot(
+                Request::get("/webhook/payment/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -896,6 +946,30 @@ mod tests {
             .unwrap();
         sqlx::migrate!("./migrations").run(&pool).await.unwrap();
         pool
+    }
+
+    fn test_ctx() -> Arc<AppContext> {
+        let config = Config::from_env_map(&HashMap::from([
+            ("TELOXIDE_TOKEN".to_string(), "test-token".to_string()),
+            (
+                "ADMIN_JWT_SECRET".to_string(),
+                "test-admin-jwt-secret-at-least-32-chars".to_string(),
+            ),
+            ("ADMIN_SETUP_CODE".to_string(), "setup-code".to_string()),
+            ("WEBHOOK_SECRET".to_string(), "webhook-secret".to_string()),
+        ]))
+        .unwrap();
+        let pool = SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            config,
+            HashMap::new(),
+            crate::bot::texts::BotTexts::default(),
+            vec![],
+        )
     }
 
     async fn seed_pending_order_with_reserved_item(pool: &SqlitePool) -> Order {

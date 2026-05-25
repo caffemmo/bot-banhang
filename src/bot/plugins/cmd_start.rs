@@ -6,7 +6,7 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::types::{
     BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
-    KeyboardMarkup, Message,
+    KeyboardMarkup, Message, User,
 };
 use url::Url;
 
@@ -117,6 +117,46 @@ async fn preferred_or_telegram_lang(
         .or_else(|| telegram_language_code.map(|lang| lang.to_string()));
 
     ctx.normalize_language_code(preferred.as_deref())
+}
+
+async fn upsert_subscriber_from_user(
+    ctx: &AppContext,
+    user: &User,
+    chat_id: i64,
+    preferred_language: Option<String>,
+) {
+    let first_name = Some(user.first_name.clone());
+    let last_name = user.last_name.clone();
+    let full_name_from_parts = format!(
+        "{} {}",
+        first_name.clone().unwrap_or_default(),
+        last_name.clone().unwrap_or_default()
+    )
+    .trim()
+    .to_string();
+    let full_name = if full_name_from_parts.is_empty() {
+        user.username.clone()
+    } else {
+        Some(full_name_from_parts)
+    };
+
+    let profile = Subscriber {
+        user_id: user.id.0 as i64,
+        chat_id,
+        username: user.username.clone(),
+        first_name,
+        last_name,
+        full_name,
+        language_code: user.language_code.clone(),
+        preferred_language,
+        stock_notifications_enabled: Some(1),
+        is_bot: Some(if user.is_bot { 1 } else { 0 }),
+        created_at: None,
+        updated_at: None,
+    };
+    if let Err(err) = users_repo::upsert_subscriber(&ctx.pool, &profile).await {
+        tracing::warn!("Failed to upsert subscriber {}: {err}", user.id.0);
+    }
 }
 
 async fn user_has_joined_required_channel(
@@ -611,42 +651,7 @@ impl AppPlugin for StartCommandPlugin {
 
         if text.starts_with("/start") && start_payload.is_empty() {
             if let Some(user) = msg.from() {
-                let user_id = user.id.0 as i64;
-                let chat_id = msg.chat.id.0;
-                let username = user.username.clone();
-                let first_name = Some(user.first_name.clone());
-                let last_name = user.last_name.clone();
-                let language_code = user.language_code.clone();
-                let is_bot = user.is_bot;
-
-                let full_name_from_parts = format!(
-                    "{} {}",
-                    first_name.clone().unwrap_or_default(),
-                    last_name.clone().unwrap_or_default()
-                )
-                .trim()
-                .to_string();
-                let full_name = if full_name_from_parts.is_empty() {
-                    username.clone()
-                } else {
-                    Some(full_name_from_parts)
-                };
-
-                let profile = Subscriber {
-                    user_id,
-                    chat_id,
-                    username,
-                    first_name,
-                    last_name,
-                    full_name,
-                    language_code,
-                    preferred_language: None,
-                    stock_notifications_enabled: Some(1),
-                    is_bot: Some(if is_bot { 1 } else { 0 }),
-                    created_at: None,
-                    updated_at: None,
-                };
-                let _ = users_repo::upsert_subscriber(&ctx.pool, &profile).await;
+                upsert_subscriber_from_user(&ctx, user, msg.chat.id.0, None).await;
             }
 
             let preferred_language = if let Some(user) = msg.from() {
@@ -735,6 +740,10 @@ impl AppPlugin for StartCommandPlugin {
                 return Ok(true);
             }
             let lang = ctx.normalize_language_code(Some(lang));
+            if let Some(msg) = &q.message {
+                upsert_subscriber_from_user(&ctx, &q.from, msg.chat().id.0, Some(lang.clone()))
+                    .await;
+            }
             let _ =
                 users_repo::update_preferred_language(&ctx.pool, q.from.id.0 as i64, &lang).await;
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
@@ -838,6 +847,7 @@ mod tests {
     use crate::config::Config;
     use std::collections::HashMap;
     use teloxide::Bot;
+    use teloxide::types::UserId;
 
     #[test]
     fn required_channel_enabled_accepts_common_truthy_values() {
@@ -1156,6 +1166,55 @@ mod tests {
         let last_row = rows.last().unwrap().as_array().unwrap();
 
         assert_eq!(last_row[0]["callback_data"], "start:menu");
+    }
+
+    #[tokio::test]
+    async fn upsert_subscriber_from_callback_user_saves_preferred_language() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let ctx = AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            Config {
+                telegram_token: "test-token".to_string(),
+                database_url: "sqlite::memory:".to_string(),
+                bank_name: "VCB".to_string(),
+                bank_account: Some("123".to_string()),
+                bank_account_name: None,
+                webhook_secret: "secret".to_string(),
+                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
+                admin_setup_code: "setupcode".to_string(),
+                admin_cookie_secure: false,
+                base_url: None,
+                i18n_dir: "i18n".to_string(),
+                port: 8080,
+                crypto: crate::config::CryptoConfig::default(),
+            },
+            HashMap::new(),
+            BotTexts::default(),
+            vec![],
+        );
+        let user = User {
+            id: UserId(42),
+            is_bot: false,
+            first_name: "Nam".to_string(),
+            last_name: None,
+            username: Some("nam".to_string()),
+            language_code: Some("en".to_string()),
+            is_premium: false,
+            added_to_attachment_menu: false,
+        };
+
+        upsert_subscriber_from_user(&ctx, &user, 420, Some("vi".to_string())).await;
+
+        assert_eq!(
+            users_repo::preferred_language(&ctx.pool, 42).await.unwrap(),
+            Some("vi".to_string())
+        );
     }
 
     #[test]

@@ -61,10 +61,17 @@ for TARGET in "${TARGETS[@]}"; do
     echo "   -> Đang sao lưu file chạy cũ vào backups/botbanhang.$TS..."
     cp -a "$TARGET/botbanhang" "$BACKUP_DIR/botbanhang.$TS"
     
-    echo "   -> Đang copy file chạy binary và public mới từ bot gốc..."
+    echo "   -> Đang copy file chạy binary, public và i18n mới từ bot gốc..."
     cp -a "$MASTER_DIR/botbanhang" "$TARGET/botbanhang"
     rm -rf "$TARGET/public"
     cp -a "$MASTER_DIR/public" "$TARGET/public"
+    if [ -d "$MASTER_DIR/i18n" ]; then
+        if [ -d "$TARGET/i18n" ]; then
+            cp -a "$TARGET/i18n" "$BACKUP_DIR/i18n.$TS"
+        fi
+        rm -rf "$TARGET/i18n"
+        cp -a "$MASTER_DIR/i18n" "$TARGET/i18n"
+    fi
     
     echo "   -> Đang khởi động lại service $BOT_NAME..."
     systemctl start "$BOT_NAME"
