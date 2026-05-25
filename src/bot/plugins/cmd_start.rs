@@ -5,8 +5,7 @@ use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::types::{
-    BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
-    KeyboardMarkup, Message, User,
+    BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User,
 };
 use url::Url;
 
@@ -330,25 +329,38 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
     ]
 }
 
-fn start_reply_keyboard(ctx: &AppContext, lang: &str) -> KeyboardMarkup {
-    let rows = start_reply_keyboard_specs(ctx, lang);
-
-    KeyboardMarkup::new(
-        rows.into_iter()
-            .map(|row| row.into_iter().map(KeyboardButton::new).collect::<Vec<_>>())
-            .collect::<Vec<_>>(),
-    )
-    .persistent()
-    .resize_keyboard()
-    .input_field_placeholder(t_lang(
+async fn send_message_with_start_reply_keyboard(
+    ctx: &AppContext,
+    chat_id: teloxide::types::ChatId,
+    key: &str,
+    text: impl Into<String>,
+    lang: &str,
+) -> Result<(), anyhow::Error> {
+    i18n::send_message_with_json_keyboard(
         ctx,
-        lang,
-        "start_keyboard_placeholder",
-        "Choose an action",
-    ))
+        chat_id,
+        key,
+        text,
+        start_reply_keyboard_json(ctx, lang),
+    )
+    .await
 }
 
-fn start_reply_keyboard_specs(ctx: &AppContext, lang: &str) -> Vec<Vec<String>> {
+fn start_reply_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
+    json!({
+        "keyboard": start_reply_keyboard_button_rows(ctx, lang),
+        "is_persistent": true,
+        "resize_keyboard": true,
+        "input_field_placeholder": t_lang(
+            ctx,
+            lang,
+            "start_keyboard_placeholder",
+            "Choose an action",
+        ),
+    })
+}
+
+fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Value>> {
     ctx.texts
         .read()
         .map(|texts| {
@@ -357,7 +369,7 @@ fn start_reply_keyboard_specs(ctx: &AppContext, lang: &str) -> Vec<Vec<String>> 
                 .map(|row| {
                     row.into_iter()
                         .map(|(label, callback)| {
-                            i18n::reply_keyboard_button_text(
+                            i18n::keyboard_button_json(
                                 ctx,
                                 start_menu_button_key_for_callback(&callback),
                                 label,
@@ -369,11 +381,17 @@ fn start_reply_keyboard_specs(ctx: &AppContext, lang: &str) -> Vec<Vec<String>> 
         })
         .unwrap_or_else(|_| {
             vec![
-                vec!["🛒 Shop".to_string()],
-                vec!["💰 Top up".to_string(), "💳 Wallet".to_string()],
-                vec!["📦 Purchased".to_string(), "📜 Top-up history".to_string()],
-                vec!["🔌 API integration".to_string(), "Help".to_string()],
-                vec!["🌐 Language".to_string()],
+                vec![json!({"text": "🛒 Shop"})],
+                vec![json!({"text": "💰 Top up"}), json!({"text": "💳 Wallet"})],
+                vec![
+                    json!({"text": "📦 Purchased"}),
+                    json!({"text": "📜 Top-up history"}),
+                ],
+                vec![
+                    json!({"text": "🔌 API integration"}),
+                    json!({"text": "Help"}),
+                ],
+                vec![json!({"text": "🌐 Language"})],
             ]
         })
 }
@@ -617,26 +635,28 @@ impl AppPlugin for StartCommandPlugin {
                         cmd_wallet::prompt_topup_amount(&ctx, msg.chat.id, dialogue.clone(), &lang)
                             .await?;
                     } else {
-                        ctx.bot
-                            .send_message(
-                                msg.chat.id,
-                                t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
-                            )
-                            .reply_markup(start_reply_keyboard(&ctx, &lang))
-                            .await?;
+                        send_message_with_start_reply_keyboard(
+                            &ctx,
+                            msg.chat.id,
+                            "user_unknown",
+                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
+                            &lang,
+                        )
+                        .await?;
                     }
                 }
                 StartMenuAction::Wallet => {
                     if let Some(user) = msg.from() {
                         cmd_wallet::show_wallet(&ctx, msg.chat.id, user.id.0 as i64).await?;
                     } else {
-                        ctx.bot
-                            .send_message(
-                                msg.chat.id,
-                                t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
-                            )
-                            .reply_markup(start_reply_keyboard(&ctx, &lang))
-                            .await?;
+                        send_message_with_start_reply_keyboard(
+                            &ctx,
+                            msg.chat.id,
+                            "user_unknown",
+                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
+                            &lang,
+                        )
+                        .await?;
                     }
                 }
                 StartMenuAction::Orders => {
@@ -654,13 +674,14 @@ impl AppPlugin for StartCommandPlugin {
                         )
                         .await?;
                     } else {
-                        ctx.bot
-                            .send_message(
-                                msg.chat.id,
-                                t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
-                            )
-                            .reply_markup(start_reply_keyboard(&ctx, &lang))
-                            .await?;
+                        send_message_with_start_reply_keyboard(
+                            &ctx,
+                            msg.chat.id,
+                            "user_unknown",
+                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
+                            &lang,
+                        )
+                        .await?;
                     }
                 }
                 StartMenuAction::ApiIntegration => {
@@ -674,13 +695,14 @@ impl AppPlugin for StartCommandPlugin {
                         )
                         .await?;
                     } else {
-                        ctx.bot
-                            .send_message(
-                                msg.chat.id,
-                                t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
-                            )
-                            .reply_markup(start_reply_keyboard(&ctx, &lang))
-                            .await?;
+                        send_message_with_start_reply_keyboard(
+                            &ctx,
+                            msg.chat.id,
+                            "user_unknown",
+                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
+                            &lang,
+                        )
+                        .await?;
                     }
                 }
                 StartMenuAction::Help => {
@@ -690,9 +712,14 @@ impl AppPlugin for StartCommandPlugin {
                         "help",
                         "❓ Quick help:\n/shop - products\n/orders - your orders\n/help - help.",
                     );
-                    i18n::send_message_for_key(&ctx, msg.chat.id, "help", msg_text)
-                        .reply_markup(start_reply_keyboard(&ctx, &lang))
-                        .await?;
+                    send_message_with_start_reply_keyboard(
+                        &ctx,
+                        msg.chat.id,
+                        "help",
+                        msg_text,
+                        &lang,
+                    )
+                    .await?;
                 }
                 StartMenuAction::Language => {
                     send_language_prompt(&ctx, msg.chat.id, &lang).await?;
@@ -1151,7 +1178,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reply_keyboard_specs_hide_custom_emoji_id_placeholders() {
+    async fn reply_keyboard_json_hides_custom_emoji_id_placeholders() {
         let ctx = test_ctx_with_texts(BotTexts::from_language_maps(
             vec![LanguageInfo {
                 code: "vi".to_string(),
@@ -1174,11 +1201,15 @@ mod tests {
             )]),
         ));
 
-        let rows = start_reply_keyboard_specs(&ctx, "vi");
+        let keyboard = start_reply_keyboard_json(&ctx, "vi");
+        let rows = keyboard["keyboard"].as_array().unwrap();
 
-        assert_eq!(rows[0][0], "✨ 🛒 Xem sản phẩm");
-        assert_eq!(rows[1][1], "✨ 💳 Ví tiền");
-        assert!(!rows.iter().flatten().any(|label| label.contains('{')));
+        assert_eq!(rows[0][0]["text"], "🛒 Xem sản phẩm");
+        assert_eq!(rows[0][0]["icon_custom_emoji_id"], "6172437452590944785");
+        assert_eq!(rows[1][1]["text"], "💳 Ví tiền");
+        assert_eq!(rows[1][1]["icon_custom_emoji_id"], "6113868675792507468");
+        assert!(!keyboard.to_string().contains("{6172437452590944785}"));
+        assert!(!keyboard.to_string().contains("{6113868675792507468}"));
     }
 
     #[test]
@@ -1263,6 +1294,10 @@ mod tests {
         );
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "✨ 💳 Ví tiền"),
+            Some(StartMenuAction::Wallet)
+        );
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "Ví tiền"),
             Some(StartMenuAction::Wallet)
         );
     }

@@ -156,26 +156,34 @@ pub fn keyboard_button(ctx: &AppContext, key: &str, text: impl Into<String>) -> 
     KeyboardButton::new(fallback_button_text_for_key(ctx, key, text))
 }
 
-pub fn reply_keyboard_button_text(ctx: &AppContext, key: &str, text: impl Into<String>) -> String {
-    fallback_button_text_for_key(ctx, key, text)
-}
-
 pub fn button_text_match_variants(text: &str) -> Vec<String> {
     let mut variants = Vec::new();
     push_unique_normalized_button_text(&mut variants, text);
+    push_unique_normalized_button_text(&mut variants, strip_leading_button_symbols(text));
 
     if contains_custom_emoji_id_placeholder(text) {
-        push_unique_normalized_button_text(
-            &mut variants,
-            render_button_custom_emoji_id_placeholders(text),
-        );
+        let rendered = render_button_custom_emoji_id_placeholders(text);
+        push_unique_normalized_button_text(&mut variants, &rendered);
+        push_unique_normalized_button_text(&mut variants, strip_leading_button_symbols(&rendered));
     }
 
     if let Some((without_placeholder, _custom_id)) = button_custom_emoji_placeholder_parts(text) {
-        push_unique_normalized_button_text(&mut variants, without_placeholder);
+        push_unique_normalized_button_text(&mut variants, &without_placeholder);
+        push_unique_normalized_button_text(
+            &mut variants,
+            strip_leading_button_symbols(&without_placeholder),
+        );
     }
 
     variants
+}
+
+fn strip_leading_button_symbols(text: &str) -> &str {
+    text.trim_start_matches(|ch: char| {
+        ch.is_whitespace()
+            || ch.is_ascii_punctuation()
+            || (!ch.is_alphanumeric() && !matches!(ch, '{' | '}'))
+    })
 }
 
 fn fallback_button_text_for_key(ctx: &AppContext, key: &str, text: impl Into<String>) -> String {
