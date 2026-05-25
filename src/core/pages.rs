@@ -64,6 +64,17 @@ mod tests {
     }
 
     #[test]
+    fn admin_i18n_editor_exposes_keyboard_button_custom_emoji_fields() {
+        assert!(ADMIN_I18N_JS.contains("isKeyboardButtonI18nKey"));
+        assert!(ADMIN_I18N_JS.contains("bot-i18n-emoji-fallback"));
+        assert!(ADMIN_I18N_JS.contains("bot-i18n-emoji-custom-id"));
+        assert!(ADMIN_I18N_JS.contains("Emoji thường"));
+        assert!(ADMIN_I18N_JS.contains("Custom emoji ID nút"));
+        assert!(ADMIN_I18N_JS.contains("payload.emojis = buildBotI18nEmojiPayload()"));
+        assert!(ADMIN_I18N_JS.contains("start_btn_shop"));
+    }
+
+    #[test]
     fn admin_broadcast_uses_inline_custom_emoji_placeholders() {
         assert!(!ADMIN_HTML.contains("id=\"bc-emoji-prefix\""));
         assert!(!ADMIN_HTML.contains("Emoji mở đầu"));

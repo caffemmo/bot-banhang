@@ -83,6 +83,114 @@
       return groups;
     }
 
+    const KEYBOARD_BUTTON_I18N_KEYS = new Set([
+      'back_btn',
+      'cancel_crypto_btn',
+      'cancel_order_btn',
+      'check_crypto_btn',
+      'continue_shopping_btn',
+      'copy_address_btn',
+      'copy_amount_btn',
+      'language_btn_en',
+      'language_btn_vi',
+      'open_shop_btn',
+      'pagination_next',
+      'pagination_prev',
+      'pay_bep20_btn',
+      'pay_binance_btn',
+      'paywallet_btn',
+      'required_channel_check_btn',
+      'required_channel_join_btn',
+      'shop_back_btn',
+      'start_btn_api_integration',
+      'start_btn_help',
+      'start_btn_language',
+      'start_btn_orders',
+      'start_btn_purchased',
+      'start_btn_shop',
+      'start_btn_topup',
+      'start_btn_topup_history',
+      'start_btn_wallet',
+      'stock_notify_buy_now_btn',
+      'stock_notify_disable_btn',
+      'stock_notify_view_more_btn',
+    ]);
+
+    function isKeyboardButtonI18nKey(key) {
+      return KEYBOARD_BUTTON_I18N_KEYS.has(key)
+        || key.startsWith('start_btn_')
+        || key.startsWith('shop_btn_')
+        || key.startsWith('topup_btn_')
+        || key.startsWith('wallet_btn_');
+    }
+
+    function emojiConfigForKey(detail, key) {
+      const config = detail?.emojis?.[key] || {};
+      const first = Array.isArray(config.emojis) && config.emojis.length ? config.emojis[0] : {};
+      return {
+        fallback: config.fallback || first.fallback || '',
+        custom_emoji_id: config.custom_emoji_id || first.custom_emoji_id || '',
+      };
+    }
+
+    function leadingEmojiToken(value) {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) return '';
+      const firstToken = trimmed.split(/\s+/)[0] || '';
+      return /[\p{L}\p{N}]/u.test(firstToken) ? '' : firstToken.slice(0, 16);
+    }
+
+    function renderKeyboardButtonEmojiFields(detail, key, value, fallbackValue) {
+      if (!isKeyboardButtonI18nKey(key)) return '';
+      const config = emojiConfigForKey(detail, key);
+      const fallbackPlaceholder = leadingEmojiToken(value) || leadingEmojiToken(fallbackValue) || 'VD: 🛒';
+      return `
+        <div class="row g-2 mt-2 bot-i18n-emoji-row" data-key="${escapeAttr(key)}">
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">Emoji thường</label>
+            <input class="form-control form-control-sm bot-i18n-emoji-fallback" data-key="${escapeAttr(key)}"
+              maxlength="16" value="${escapeAttr(config.fallback)}" placeholder="${escapeAttr(fallbackPlaceholder)}">
+          </div>
+          <div class="col-12 col-md-8">
+            <label class="form-label small mb-1">Custom emoji ID nút</label>
+            <input class="form-control form-control-sm bot-i18n-emoji-custom-id" data-key="${escapeAttr(key)}"
+              inputmode="numeric" maxlength="64" value="${escapeAttr(config.custom_emoji_id)}"
+              placeholder="VD: 6172437452590944785">
+          </div>
+        </div>
+      `;
+    }
+
+    function buildBotI18nEmojiPayload() {
+      const emojis = {};
+      const current = currentBotI18nDetail?.emojis || {};
+      Object.keys(current).forEach(key => {
+        emojis[key] = current[key];
+      });
+
+      $('.bot-i18n-emoji-row').each(function () {
+        const key = String($(this).data('key') || '');
+        const fallback = String($(this).find('.bot-i18n-emoji-fallback').val() || '').trim();
+        const customId = String($(this).find('.bot-i18n-emoji-custom-id').val() || '').trim();
+        if (!key) return;
+        if (!fallback && !customId) {
+          delete emojis[key];
+          return;
+        }
+        if (customId && !/^\d{8,64}$/.test(customId)) {
+          throw new Error(`Custom emoji ID nút ${key} phải là số, dài 8-64 ký tự.`);
+        }
+        if (!fallback) {
+          throw new Error(`Nhập Emoji thường cho ${key} để làm fallback khi Telegram không hiện emoji động.`);
+        }
+        emojis[key] = customId
+          ? { fallback, custom_emoji_id: customId }
+          : fallback;
+      });
+
+      return emojis;
+    }
+
     async function loadBotI18n() {
       await loadBotI18nLanguages();
     }
@@ -185,6 +293,7 @@
             <div class="col-12 col-lg-6 bot-i18n-field">
               <label class="form-label font-monospace small mb-1">${escapeHtml(key)}</label>
               <textarea class="form-control bot-i18n-input" data-key="${escapeAttr(key)}" rows="${rows}">${escapeHtml(value)}</textarea>
+              ${renderKeyboardButtonEmojiFields(detail, key, value || fallbackValue, fallbackValue)}
               ${fallbackValue ? `<div class="form-text text-muted">Fallback: ${escapeHtml(fallbackValue)}</div>` : ''}
               ${emojisEnabled ? '<div class="form-text">Để đặt emoji động đúng vị trí, nhập {Custom emoji ID} trong nội dung text.</div>' : ''}
             </div>
@@ -212,10 +321,11 @@
 
       try {
         const code = currentBotI18nDetail.language.code;
-        const body = { bot };
+        const payload = { bot };
+        payload.emojis = buildBotI18nEmojiPayload();
         const result = await apiFetch(`/i18n/language/${encodeURIComponent(code)}`, {
           method: 'PUT',
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
         });
         alertBox('success', `Đã lưu ${result.imported_keys} key cho ${result.language.label}.`);
         await loadBotI18nLanguages();
