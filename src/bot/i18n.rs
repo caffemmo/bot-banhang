@@ -156,6 +156,28 @@ pub fn keyboard_button(ctx: &AppContext, key: &str, text: impl Into<String>) -> 
     KeyboardButton::new(fallback_button_text_for_key(ctx, key, text))
 }
 
+pub fn reply_keyboard_button_text(ctx: &AppContext, key: &str, text: impl Into<String>) -> String {
+    fallback_button_text_for_key(ctx, key, text)
+}
+
+pub fn button_text_match_variants(text: &str) -> Vec<String> {
+    let mut variants = Vec::new();
+    push_unique_normalized_button_text(&mut variants, text);
+
+    if contains_custom_emoji_id_placeholder(text) {
+        push_unique_normalized_button_text(
+            &mut variants,
+            render_button_custom_emoji_id_placeholders(text),
+        );
+    }
+
+    if let Some((without_placeholder, _custom_id)) = button_custom_emoji_placeholder_parts(text) {
+        push_unique_normalized_button_text(&mut variants, without_placeholder);
+    }
+
+    variants
+}
+
 fn fallback_button_text_for_key(ctx: &AppContext, key: &str, text: impl Into<String>) -> String {
     let text = text.into();
     if contains_custom_emoji_id_placeholder(&text) {
@@ -235,6 +257,17 @@ fn render_button_custom_emoji_id_placeholders(text: &str) -> String {
     }
 
     rendered.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn push_unique_normalized_button_text(variants: &mut Vec<String>, text: impl AsRef<str>) {
+    let normalized = text
+        .as_ref()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !normalized.is_empty() && !variants.iter().any(|candidate| candidate == &normalized) {
+        variants.push(normalized);
+    }
 }
 
 #[allow(dead_code)]

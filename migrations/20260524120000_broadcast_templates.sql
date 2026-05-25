@@ -18,7 +18,7 @@ VALUES
 
 Sản phẩm hot vừa được nhập thêm.
 Nhanh tay mua trước khi hết hàng.',
-'message_only',
+'view_shop',
 '[[{"text":"{5375135722514685501} Xem sản phẩm","callback_data":"start:shop"}]]',
 1),
 (2, 'Flash sale',
@@ -27,7 +27,7 @@ Nhanh tay mua trước khi hết hàng.',
 
 Một số sản phẩm đang có giá tốt.
 Vào shop để xem và đặt đơn ngay.',
-'message_only',
+'view_shop',
 '[[{"text":"{5375135722514685501} Xem sản phẩm","callback_data":"start:shop"}],[{"text":"{5420147074266044260} Nạp ví","callback_data":"wallet:topup"}]]',
 2),
 (3, 'Nạp ví bonus',
@@ -44,7 +44,7 @@ Nạp ví trước để thanh toán nhanh hơn khi hàng mới lên kho.',
 
 Kho đang còn số lượng giới hạn.
 Ai thanh toán trước sẽ được giao trước.',
-'message_only',
+'view_shop',
 '[[{"text":"{5375135722514685501} Mua ngay","callback_data":"start:shop"}]]',
 4),
 (5, 'Thông báo hỗ trợ',

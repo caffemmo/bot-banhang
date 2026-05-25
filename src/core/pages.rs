@@ -40,6 +40,7 @@ pub async fn serve(ctx: Arc<AppContext>) -> Result<()> {
 mod tests {
     const ADMIN_HTML: &str = include_str!("../../public/admin.html");
     const ADMIN_CORE_JS: &str = include_str!("../../public/assets/admin/core.js");
+    const ADMIN_EVENTS_JS: &str = include_str!("../../public/assets/admin/events.js");
     const ADMIN_PRODUCTS_JS: &str = include_str!("../../public/assets/admin/products.js");
     const ADMIN_CONFIGS_JS: &str = include_str!("../../public/assets/admin/configs.js");
     const ADMIN_I18N_JS: &str = include_str!("../../public/assets/admin/i18n.js");
@@ -86,5 +87,16 @@ mod tests {
         assert!(ADMIN_HTML.contains("id=\"product-button-custom-emoji-id\""));
         assert!(ADMIN_HTML.contains("Emoji nút"));
         assert!(ADMIN_HTML.contains("Custom emoji ID động"));
+    }
+
+    #[test]
+    fn admin_broadcast_templates_are_scoped_to_selected_mode() {
+        assert!(ADMIN_CORE_JS.contains("filteredBroadcastTemplates()"));
+        assert!(ADMIN_CORE_JS.contains("renderBroadcastTemplateOptions({ preferredId"));
+        assert!(ADMIN_CORE_JS.contains("Không có mẫu cho kiểu"));
+        assert!(ADMIN_EVENTS_JS.contains("renderBroadcastTemplateOptions()"));
+        assert!(ADMIN_EVENTS_JS.contains("selectedBroadcastTemplate()"));
+        assert!(ADMIN_EVENTS_JS.contains("applyBroadcastTemplate(template.id)"));
+        assert!(ADMIN_EVENTS_JS.contains("toggleBroadcastProductPicker()"));
     }
 }

@@ -222,7 +222,7 @@ fn default_broadcast_templates() -> Vec<BroadcastTemplateSeed> {
         BroadcastTemplateSeed {
             name: "Hàng mới lên kho",
             text: "{5375135722514685501} HÀNG MỚI VỪA LÊN KHO\n━━━━━━━━━━━━\n\nSản phẩm hot vừa được nhập thêm.\nNhanh tay mua trước khi hết hàng.",
-            mode: "message_only",
+            mode: "view_shop",
             buttons_json: r#"[[{"text":"{5375135722514685501} Xem sản phẩm","callback_data":"start:shop"}]]"#,
             product_id: None,
             sort_order: 1,
@@ -230,7 +230,7 @@ fn default_broadcast_templates() -> Vec<BroadcastTemplateSeed> {
         BroadcastTemplateSeed {
             name: "Flash sale",
             text: "{5375135722514685501} FLASH SALE HÔM NAY\n━━━━━━━━━━━━\n\nMột số sản phẩm đang có giá tốt.\nVào shop để xem và đặt đơn ngay.",
-            mode: "message_only",
+            mode: "view_shop",
             buttons_json: r#"[[{"text":"{5375135722514685501} Xem sản phẩm","callback_data":"start:shop"}],[{"text":"{5420147074266044260} Nạp ví","callback_data":"wallet:topup"}]]"#,
             product_id: None,
             sort_order: 2,
@@ -246,7 +246,7 @@ fn default_broadcast_templates() -> Vec<BroadcastTemplateSeed> {
         BroadcastTemplateSeed {
             name: "Sản phẩm hot còn ít",
             text: "{5375135722514685501} SẢN PHẨM HOT CÒN ÍT\n━━━━━━━━━━━━\n\nKho đang còn số lượng giới hạn.\nAi thanh toán trước sẽ được giao trước.",
-            mode: "message_only",
+            mode: "view_shop",
             buttons_json: r#"[[{"text":"{5375135722514685501} Mua ngay","callback_data":"start:shop"}]]"#,
             product_id: None,
             sort_order: 4,
@@ -1417,7 +1417,13 @@ mod tests {
 
         assert_eq!(templates.len(), 5);
         assert_eq!(templates[0].id, 1);
+        assert_eq!(templates[0].mode, "view_shop");
         assert!(templates[0].buttons_json.contains("start:shop"));
+        assert!(
+            templates
+                .iter()
+                .any(|template| template.mode == "message_only")
+        );
     }
 
     #[tokio::test]

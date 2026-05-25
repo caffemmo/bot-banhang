@@ -154,7 +154,15 @@
       });
       $('#order-status, #order-from, #order-to').on('change', applyOrderFilters);
       $('#export-orders').on('click', exportOrders);
-      $('#bc-mode').on('change', toggleBroadcastProductPicker);
+      $('#bc-mode').on('change', () => {
+        renderBroadcastTemplateOptions();
+        const template = selectedBroadcastTemplate();
+        if (template) {
+          applyBroadcastTemplate(template.id);
+        } else {
+          toggleBroadcastProductPicker();
+        }
+      });
       $('#broadcast-tab').on('shown.bs.tab', () => {
         loadBroadcastTemplates();
         toggleBroadcastProductPicker();

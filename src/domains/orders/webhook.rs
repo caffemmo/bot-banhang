@@ -451,9 +451,7 @@ fn authorize_webhook(ctx: &AppContext, headers: &HeaderMap) -> bool {
 
         // Accept: "Apikey <key>" with any casing for the scheme.
         if let Some((scheme, secret)) = auth.split_once(char::is_whitespace) {
-            if scheme.eq_ignore_ascii_case("apikey")
-                && secret.trim() == ctx.config.webhook_secret
-            {
+            if scheme.eq_ignore_ascii_case("apikey") && secret.trim() == ctx.config.webhook_secret {
                 return true;
             }
         }

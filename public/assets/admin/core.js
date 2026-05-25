@@ -261,24 +261,51 @@
     }
 
     let broadcastTemplates = [];
+    const BROADCAST_MODE_LABELS = {
+      message_only: 'Chỉ gửi nội dung',
+      view_shop: 'Kèm nút xem sản phẩm',
+      product_list: 'Gửi kèm danh sách sản phẩm',
+      new_product: 'Thông báo sản phẩm mới',
+    };
 
     async function loadBroadcastTemplates() {
       try {
         broadcastTemplates = await apiFetch('/broadcast/templates');
         renderBroadcastTemplateOptions();
         if (broadcastTemplates.length) {
-          applyBroadcastTemplate(broadcastTemplates[0].id);
+          const template = filteredBroadcastTemplates()[0] || broadcastTemplates[0];
+          applyBroadcastTemplate(template.id);
         }
       } catch (e) {
         alertBox('danger', `Tải mẫu thông báo thất bại: ${e.message}`);
       }
     }
 
-    function renderBroadcastTemplateOptions() {
-      const options = broadcastTemplates
+    function filteredBroadcastTemplates() {
+      const mode = $('#bc-mode').val() || 'message_only';
+      return broadcastTemplates.filter(t => (t.mode || 'message_only') === mode);
+    }
+
+    function renderBroadcastTemplateOptions(options = {}) {
+      const preferredId = options.preferredId;
+      const mode = $('#bc-mode').val() || 'message_only';
+      const templates = filteredBroadcastTemplates();
+      if (!templates.length) {
+        $('#bc-template-select').html(`<option value="">Không có mẫu cho kiểu ${escapeHtml(BROADCAST_MODE_LABELS[mode] || mode)}</option>`);
+        $('#bc-template-select').prop('disabled', true);
+        $('#bc-template-apply, #bc-template-save').prop('disabled', true);
+        return;
+      }
+      const html = templates
         .map(t => `<option value="${escapeAttr(t.id)}">${escapeHtml(t.sort_order || t.id)}. ${escapeHtml(t.name)}</option>`)
         .join('');
-      $('#bc-template-select').html(options);
+      $('#bc-template-select').html(html);
+      $('#bc-template-select').prop('disabled', false);
+      $('#bc-template-apply, #bc-template-save').prop('disabled', false);
+      const selected = templates.find(t => Number(t.id) === Number(preferredId))
+        || templates.find(t => Number(t.id) === Number($('#bc-template-select').val()))
+        || templates[0];
+      $('#bc-template-select').val(String(selected.id));
     }
 
     function selectedBroadcastTemplate() {
@@ -289,10 +316,11 @@
     function applyBroadcastTemplate(id) {
       const template = broadcastTemplates.find(t => Number(t.id) === Number(id));
       if (!template) return;
+      $('#bc-mode').val(template.mode || 'message_only');
+      renderBroadcastTemplateOptions({ preferredId: template.id });
       $('#bc-template-select').val(String(template.id));
       $('#bc-template-name').val(template.name || '');
       $('#bc-text').val(template.text || '');
-      $('#bc-mode').val(template.mode || 'message_only');
       $('#bc-buttons-json').val(template.buttons_json || '[]');
       if (template.product_id) {
         $('#bc-product-id').val(String(template.product_id));

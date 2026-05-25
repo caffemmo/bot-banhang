@@ -331,19 +331,7 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
 }
 
 fn start_reply_keyboard(ctx: &AppContext, lang: &str) -> KeyboardMarkup {
-    let rows = ctx
-        .texts
-        .read()
-        .map(|texts| start_reply_keyboard_specs_from_texts(&texts, lang))
-        .unwrap_or_else(|_| {
-            vec![
-                vec!["🛒 Shop".to_string()],
-                vec!["💰 Top up".to_string(), "💳 Wallet".to_string()],
-                vec!["📦 Purchased".to_string(), "📜 Top-up history".to_string()],
-                vec!["🔌 API integration".to_string(), "Help".to_string()],
-                vec!["🌐 Language".to_string()],
-            ]
-        });
+    let rows = start_reply_keyboard_specs(ctx, lang);
 
     KeyboardMarkup::new(
         rows.into_iter()
@@ -358,6 +346,50 @@ fn start_reply_keyboard(ctx: &AppContext, lang: &str) -> KeyboardMarkup {
         "start_keyboard_placeholder",
         "Choose an action",
     ))
+}
+
+fn start_reply_keyboard_specs(ctx: &AppContext, lang: &str) -> Vec<Vec<String>> {
+    ctx.texts
+        .read()
+        .map(|texts| {
+            start_menu_button_specs_from_texts(&texts, lang)
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|(label, callback)| {
+                            i18n::reply_keyboard_button_text(
+                                ctx,
+                                start_menu_button_key_for_callback(&callback),
+                                label,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|_| {
+            vec![
+                vec!["🛒 Shop".to_string()],
+                vec!["💰 Top up".to_string(), "💳 Wallet".to_string()],
+                vec!["📦 Purchased".to_string(), "📜 Top-up history".to_string()],
+                vec!["🔌 API integration".to_string(), "Help".to_string()],
+                vec!["🌐 Language".to_string()],
+            ]
+        })
+}
+
+fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
+    match callback {
+        "start:shop" => "start_btn_shop",
+        "wallet:topup" => "start_btn_topup",
+        "start:wallet" => "start_btn_wallet",
+        "start:orders" => "start_btn_purchased",
+        "wallet:topup_history" => "start_btn_topup_history",
+        "shop_api" => "start_btn_api_integration",
+        "start:help" => "start_btn_help",
+        "start:language" => "start_btn_language",
+        _ => "start_btn",
+    }
 }
 
 fn start_reply_keyboard_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<String>> {
@@ -466,8 +498,37 @@ fn start_menu_action_from_text(
     lang: &str,
     text: &str,
 ) -> Option<StartMenuAction> {
-    let normalized = text.trim();
-    let actions = [
+    let input_variants = i18n::button_text_match_variants(text);
+    start_menu_match_languages(texts, lang)
+        .into_iter()
+        .find_map(|candidate_lang| {
+            start_menu_action_labels(texts, &candidate_lang)
+                .into_iter()
+                .find_map(|(action, label)| {
+                    let label_variants = i18n::button_text_match_variants(&label);
+                    label_variants
+                        .iter()
+                        .any(|label| input_variants.iter().any(|input| input == label))
+                        .then_some(action)
+                })
+        })
+}
+
+fn start_menu_match_languages(texts: &BotTexts, lang: &str) -> Vec<String> {
+    let mut languages = vec![texts.normalize_language(Some(lang))];
+    for language in texts.enabled_languages() {
+        if !languages
+            .iter()
+            .any(|candidate| candidate == &language.code)
+        {
+            languages.push(language.code);
+        }
+    }
+    languages
+}
+
+fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuAction, String)> {
+    vec![
         (
             StartMenuAction::Shop,
             texts.get_lang("start_btn_shop", lang, "🛒 Shop"),
@@ -485,6 +546,10 @@ fn start_menu_action_from_text(
             texts.get_lang("start_btn_purchased", lang, "📦 Purchased"),
         ),
         (
+            StartMenuAction::Orders,
+            texts.get_lang("start_btn_orders", lang, "📋 Recent orders"),
+        ),
+        (
             StartMenuAction::TopupHistory,
             texts.get_lang("start_btn_topup_history", lang, "📜 Top-up history"),
         ),
@@ -500,11 +565,7 @@ fn start_menu_action_from_text(
             StartMenuAction::Language,
             texts.get_lang("start_btn_language", lang, "🌐 Language"),
         ),
-    ];
-
-    actions
-        .into_iter()
-        .find_map(|(action, label)| (normalized == label.trim()).then_some(action))
+    ]
 }
 
 #[async_trait::async_trait]
@@ -1089,6 +1150,37 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn reply_keyboard_specs_hide_custom_emoji_id_placeholders() {
+        let ctx = test_ctx_with_texts(BotTexts::from_language_maps(
+            vec![LanguageInfo {
+                code: "vi".to_string(),
+                label: "Tiếng Việt".to_string(),
+                fallback: "en".to_string(),
+                enabled: true,
+            }],
+            HashMap::from([(
+                "vi".to_string(),
+                HashMap::from([
+                    (
+                        "start_btn_shop".to_string(),
+                        "{6172437452590944785} 🛒 Xem sản phẩm".to_string(),
+                    ),
+                    (
+                        "start_btn_wallet".to_string(),
+                        "{6113868675792507468} 💳 Ví tiền".to_string(),
+                    ),
+                ]),
+            )]),
+        ));
+
+        let rows = start_reply_keyboard_specs(&ctx, "vi");
+
+        assert_eq!(rows[0][0], "✨ 🛒 Xem sản phẩm");
+        assert_eq!(rows[1][1], "✨ 💳 Ví tiền");
+        assert!(!rows.iter().flatten().any(|label| label.contains('{')));
+    }
+
     #[test]
     fn reply_keyboard_text_maps_to_start_action() {
         let texts = BotTexts::from_language_maps(
@@ -1110,6 +1202,10 @@ mod tests {
                         "start_btn_api_integration".to_string(),
                         "🔌 Tích hợp API".to_string(),
                     ),
+                    (
+                        "start_btn_orders".to_string(),
+                        "📋 Đơn hàng gần đây".to_string(),
+                    ),
                     ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
                 ]),
             )]),
@@ -1128,8 +1224,75 @@ mod tests {
             Some(StartMenuAction::ApiIntegration)
         );
         assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "📋 Đơn hàng gần đây"),
+            Some(StartMenuAction::Orders)
+        );
+        assert_eq!(
             start_menu_action_from_text(&texts, "vi", "🌐 Ngôn ngữ"),
             Some(StartMenuAction::Language)
+        );
+    }
+
+    #[test]
+    fn reply_keyboard_text_maps_rendered_custom_emoji_buttons_to_start_action() {
+        let texts = BotTexts::from_language_maps(
+            vec![LanguageInfo {
+                code: "vi".to_string(),
+                label: "Tiếng Việt".to_string(),
+                fallback: "en".to_string(),
+                enabled: true,
+            }],
+            HashMap::from([(
+                "vi".to_string(),
+                HashMap::from([
+                    (
+                        "start_btn_shop".to_string(),
+                        "{6172437452590944785} 🛒 Xem sản phẩm".to_string(),
+                    ),
+                    (
+                        "start_btn_wallet".to_string(),
+                        "{6113868675792507468} 💳 Ví tiền".to_string(),
+                    ),
+                ]),
+            )]),
+        );
+
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "🛒 Xem sản phẩm"),
+            Some(StartMenuAction::Shop)
+        );
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "✨ 💳 Ví tiền"),
+            Some(StartMenuAction::Wallet)
+        );
+    }
+
+    #[test]
+    fn reply_keyboard_text_maps_enabled_language_labels_when_current_lang_differs() {
+        let texts = BotTexts::from_language_maps(
+            vec![
+                LanguageInfo {
+                    code: "en".to_string(),
+                    label: "English".to_string(),
+                    fallback: "en".to_string(),
+                    enabled: true,
+                },
+                LanguageInfo {
+                    code: "vi".to_string(),
+                    label: "Tiếng Việt".to_string(),
+                    fallback: "en".to_string(),
+                    enabled: true,
+                },
+            ],
+            HashMap::from([(
+                "vi".to_string(),
+                HashMap::from([("start_btn_help".to_string(), "Hướng dẫn".to_string())]),
+            )]),
+        );
+
+        assert_eq!(
+            start_menu_action_from_text(&texts, "en", "Hướng dẫn"),
+            Some(StartMenuAction::Help)
         );
     }
 
@@ -1233,5 +1396,33 @@ mod tests {
         let entry = start_entry_from_language_choice(&texts, None, Some("vi"));
 
         assert_eq!(entry, StartEntry::LanguagePrompt("vi".to_string()));
+    }
+
+    fn test_ctx_with_texts(texts: BotTexts) -> Arc<AppContext> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            Config {
+                telegram_token: "test-token".to_string(),
+                database_url: "sqlite::memory:".to_string(),
+                bank_name: "VCB".to_string(),
+                bank_account: Some("123".to_string()),
+                bank_account_name: None,
+                webhook_secret: "secret".to_string(),
+                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
+                admin_setup_code: "setupcode".to_string(),
+                admin_cookie_secure: false,
+                base_url: None,
+                i18n_dir: "i18n".to_string(),
+                port: 8080,
+                crypto: crate::config::CryptoConfig::default(),
+            },
+            HashMap::new(),
+            texts,
+            vec![],
+        )
     }
 }
