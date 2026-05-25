@@ -127,6 +127,13 @@ EOF
 
 echo "==> Reloading and enabling service"
 sudo systemctl daemon-reload
-sudo systemctl enable --now "${APP_NAME}.service"
+sudo systemctl reset-failed "${APP_NAME}.service" >/dev/null 2>&1 || true
+if ! sudo systemctl enable --now "${APP_NAME}.service"; then
+  echo "==> Service failed to start. Recent status:"
+  sudo systemctl status "${APP_NAME}.service" --no-pager -l || true
+  echo "==> Recent logs:"
+  sudo journalctl -u "${APP_NAME}.service" -n 80 --no-pager || true
+  exit 1
+fi
 
 echo "==> Done. Check status with: sudo systemctl status ${APP_NAME}"

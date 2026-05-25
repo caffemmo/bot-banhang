@@ -73,9 +73,9 @@ docker run --rm `
     -v "${targetDir}:/work/target" `
     -w /work `
     $Image `
-    bash -lc "export PATH=/usr/local/cargo/bin:`$PATH; cargo build --release && strip target/release/botbanhang || true"
+    bash -lc "export PATH=/usr/local/cargo/bin:`$PATH; apt-get update && apt-get install -y musl-tools && rustup target add x86_64-unknown-linux-musl && cargo build --release --target x86_64-unknown-linux-musl && strip target/x86_64-unknown-linux-musl/release/botbanhang || true"
 
-Copy-Item -LiteralPath (Join-Path $targetDir "release\\botbanhang") -Destination (Join-Path $artifactDir "botbanhang") -Force
+Copy-Item -LiteralPath (Join-Path $targetDir "x86_64-unknown-linux-musl\\release\\botbanhang") -Destination (Join-Path $artifactDir "botbanhang") -Force
 $binaryPath = Join-Path $artifactDir "botbanhang"
 $md5 = (Get-FileHash -LiteralPath $binaryPath -Algorithm MD5).Hash.ToLowerInvariant()
 $sha256 = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -85,7 +85,7 @@ $manifest = [ordered]@{
     description = $ReleaseDescription
     built_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     git_sha = $gitSha
-    target = "x86_64-unknown-linux-gnu"
+    target = "x86_64-unknown-linux-musl"
     binary_md5 = $md5
     binary_sha256 = $sha256
 }
