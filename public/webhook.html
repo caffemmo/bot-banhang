@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Webhook Tester</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+</head>
+<body class="bg-light">
+  <div class="container py-4">
+    <h4 class="mb-3">Gửi webhook thanh toán (test)</h4>
+    <div class="text-muted mb-2">Hỗ trợ 2 format: <b>Legacy</b> (X-Webhook-Secret) và <b>SePay</b> (Authorization: Apikey ...)</div>
+    <div id="alert"></div>
+
+    <form id="webhook-form" class="card p-3 shadow-sm">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Mode</label>
+          <select class="form-select" id="mode">
+            <option value="sepay" selected>SePay</option>
+            <option value="legacy">Legacy</option>
+          </select>
+        </div>
+
+        <div class="col-md-8">
+          <label class="form-label">API key / secret</label>
+          <input class="form-control" id="secret" placeholder="SePay: Authorization Apikey <key> | Legacy: X-Webhook-Secret" required>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Memo (nội dung chuyển khoản / code)</label>
+          <input class="form-control" id="memo" placeholder="VD: MEMO123" required>
+          <div class="form-text">SePay: sẽ map memo từ <code>code</code> (nếu có) hoặc <code>content</code>. Legacy: dùng field <code>memo</code>.</div>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Amount (VND)</label>
+          <input type="number" min="1" class="form-control" id="amount" required>
+        </div>
+
+        <div class="col-md-3" id="legacy-status-wrap" style="display:none">
+          <label class="form-label">Status (Legacy)</label>
+          <select class="form-select" id="status">
+            <option value="paid" selected>paid</option>
+            <option value="pending">pending</option>
+          </select>
+        </div>
+
+        <div class="col-md-4" id="legacy-txid-wrap" style="display:none">
+          <label class="form-label">TX ID (Legacy)</label>
+          <input class="form-control" id="tx-id" placeholder="transaction id">
+        </div>
+
+        <div class="col-md-4" id="legacy-paidat-wrap" style="display:none">
+          <label class="form-label">paid_at (RFC3339, optional)</label>
+          <input class="form-control" id="paid-at" placeholder="2026-01-26T08:00:00Z">
+        </div>
+
+        <div class="col-md-4" id="sepay-txid-wrap">
+          <label class="form-label">referenceCode (SePay, optional)</label>
+          <input class="form-control" id="ref-code" placeholder="MBVCB.3278907687">
+        </div>
+
+        <div class="col-md-4" id="sepay-txdate-wrap">
+          <label class="form-label">transactionDate (SePay)</label>
+          <input class="form-control" id="tx-date" placeholder="2026-01-28 10:00:00">
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mt-3">
+        <button type="submit" class="btn btn-primary">Send webhook</button>
+        <button type="button" class="btn btn-outline-secondary" id="fill-paid">Fill now</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    function showAlert(type, msg) {
+      $('#alert').html(`<div class="alert alert-${type} mt-3">${msg}</div>`);
+    }
+
+    function applyMode() {
+      const mode = $('#mode').val();
+      const isLegacy = mode === 'legacy';
+
+      $('#legacy-status-wrap').toggle(isLegacy);
+      $('#legacy-txid-wrap').toggle(isLegacy);
+      $('#legacy-paidat-wrap').toggle(isLegacy);
+
+      $('#sepay-txid-wrap').toggle(!isLegacy);
+      $('#sepay-txdate-wrap').toggle(!isLegacy);
+
+      // requirements
+      $('#tx-id').prop('required', isLegacy);
+      $('#status').prop('required', isLegacy);
+    }
+
+    $('#mode').on('change', applyMode);
+    applyMode();
+
+    $('#fill-paid').on('click', () => {
+      const mode = $('#mode').val();
+      if (mode === 'legacy') {
+        $('#status').val('paid');
+        $('#paid-at').val(new Date().toISOString());
+      } else {
+        // SePay style time: "YYYY-MM-DD HH:mm:ss"
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const ts = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        $('#tx-date').val(ts);
+      }
+    });
+
+    async function readBody(res) {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        return await res.json().catch(() => ({}));
+      }
+      return await res.text().catch(() => '');
+    }
+
+    $('#webhook-form').on('submit', async function (e) {
+      e.preventDefault();
+
+      const mode = $('#mode').val();
+      const secret = $('#secret').val().trim();
+
+      let payload;
+      let headers = { 'Content-Type': 'application/json' };
+
+      if (mode === 'legacy') {
+        payload = {
+          memo: $('#memo').val().trim(),
+          amount: Number($('#amount').val()),
+          status: $('#status').val(),
+          tx_id: $('#tx-id').val().trim(),
+          paid_at: $('#paid-at').val().trim() || null,
+        };
+        headers['X-Webhook-Secret'] = secret;
+      } else {
+        payload = {
+          id: 1,
+          gateway: 'Vietcombank',
+          transactionDate: $('#tx-date').val().trim() || null,
+          accountNumber: null,
+          code: null,
+          content: $('#memo').val().trim(),
+          transferType: 'in',
+          transferAmount: Number($('#amount').val()),
+          accumulated: null,
+          subAccount: null,
+          referenceCode: $('#ref-code').val().trim() || null,
+          description: null,
+        };
+        headers['Authorization'] = `Apikey ${secret}`;
+      }
+
+      try {
+        const res = await fetch('/webhook/payment', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        });
+
+        const data = await readBody(res);
+        if (!res.ok) {
+          throw new Error(typeof data === 'string' ? data : (data?.error || JSON.stringify(data)));
+        }
+        showAlert('success', `OK: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+      } catch (err) {
+        showAlert('danger', `Error: ${err.message}`);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trang quản trị</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <link rel="stylesheet" href="/assets/admin/admin.css?v=20260521-config-sections">
+</head>
+
+<body class="p-3 p-md-4">
+  <div class="container-fluid">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-3">
+      <div>
+        <h3 class="fw-bold mb-0">Trang quản trị</h3>
+        <small class="text-muted">Sản phẩm · Đơn hàng · Thanh toán</small>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge text-bg-light border d-none" id="admin-user-badge"></span>
+        <a class="btn btn-outline-primary btn-sm auth-required d-none" href="/chat.html">Chat</a>
+        <button class="btn btn-outline-danger btn-sm d-none" id="logout-btn">Đăng xuất</button>
+        <button class="btn btn-outline-secondary btn-sm" id="refresh-health">Ping</button>
+      </div>
+    </div>
+
+    <div id="alert-area"></div>
+
+    <div class="card section-card auth-panel d-none" id="auth-panel">
+      <div class="card-body p-3 p-md-4">
+        <h5 class="fw-bold mb-3" id="auth-title">Đăng nhập quản trị</h5>
+        <form id="login-form" class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Tài khoản</label>
+            <input class="form-control" id="login-username" autocomplete="username" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Mật khẩu</label>
+            <input class="form-control" id="login-password" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="col-12 d-none" id="setup-code-wrap">
+            <label class="form-label">Mã bí mật tạo admin</label>
+            <input class="form-control" id="setup-code" type="password" autocomplete="off">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" id="login-submit" type="submit">Đăng nhập</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="nav-tabs-wrapper auth-required d-none" aria-label="Danh sách tab có thể cuộn ngang">
+      <ul class="nav nav-pills" id="mainTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="products-tab" data-bs-toggle="pill" data-bs-target="#products-pane"
+            type="button" role="tab">Sản phẩm</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="orders-tab" data-bs-toggle="pill" data-bs-target="#orders-pane" type="button"
+            role="tab">Đơn hàng</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="wallets-tab" data-bs-toggle="pill" data-bs-target="#wallets-pane" type="button"
+            role="tab">Ví tiền</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="broadcast-tab" data-bs-toggle="pill" data-bs-target="#broadcast-pane"
+            type="button" role="tab">Thông báo</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="webhooks-tab" data-bs-toggle="pill" data-bs-target="#webhooks-pane" type="button"
+            role="tab">Webhook</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="configs-tab" data-bs-toggle="pill" data-bs-target="#configs-pane" type="button"
+            role="tab">Cấu hình Bot</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="bot-i18n-tab" data-bs-toggle="pill" data-bs-target="#bot-i18n-pane"
+            type="button" role="tab">Ngôn ngữ bot</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="admins-tab" data-bs-toggle="pill" data-bs-target="#admins-pane" type="button"
+            role="tab">Admin</button>
+        </li>
+      </ul>
+    </div>
+    <div class="nav-scroll-hint auth-required d-none" aria-hidden="true">Vuốt ngang để xem thêm tab →</div>
+    <div class="tab-content auth-required d-none">
+      <div class="tab-pane fade show active" id="products-pane" role="tabpanel">
+        <div class="row g-3 mb-4">
+          <div class="col-6 col-lg-3">
+            <div class="card section-card h-100"
+              style="background: linear-gradient(135deg, rgba(13, 110, 253, 0.05), rgba(255, 255, 255, 0.7))">
+              <div class="card-body p-3">
+                <div class="text-muted small fw-bold mb-2">Doanh thu 7 ngày</div>
+                <div class="h4 fw-bold mb-1 text-primary" id="rev-7d">--</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                  <small class="text-muted x-small" id="rev-7d-range"></small>
+                  <button class="btn btn-xs btn-outline-primary py-0 px-1 border-0 touch-target" id="refresh-rev-7d"
+                    style="font-size: 10px;" aria-label="Làm mới doanh thu 7 ngày">↻</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card section-card h-100"
+              style="background: linear-gradient(135deg, rgba(102, 16, 242, 0.05), rgba(255, 255, 255, 0.7))">
+              <div class="card-body p-3">
+                <div class="text-muted small fw-bold mb-2">Doanh thu 30 ngày</div>
+                <div class="h4 fw-bold mb-1 text-purple" id="rev-30d" style="color: #6610f2;">--</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                  <small class="text-muted x-small" id="rev-30d-range"></small>
+                  <button class="btn btn-xs btn-outline-primary py-0 px-1 border-0 touch-target" id="refresh-rev-30d"
+                    style="font-size: 10px; color: #6610f2;" aria-label="Làm mới doanh thu 30 ngày">↻</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card section-card mb-4 border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4 admin-action-card-body">
+            <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+              <div>
+                <h5 class="fw-bold mb-1">Danh mục sản phẩm</h5>
+                <div class="text-muted small">Quản lý tên danh mục, emoji thường và emoji động cho menu shop.</div>
+              </div>
+              <button class="btn btn-outline-primary" id="new-product-category">+ Danh mục</button>
+            </div>
+            <div class="table-responsive admin-action-table-wrap">
+              <table class="table align-middle table-hover mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Danh mục</th>
+                    <th>Emoji</th>
+                    <th>Emoji động</th>
+                    <th>Sắp xếp</th>
+                    <th>Hành động</th>
+                  </tr>
+                </thead>
+                <tbody id="product-categories-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card section-card mb-4 border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4 admin-action-card-body">
+            <div class="d-flex flex-wrap gap-3 align-items-end mb-4">
+              <div class="flex-grow-1" style="min-width: 200px;">
+                <label class="form-label small fw-bold text-muted mb-1">Tìm kiếm sản phẩm</label>
+                <input class="form-control" id="product-query" placeholder="Nhập tên sản phẩm...">
+              </div>
+              <div style="min-width: 120px;">
+                <label class="form-label small fw-bold text-muted mb-1">Trạng thái</label>
+                <select class="form-select" id="product-active">
+                  <option value="all">Tất cả</option>
+                  <option value="1" selected>Đang bán</option>
+                  <option value="0">Tạm ngưng</option>
+                </select>
+              </div>
+              <div class="d-flex gap-2 ms-md-auto w-100 w-md-auto mt-2 mt-md-0">
+                <button class="btn btn-outline-secondary flex-grow-1 flex-md-grow-0" id="refresh-products">Làm
+                  mới</button>
+                <button class="btn btn-primary flex-grow-1 flex-md-grow-0" id="new-product">+ Sản phẩm mới</button>
+                <span class="text-muted small d-none align-self-center" id="products-filter-loading">
+                  <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Đang
+                  lọc...
+                </span>
+              </div>
+            </div>
+            <div class="table-responsive admin-action-table-wrap">
+              <table class="table align-middle table-hover">
+                <thead class="table-light">
+                  <tr>
+                    <th class="mobile-priority">Sản phẩm</th>
+                    <th class="mobile-priority">Giá</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Kho/File</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Loại</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Bán</th>
+                    <th class="mobile-priority">Sắp xếp</th>
+                    <th class="d-none d-lg-table-cell mobile-hide">Ngày tạo</th>
+                    <th class="mobile-priority">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody id="products-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="orders-pane" role="tabpanel">
+        <div class="card section-card mb-4 border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4 admin-action-card-body">
+            <div class="row g-3 align-items-end mb-4">
+              <div class="col-6 col-md-2">
+                <label class="form-label small fw-bold text-muted mb-1">Trạng thái</label>
+                <select class="form-select" id="order-status">
+                  <option value="all">Tất cả</option>
+                  <option value="pending">Chờ thanh toán</option>
+                  <option value="paid">Đã thanh toán</option>
+                  <option value="cancel">Đã hủy</option>
+                  <option value="expired">Hết hạn</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small fw-bold text-muted mb-1">Tìm kiếm</label>
+                <input class="form-control" id="order-query" placeholder="Memo/ID/User...">
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small fw-bold text-muted mb-1">Từ ngày</label>
+                <input class="form-control" id="order-from" type="date">
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small fw-bold text-muted mb-1">Đến ngày</label>
+                <input class="form-control" id="order-to" type="date">
+              </div>
+              <div class="col-12 col-md-3 d-flex justify-content-end gap-2 mt-2 mt-md-0">
+                <button class="btn btn-outline-secondary flex-grow-1 flex-md-grow-0" id="refresh-orders">Làm
+                  mới</button>
+                <button class="btn btn-outline-primary flex-grow-1 flex-md-grow-0" id="export-orders">Xuất file</button>
+                <span class="text-muted small d-none align-self-center" id="orders-filter-loading">
+                  <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Đang
+                  lọc...
+                </span>
+              </div>
+            </div>
+            <div class="table-responsive admin-action-table-wrap">
+              <table class="table align-middle table-hover">
+                <thead class="table-light">
+                  <tr>
+                    <th class="mobile-priority">Ngày tạo</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Nội dung</th>
+                    <th class="mobile-priority">Đơn ID</th>
+                    <th class="mobile-priority">Sản phẩm</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Số lượng</th>
+                    <th class="mobile-priority">Tổng</th>
+                    <th class="mobile-priority">Trạng thái</th>
+                    <th class="d-none d-lg-table-cell mobile-hide">User</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Thông tin</th>
+                    <th class="mobile-priority">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody id="orders-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="wallets-pane" role="tabpanel">
+        <div class="row g-3 mb-4">
+          <div class="col-6 col-lg-3">
+            <div class="card section-card h-100">
+              <div class="card-body p-3">
+                <div class="text-muted small fw-bold mb-2">Tổng user ví</div>
+                <div class="h4 fw-bold mb-1 text-primary" id="wallet-total-users">--</div>
+                <small class="text-muted">Bao gồm user chưa phát sinh ví</small>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card section-card h-100">
+              <div class="card-body p-3">
+                <div class="text-muted small fw-bold mb-2">Trang hiện tại</div>
+                <div class="h4 fw-bold mb-1" id="wallet-page-balance">--</div>
+                <small class="text-muted">Tổng số dư đang hiển thị</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card section-card mb-4 border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4 admin-action-card-body">
+            <div class="row g-3 align-items-end mb-4">
+              <div class="col-12 col-md-5">
+                <label class="form-label small fw-bold text-muted mb-1">Tìm user</label>
+                <input class="form-control" id="wallet-query" placeholder="User ID, chat ID, username, tên...">
+              </div>
+              <div class="col-12 col-md-7 d-flex justify-content-end gap-2 mt-2 mt-md-0">
+                <button class="btn btn-outline-secondary flex-grow-1 flex-md-grow-0" id="refresh-wallets">Làm
+                  mới</button>
+                <button class="btn btn-primary flex-grow-1 flex-md-grow-0" id="manual-topup-by-id">Nạp theo User
+                  ID</button>
+                <span class="text-muted small d-none align-self-center" id="wallets-filter-loading">
+                  <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Đang
+                  lọc...
+                </span>
+              </div>
+            </div>
+            <div class="table-responsive admin-action-table-wrap">
+              <table class="table align-middle table-hover">
+                <thead class="table-light">
+                  <tr>
+                    <th class="mobile-priority">User</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Chat</th>
+                    <th class="mobile-priority">Số dư</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Giao dịch</th>
+                    <th class="d-none d-lg-table-cell mobile-hide">Cập nhật</th>
+                    <th class="mobile-priority">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody id="wallets-body"></tbody>
+              </table>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-2">
+              <div class="text-muted small" id="wallets-meta">--</div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="wallets-prev">Trước</button>
+                <button class="btn btn-sm btn-outline-secondary" id="wallets-next">Sau</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="broadcast-pane" role="tabpanel">
+        <div class="card section-card border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4">
+            <h5 class="fw-bold mb-3">Gửi thông báo toàn hệ thống</h5>
+            <p class="text-muted small mb-4">Thông báo sẽ được gửi đến toàn bộ người dùng đã từng tương tác với Bot.</p>
+            <div class="border rounded p-3 mb-4">
+              <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                  <label class="form-label small fw-bold text-muted">Mẫu thông báo đã lưu</label>
+                  <select class="form-select" id="bc-template-select"></select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small fw-bold text-muted">Tên mẫu</label>
+                  <input class="form-control" id="bc-template-name" maxlength="80" placeholder="VD: Hàng mới lên kho">
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                  <button type="button" class="btn btn-outline-primary flex-fill" id="bc-template-apply">Áp dụng</button>
+                  <button type="button" class="btn btn-outline-success flex-fill" id="bc-template-save">Lưu mẫu</button>
+                </div>
+              </div>
+              <div class="form-text mt-2">Mẫu lưu nội dung, kiểu thông báo, sản phẩm và nút. Emoji động dùng trực tiếp dạng {Custom emoji ID}.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small fw-bold text-muted">Nội dung tin nhắn</label>
+              <textarea class="form-control" id="bc-text" rows="5"
+                placeholder="Nhập nội dung muốn thông báo..."></textarea>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label small fw-bold text-muted">Kiểu thông báo</label>
+                <select class="form-select" id="bc-mode">
+                  <option value="message_only">Chỉ gửi nội dung</option>
+                  <option value="view_shop">Kèm nút xem sản phẩm</option>
+                  <option value="product_list">Gửi kèm danh sách sản phẩm</option>
+                  <option value="new_product">Thông báo sản phẩm mới</option>
+                </select>
+              </div>
+              <div class="col-md-6 d-none" id="bc-product-wrap">
+                <label class="form-label small fw-bold text-muted">Sản phẩm</label>
+                <select class="form-select" id="bc-product-id"></select>
+              </div>
+            </div>
+            <div class="mb-4">
+              <label class="form-label small fw-bold text-muted">Nút gửi kèm (JSON)</label>
+              <textarea class="form-control font-monospace" id="bc-buttons-json" rows="3"
+                placeholder='[[{"text":"{5375135722514685501} Xem sản phẩm","callback_data":"start:shop"}]]'></textarea>
+              <div class="form-text">Mỗi dòng nút là một mảng. Callback hỗ trợ: start:shop, start:wallet, start:orders, wallet:topup, buy:ID, shop_api.</div>
+            </div>
+            <div class="mb-4">
+              <label class="form-label small fw-bold text-muted">Ảnh đính kèm (Tùy chọn)</label>
+              <input class="form-control" id="bc-image" type="file" accept="image/*">
+            </div>
+            <button class="btn btn-primary w-100 w-md-auto px-5" id="send-broadcast">
+              <span class="me-2">📣</span> Gửi thông báo ngay
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="webhooks-pane" role="tabpanel">
+        <div class="card section-card mb-4 border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4">
+            <div class="row g-3 align-items-end mb-4">
+              <div class="col-6 col-md-2">
+                <label class="form-label small fw-bold text-muted mb-1">Nhà cung cấp</label>
+                <select class="form-select" id="wh-provider">
+                  <option value="">Tất cả</option>
+                  <option value="sepay">SePay</option>
+                  <option value="legacy">Legacy</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small fw-bold text-muted mb-1">Mã ghi chú</label>
+                <input class="form-control" id="wh-memo" placeholder="DHXXXXXXXX">
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small fw-bold text-muted mb-1">Giao dịch ID</label>
+                <input class="form-control" id="wh-txid" placeholder="MBVCB...">
+              </div>
+              <div class="col-6 col-md-4 d-flex justify-content-end gap-2 mt-2 mt-md-0">
+                <a class="btn btn-outline-primary flex-grow-1 flex-md-grow-0" href="/sepay-webhook-guide.html"
+                  target="_blank" rel="noopener">Hướng dẫn SePay</a>
+                <button class="btn btn-outline-secondary flex-grow-1 flex-md-grow-0" id="refresh-webhooks">Làm
+                  mới</button>
+                <span class="text-muted small d-none align-self-center" id="webhooks-filter-loading">
+                  <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Đang
+                  lọc...
+                </span>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table align-middle table-hover">
+                <thead class="table-light">
+                  <tr>
+                    <th class="mobile-priority">Ngày nhận</th>
+                    <th class="mobile-priority">Nguồn</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Auth</th>
+                    <th class="d-none d-lg-table-cell mobile-hide">IP</th>
+                    <th class="mobile-priority">Nội dung</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Giao dịch</th>
+                    <th class="mobile-priority">Tiền</th>
+                    <th class="d-none d-md-table-cell mobile-hide">Trạng thái</th>
+                    <th class="d-none d-lg-table-cell mobile-hide">Đơn ID</th>
+                    <th class="mobile-priority">Kết quả</th>
+                  </tr>
+                </thead>
+                <tbody id="webhooks-body"></tbody>
+              </table>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-2">
+              <div class="text-muted small" id="webhooks-meta">--</div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="webhooks-prev">Trước</button>
+                <button class="btn btn-sm btn-outline-secondary" id="webhooks-next">Sau</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="configs-pane" role="tabpanel">
+        <div class="card section-card border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-4">
+              <h5 class="fw-bold mb-0">Cấu hình vận hành Bot</h5>
+              <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-outline-primary" href="/sepay-webhook-guide.html" target="_blank" rel="noopener">Hướng
+                  dẫn Webhook SePay</a>
+                <button class="btn btn-primary" id="save-configs-btn">
+                  <span class="me-1">💾</span> Lưu thay đổi
+                </button>
+              </div>
+            </div>
+            <div id="configs-form-container" class="row g-4">
+              <!-- Dynamically populated config fields -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="bot-i18n-pane" role="tabpanel">
+        <div class="row g-3">
+          <div class="col-lg-7">
+            <div class="card section-card border-0 shadow-sm h-100">
+              <div class="card-body p-3 p-md-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="fw-bold mb-0">Ngôn ngữ bot</h5>
+                  <button class="btn btn-outline-secondary btn-sm" id="bot-i18n-refresh">Làm mới</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead>
+                      <tr>
+                        <th>Code</th>
+                        <th>Tên</th>
+                        <th>Fallback</th>
+                        <th>Trạng thái</th>
+                        <th>Keys</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="bot-i18n-languages-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="card section-card border-0 shadow-sm h-100">
+              <div class="card-body p-3 p-md-4">
+                <h5 class="fw-bold mb-3">Import / Export</h5>
+                <label class="form-label small fw-bold">Format</label>
+                <select class="form-select mb-2" id="bot-i18n-import-format">
+                  <option value="json">JSON</option>
+                  <option value="yaml">YAML</option>
+                </select>
+                <textarea class="form-control font-monospace mb-2" id="bot-i18n-import-content" rows="8"
+                  placeholder='{"code":"th","label":"ไทย","fallback":"en","bot":{"start":"..."}}'></textarea>
+                <button class="btn btn-primary w-100 mb-3" id="bot-i18n-import-btn">Import ngôn ngữ</button>
+
+                <div class="input-group mb-2">
+                  <select class="form-select" id="bot-i18n-export-code"></select>
+                  <button class="btn btn-outline-secondary" id="bot-i18n-export-btn">Export</button>
+                </div>
+                <textarea class="form-control font-monospace" id="bot-i18n-export-output" rows="7" readonly></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card section-card border-0 shadow-sm">
+              <div class="card-body p-3 p-md-4">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-2 mb-3">
+                  <div>
+                    <h5 class="fw-bold mb-1">Edit bản dịch</h5>
+                    <div class="text-muted small" id="bot-i18n-editor-title">Chọn ngôn ngữ để sửa text bot</div>
+                  </div>
+                  <div class="d-flex gap-2">
+                    <select class="form-select" id="bot-i18n-edit-code" style="min-width: 180px;"></select>
+                    <button class="btn btn-outline-primary" id="bot-i18n-load-editor-btn">Tải</button>
+                    <button class="btn btn-primary" id="bot-i18n-save-editor-btn">Lưu bản dịch</button>
+                  </div>
+                </div>
+                <div id="bot-i18n-editor-card">
+                  <div class="row g-3" id="bot-i18n-editor-fields"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="admins-pane" role="tabpanel">
+        <div class="row g-3">
+          <div class="col-lg-5">
+            <div class="card section-card border-0 shadow-sm h-100">
+              <div class="card-body p-3 p-md-4">
+                <h5 class="fw-bold mb-3">Thêm admin</h5>
+                <form id="admin-create-form" class="vstack gap-3">
+                  <div>
+                    <label class="form-label">Tài khoản</label>
+                    <input class="form-control" id="admin-create-username" required>
+                  </div>
+                  <div>
+                    <label class="form-label">Mật khẩu</label>
+                    <input class="form-control" id="admin-create-password" type="password" required>
+                  </div>
+                  <div>
+                    <label class="form-label">Mã bí mật</label>
+                    <input class="form-control" id="admin-create-code" type="password" required>
+                  </div>
+                  <button class="btn btn-primary" type="submit">Tạo admin</button>
+                </form>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="card section-card border-0 shadow-sm h-100">
+              <div class="card-body p-3 p-md-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="fw-bold mb-0">Danh sách admin</h5>
+                  <button class="btn btn-outline-secondary btn-sm" id="refresh-admins">Làm mới</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table align-middle">
+                    <thead class="table-light">
+                      <tr>
+                        <th>ID</th>
+                        <th>Tài khoản</th>
+                        <th>Lần đăng nhập</th>
+                        <th>Đổi mật khẩu</th>
+                      </tr>
+                    </thead>
+                    <tbody id="admins-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="productModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header border-0 pb-0">
+          <h5 class="modal-title fw-bold" id="productModalLabel">Sản phẩm</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="product-id">
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label">Tên</label>
+              <input class="form-control" id="product-name" required>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label">Giá (VND)</label>
+              <input type="number" min="1" class="form-control" id="product-price" required>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label">Kích hoạt</label>
+              <select class="form-select" id="product-active-input">
+                <option value="1">Kích hoạt</option>
+                <option value="0">Tạm ngưng</option>
+              </select>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label">Kiểu giao hàng</label>
+              <select class="form-select" id="product-delivery-type">
+                <option value="stock_item">Kho item</option>
+                <option value="uploaded_file">File upload</option>
+                <option value="manual_input">Nhập thông tin</option>
+              </select>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label">Danh mục</label>
+              <select class="form-select" id="product-category-id">
+                <option value="">Chưa chọn</option>
+              </select>
+            </div>
+              <div class="col-sm-3">
+                <label class="form-label">Emoji nút</label>
+                <input class="form-control" id="product-button-emoji" maxlength="16" placeholder="➖">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label">Custom emoji ID động</label>
+                <input class="form-control" id="product-button-custom-emoji-id" inputmode="numeric" maxlength="32" placeholder="VD: 5368324170671202286">
+                <small class="text-muted">Nếu có ID này, Telegram sẽ hiện emoji động trước tên nút.</small>
+              </div>
+              <div class="col-sm-9" id="product-input-prompt-group">
+              <label class="form-label">Thông báo hướng dẫn (hiện cho khách khi cần nhập)</label>
+              <input class="form-control" id="product-input-prompt" placeholder="Ví dụ: Nhập email để kích hoạt">
+              <small class="text-muted">Tối đa 200 ký tự.</small>
+            </div>
+            <div class="col-sm-12">
+              <label class="form-label">Mô tả sản phẩm</label>
+              <textarea class="form-control" id="product-description" rows="3"
+                placeholder="Mô tả chi tiết sản phẩm"></textarea>
+            </div>
+            <div class="col-sm-12">
+              <label class="form-label">Ảnh sản phẩm</label>
+              <input class="form-control" type="file" id="product-image" accept="image/*">
+              <div class="d-none align-items-center gap-2 mt-2" id="product-image-current">
+                <img id="product-image-preview" src="" alt="Ảnh sản phẩm hiện tại"
+                  style="width:56px; height:56px; object-fit:cover; border-radius:4px;">
+                <button type="button" class="btn btn-sm btn-outline-danger" id="delete-product-image-btn">Xóa
+                  ảnh</button>
+              </div>
+            </div>
+            <div class="col-sm-12" id="product-file-group">
+              <label class="form-label">File giao cho khách</label>
+              <input class="form-control" type="file" id="product-file" multiple>
+              <small class="text-muted" id="product-file-current">Chưa có file trong kho.</small>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Đóng</button>
+          <button type="button" class="btn btn-primary" id="save-product-btn">Lưu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="orderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header border-0 pb-0">
+          <h5 class="modal-title fw-bold">Chi tiết đơn hàng</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <div class="order-detail-grid mb-3">
+            <div class="order-detail-item">
+              <div class="order-detail-label">Mã đơn hàng</div>
+              <div class="order-detail-value"><code id="order-detail-id">-</code></div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Trạng thái</div>
+              <div class="order-detail-value" id="order-detail-status">-</div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Sản phẩm</div>
+              <div class="order-detail-value" id="order-detail-product">-</div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Số lượng</div>
+              <div class="order-detail-value" id="order-detail-qty">-</div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Khách hàng</div>
+              <div class="order-detail-value"><code id="order-detail-user">-</code></div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Thời gian tạo</div>
+              <div class="order-detail-value" id="order-detail-created">-</div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Memo chuyển khoản</div>
+              <div class="order-detail-value"><code id="order-detail-memo">-</code></div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Dữ liệu giao</div>
+              <div class="order-detail-value" id="order-detail-delivered">-</div>
+            </div>
+          </div>
+          <details>
+            <summary class="small text-muted mb-2" style="cursor:pointer;">Xem JSON đầy đủ</summary>
+            <pre class="bg-light p-3 rounded mb-0" id="order-detail-pre"></pre>
+          </details>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" id="copy-data-btn">Sao chép dữ liệu giao</button>
+            <button class="btn btn-sm btn-outline-secondary" id="copy-memo-btn">Sao chép memo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="walletModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-0 pb-0">
+          <div>
+            <h5 class="modal-title fw-bold">Chi tiết ví</h5>
+            <small class="text-muted" id="wallet-detail-user">-</small>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <div class="order-detail-grid mb-3">
+            <div class="order-detail-item">
+              <div class="order-detail-label">Số dư</div>
+              <div class="order-detail-value text-primary" id="wallet-detail-balance">-</div>
+            </div>
+            <div class="order-detail-item">
+              <div class="order-detail-label">Cập nhật ví</div>
+              <div class="order-detail-value" id="wallet-detail-updated">-</div>
+            </div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold mb-0">Giao dịch gần đây</h6>
+            <button class="btn btn-sm btn-outline-primary" id="wallet-detail-topup">Nạp tiền</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Loại</th>
+                  <th>Số tiền</th>
+                  <th>Số dư sau</th>
+                  <th>Ghi chú</th>
+                </tr>
+              </thead>
+              <tbody id="wallet-transactions-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="itemModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Thêm item sản phẩm</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="item-product-id">
+          <label class="form-label">Nhập mỗi dòng một item</label>
+          <textarea class="form-control" id="item-textarea" rows="6" placeholder="user pass 2fa"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Đóng</button>
+          <button type="button" class="btn btn-primary" id="save-items-btn">Thêm item</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="itemsListModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h5 class="modal-title" id="items-list-title">Danh sách item sản phẩm</h5>
+            <small class="text-muted" id="items-list-subtitle"></small>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div><span class="fw-semibold">Tổng:</span> <span id="items-total">0</span></div>
+            <div class="btn-group">
+              <button class="btn btn-sm btn-outline-secondary" id="items-prev">Trước</button>
+              <button class="btn btn-sm btn-outline-secondary" id="items-next">Sau</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>ID</th>
+                  <th>Nội dung</th>
+                  <th>Ngày tạo</th>
+                  <th class="text-end">Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="items-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="plansModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h5 class="modal-title" id="plans-title">Gói</h5>
+            <small class="text-muted" id="plans-subtitle"></small>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="plans-product-id">
+          <div class="row g-3 align-items-end mb-3">
+            <div class="col-sm-4">
+              <label class="form-label">Nhãn gói</label>
+              <input class="form-control" id="plan-label" placeholder="1 tháng / 3 tháng">
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label">Tháng</label>
+              <input type="number" min="1" class="form-control" id="plan-months" value="1">
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label">Giá (VND)</label>
+              <input type="number" min="1" class="form-control" id="plan-price" value="0">
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label">Thứ tự</label>
+              <input type="number" class="form-control" id="plan-sort" value="0">
+            </div>
+          </div>
+          <div class="d-flex gap-2 mb-3">
+            <button class="btn btn-primary btn-sm" id="save-plan-btn">Lưu gói</button>
+            <button class="btn btn-outline-secondary btn-sm" id="reset-plan-btn">Đặt lại</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table align-middle table-hover">
+              <thead class="table-light">
+                <tr>
+                  <th>ID</th>
+                  <th>Nhãn</th>
+                  <th>Tháng</th>
+                  <th>Giá</th>
+                  <th>Thứ tự</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="plans-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="confirmActionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="confirmActionTitle">Xác nhận thao tác</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2" id="confirmActionDescription"></p>
+          <ul class="small text-muted mb-0 ps-3" id="confirmActionContext"></ul>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"
+            id="confirmActionCancelBtn">Hủy</button>
+          <button type="button" class="btn btn-danger" id="confirmActionConfirmBtn">Xác nhận</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="inputActionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="inputActionTitle">Nhập thông tin</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <form id="inputActionForm">
+          <div class="modal-body">
+            <p class="mb-3 text-muted small" id="inputActionDescription"></p>
+            <div id="inputActionFields" class="d-flex flex-column gap-3"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"
+              id="inputActionCancelBtn">Hủy</button>
+            <button type="submit" class="btn btn-primary" id="inputActionConfirmBtn">Xác nhận</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/admin/core.js?v=20260522-broadcast-emoji"></script>
+  <script src="/assets/admin/products.js"></script>
+  <script src="/assets/admin/orders.js"></script>
+  <script src="/assets/admin/wallets.js"></script>
+  <script src="/assets/admin/webhooks.js"></script>
+  <script src="/assets/admin/configs.js?v=20260522-i18n-emoji-global-toggle"></script>
+  <script src="/assets/admin/i18n.js?v=20260522-i18n-emoji-global-toggle"></script>
+  <script src="/assets/admin/admins.js"></script>
+  <script src="/assets/admin/events.js?v=20260522-i18n-emoji-global-toggle"></script>
+  <script src="/assets/admin/bootstrap.js"></script>
+</body>
+
+</html>

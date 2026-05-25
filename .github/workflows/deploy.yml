@@ -1,0 +1,102 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deploy.sh"
+      - "bot_*.sh"
+      - "public/**"
+      - "i18n/**"
+      - ".github/workflows/deploy.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  BOTBANHANG_GIT_SHA: ${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: deploy-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            deploy-${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        env:
+          BOT_MANAGER_ARTIFACT_SIGNATURE_SECRET: ${{ secrets.BOT_MANAGER_ARTIFACT_SIGNATURE_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BOT_MANAGER_ARTIFACT_SIGNATURE_SECRET:-}" ]; then
+            echo "Missing GitHub secret: BOT_MANAGER_ARTIFACT_SIGNATURE_SECRET"
+            exit 1
+          fi
+          export BOT_MANAGER_ARTIFACT_SIGNATURE="BOT_MANAGER_ARTIFACT_SIGNATURE=${BOT_MANAGER_ARTIFACT_SIGNATURE_SECRET}"
+          cargo build --release
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          marker = f"BOT_MANAGER_ARTIFACT_SIGNATURE={os.environ['BOT_MANAGER_ARTIFACT_SIGNATURE_SECRET']}".encode()
+          binary = pathlib.Path("target/release/botbanhang")
+          if marker not in binary.read_bytes():
+              sys.exit("signature marker missing from release binary")
+          PY
+
+      - name: Package deploy bundle
+        run: |
+          mkdir -p dist
+          cp target/release/botbanhang dist/
+          cp deploy.sh dist/
+          cp bot_clone.sh bot_update.sh bot_list.sh dist/ 2>/dev/null || true
+          if [ -d public ]; then cp -r public dist/; fi
+          if [ -d i18n ]; then cp -r i18n dist/; fi
+          tar -czf botbanhang.tar.gz -C dist .
+
+      - name: Copy bundle to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: botbanhang.tar.gz
+          target: /tmp
+
+      - name: Run remote deploy
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script: |
+            set -euo pipefail
+            WORK_DIR=/tmp/botbanhang-deploy
+            mkdir -p "$WORK_DIR"
+            tar -xzf /tmp/botbanhang.tar.gz -C "$WORK_DIR"
+            cd "$WORK_DIR"
+            chmod +x deploy.sh botbanhang
+            BIN_PATH=./botbanhang ./deploy.sh
+            rm -f /tmp/botbanhang.tar.gz

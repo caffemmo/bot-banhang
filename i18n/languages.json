@@ -1,0 +1,14 @@
+[
+  {
+    "code": "vi",
+    "label": "Tiếng Việt",
+    "fallback": "en",
+    "enabled": true
+  },
+  {
+    "code": "en",
+    "label": "English",
+    "fallback": "en",
+    "enabled": true
+  }
+]

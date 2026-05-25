@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hướng dẫn cấu hình webhook SePay</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --page-bg: #f6f8fb;
+      --ink: #111827;
+      --muted: #5b6472;
+      --line: #dbe3ee;
+      --accent: #0d6efd;
+      --panel: #ffffff;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page-bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .guide-header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .guide-shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 16px;
+    }
+
+    .header-row {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.08;
+      letter-spacing: 0;
+      margin: 0 0 12px;
+      font-weight: 800;
+    }
+
+    .lead {
+      color: var(--muted);
+      max-width: 760px;
+      font-size: 16px;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .info-box,
+    .step-card,
+    .check-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+
+    .info-box {
+      padding: 14px;
+    }
+
+    .info-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    code {
+      color: #0f172a;
+      background: #eef4ff;
+      border: 1px solid #d7e6ff;
+      border-radius: 6px;
+      padding: 2px 6px;
+      word-break: break-word;
+    }
+
+    .step-list {
+      display: grid;
+      gap: 18px;
+    }
+
+    .step-card {
+      overflow: hidden;
+    }
+
+    .step-content {
+      display: grid;
+      grid-template-columns: minmax(220px, 330px) minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px;
+      align-items: start;
+    }
+
+    .step-number {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+
+    .step-title {
+      font-size: 19px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .step-text {
+      color: var(--muted);
+      line-height: 1.58;
+      margin-bottom: 12px;
+    }
+
+    .step-note {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #334155;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .step-shot {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .check-card {
+      padding: 18px;
+    }
+
+    .check-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      margin-top: 20px;
+    }
+
+    @media (max-width: 820px) {
+      .header-row {
+        flex-direction: column;
+      }
+
+      .header-actions {
+        justify-content: flex-start;
+      }
+
+      .info-grid,
+      .step-content {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header class="guide-header">
+    <div class="guide-shell">
+      <div class="header-row">
+        <div>
+          <div class="eyebrow">SePay Webhook</div>
+          <h1>Hướng dẫn kết nối thanh toán tự động</h1>
+          <p class="lead">
+            Làm theo các bước bên dưới để SePay gửi giao dịch về bot. Khi khách chuyển khoản đúng
+            nội dung, backend sẽ nhận webhook tại <code>/webhook/payment</code>, xác thực API key,
+            ghi log và tự xử lý đơn hàng hoặc yêu cầu nạp ví.
+          </p>
+        </div>
+        <div class="header-actions">
+          <a class="btn btn-outline-secondary" href="/admin">Quay lại Admin</a>
+          <a class="btn btn-primary" href="/admin#webhooks-pane">Xem log Webhook</a>
+        </div>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-box">
+          <div class="info-label">Webhook URL</div>
+          <code data-webhook-url>/webhook/payment</code>
+        </div>
+        <div class="info-box">
+          <div class="info-label">Phương thức xác thực</div>
+          <code>API Key</code>
+        </div>
+        <div class="info-box">
+          <div class="info-label">Header SePay gửi</div>
+          <code>Authorization: &lt;WEBHOOK_SECRET&gt;</code>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="guide-shell">
+    <div class="check-card mb-4">
+      <h2 class="h5 fw-bold mb-3">Chuẩn bị trước khi cấu hình</h2>
+      <ul class="check-list">
+        <li>Server bot phải truy cập được từ Internet bằng domain hoặc IP public.</li>
+        <li>Biến cấu hình <code>WEBHOOK_SECRET</code> trên server phải trùng API Key nhập trong SePay.</li>
+        <li>Nếu chạy sau reverse proxy, hãy trỏ URL SePay tới domain HTTPS public thay vì URL nội bộ.</li>
+        <li>Sau khi lưu webhook, kiểm tra tab <strong>Webhook</strong> trong Admin để xem request có vào hệ thống không.
+        </li>
+      </ul>
+    </div>
+
+    <section class="step-list" aria-label="Các bước cấu hình SePay webhook">
+      <article class="step-card">
+        <div class="step-content">
+          <div>
+            <div class="step-number">1</div>
+            <div class="step-title">Mở mục Tích hợp Webhooks</div>
+            <p class="step-text">
+              Trong dashboard SePay, mở Quick menu rồi chọn <strong>Tích hợp Webhooks</strong>.
+              Đây là nơi quản lý các webhook mà SePay sẽ gọi khi có giao dịch.
+            </p>
+          </div>
+          <img class="step-shot" src="/images/buoc1.png" alt="SePay Quick menu chọn Tích hợp Webhooks">
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-content">
+          <div>
+            <div class="step-number">2</div>
+            <div class="step-title">Thêm webhook mới</div>
+            <p class="step-text">
+              Ở màn hình Webhooks, bấm <strong>Thêm webhook</strong>. Nếu đã có webhook cũ, có thể
+              giữ lại để đối chiếu nhưng chỉ nên bật webhook đang trỏ về server hiện tại.
+            </p>
+          </div>
+          <img class="step-shot" src="/images/buoc2.png" alt="Màn hình Webhooks và nút Thêm webhook">
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-content">
+          <div>
+            <div class="step-number">3</div>
+            <div class="step-title">Nhập thông tin cơ bản</div>
+            <p class="step-text">
+              Đặt tên dễ nhận biết, ví dụ <strong>bot</strong>. Ở ô URL nhận webhook, nhập URL public
+              của server kèm path <code>/webhook/payment</code>. Chọn loại giao dịch <strong>Tiền vào</strong>
+              và định dạng dữ liệu <strong>JSON</strong>.
+            </p>
+            <div class="step-note">
+              URL theo domain hiện tại: <code data-webhook-url>/webhook/payment</code>. Hãy copy đúng URL này vào
+              SePay để webhook gọi về server đang chạy.
+            </div>
+          </div>
+          <img class="step-shot" src="/images/buoc3.png" alt="Form thêm webhook nhập URL nhận webhook">
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-content">
+          <div>
+            <div class="step-number">4</div>
+            <div class="step-title">Chọn tài khoản ngân hàng</div>
+            <p class="step-text">
+              Chọn <strong>Tất cả tài khoản</strong> nếu mọi tài khoản đã liên kết đều dùng cho bot,
+              hoặc chọn <strong>Tùy chọn</strong> nếu chỉ một tài khoản nhận tiền cho shop.
+            </p>
+            <div class="step-note">
+              Nếu bật "Dùng để xác thực thanh toán", hãy chắc chắn tài khoản nhận tiền trong SePay
+              trùng tài khoản đang cấu hình trong bot.
+            </div>
+          </div>
+          <img class="step-shot" src="/images/buoc4.png" alt="Bước chọn tài khoản ngân hàng cho webhook">
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-content">
+          <div>
+            <div class="step-number">5</div>
+            <div class="step-title">Cấu hình API Key</div>
+            <p class="step-text">
+              Chọn phương thức xác thực <strong>API Key</strong>. Giá trị API Key nhập vào SePay phải
+              giống biến <code>WEBHOOK_SECRET</code> trên server bot.
+            </p>
+            <div class="step-note">
+              Backend sẽ kiểm tra header SePay gửi lên: <code>Authorization: &lt;WEBHOOK_SECRET&gt;</code>.
+              Nếu sai key, log webhook sẽ hiện <code>Auth = no</code> và request bị từ chối.
+            </div>
+          </div>
+          <img class="step-shot" src="/images/buoc5.png" alt="Cấu hình API Key cho SePay webhook">
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-content">
+          <div>
+            <div class="step-number">6</div>
+            <div class="step-title">Hoàn tất và kiểm tra log</div>
+            <p class="step-text">
+              Ở bước cảnh báo, có thể bật hoặc tắt tùy nhu cầu vận hành, sau đó bấm <strong>Thêm</strong>.
+              Tạo một giao dịch thử với đúng nội dung chuyển khoản để kiểm tra xử lý tự động.
+            </p>
+            <div class="step-note">
+              Trong Admin, mở tab <strong>Webhook</strong>, lọc nhà cung cấp <strong>SePay</strong>.
+              Request hợp lệ sẽ có <code>Auth = yes</code>; nếu không khớp đơn, kiểm tra lại nội dung chuyển khoản.
+            </div>
+          </div>
+          <img class="step-shot" src="/images/buoc6.png" alt="Bước cảnh báo và nút Thêm webhook">
+        </div>
+      </article>
+    </section>
+
+    <div class="footer-note">
+      Lưu ý bảo mật: không chia sẻ <code>WEBHOOK_SECRET</code>. Khi nghi ngờ key đã lộ, đổi key trên server,
+      cập nhật lại API Key trong SePay, rồi kiểm tra log webhook sau giao dịch thử.
+    </div>
+  </main>
+  <script>
+    (() => {
+      const origin = window.location.origin;
+      const webhookUrl = origin && origin !== 'null'
+        ? new URL('/webhook/payment', origin).href
+        : '/webhook/payment';
+
+      document.querySelectorAll('[data-webhook-url]').forEach((el) => {
+        el.textContent = webhookUrl;
+      });
+    })();
+  </script>
+</body>
+
+</html>

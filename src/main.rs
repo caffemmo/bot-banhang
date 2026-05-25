@@ -1,0 +1,520 @@
+mod app;
+mod artifact_signature;
+mod bot;
+mod config;
+mod core;
+mod db;
+mod domains;
+
+use crate::bot::texts::BotTexts;
+use anyhow::Result;
+use config::Config;
+use teloxide::payloads::SetMyCommandsSetters;
+use teloxide::requests::Requester;
+use teloxide::types::BotCommand;
+use tracing_subscriber::EnvFilter;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    artifact_signature::keep_marker();
+    init_tracing();
+
+    let config = Config::from_env()?;
+    let pool = db::init_pool(&config.database_url).await?;
+    let bot = teloxide::Bot::new(config.telegram_token.clone());
+    let plugins = crate::bot::plugins::init_plugins();
+
+    // Seed DB with .env config values (only if not already set)
+    seed_configs_from_env(&pool, &config).await;
+
+    // Load operational configs from DB and bot text from JSON files.
+    let configs = domains::configs::repo::get_all_configs(&pool).await?;
+    let texts = domains::i18n::repo::load_texts_from_dir(&config.i18n_dir)?;
+    let ctx = app::AppContext::new(
+        bot.clone(),
+        pool.clone(),
+        config.clone(),
+        configs,
+        texts,
+        plugins,
+    );
+    log_crypto_feature_status(&ctx);
+
+    let mut all_commands = Vec::new();
+
+    for plugin in ctx.plugins.iter() {
+        if let Err(e) = plugin.on_init(&ctx.pool).await {
+            tracing::error!("Plugin {} error on_init: {}", plugin.name(), e);
+        }
+        all_commands.extend(plugin.commands());
+    }
+
+    if !all_commands.is_empty() {
+        let texts = ctx.texts.read().map(|texts| texts.clone());
+        let result = match texts {
+            Ok(texts) => register_bot_commands(&bot, &texts, &all_commands).await,
+            Err(_) => bot
+                .set_my_commands(all_commands)
+                .await
+                .map(|_| ())
+                .map_err(Into::into),
+        };
+
+        if let Err(e) = result {
+            tracing::error!("Failed to set bot commands: {}", e);
+        } else {
+            tracing::info!("Successfully registered bot commands to Telegram");
+        }
+    }
+
+    let bot_task = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(err) = bot::run(ctx.clone()).await {
+                tracing::error!("Bot stopped: {err}");
+            }
+        }
+    });
+
+    let server_task = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(err) = crate::core::pages::serve(ctx.clone()).await {
+                tracing::error!("Server stopped: {err}");
+            }
+        }
+    });
+
+    let worker_task = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(err) = domains::worker::run(ctx.clone()).await {
+                tracing::error!("Worker stopped: {err}");
+            }
+        }
+    });
+
+    let _ = tokio::try_join!(bot_task, server_task, worker_task)?;
+    Ok(())
+}
+
+fn localized_commands_for_lang(
+    commands: &[BotCommand],
+    texts: &BotTexts,
+    lang: &str,
+) -> Vec<BotCommand> {
+    commands
+        .iter()
+        .map(|command| {
+            let key = format!("cmd_{}", command.command.replace('-', "_"));
+            BotCommand {
+                command: command.command.clone(),
+                description: texts.get_lang(&key, lang, &command.description),
+            }
+        })
+        .collect()
+}
+
+async fn register_bot_commands(
+    bot: &teloxide::Bot,
+    texts: &BotTexts,
+    commands: &[BotCommand],
+) -> Result<()> {
+    let default_lang = texts.default_language();
+    bot.set_my_commands(localized_commands_for_lang(commands, texts, &default_lang))
+        .await?;
+
+    for language in texts.enabled_languages() {
+        if let Err(err) = bot
+            .set_my_commands(localized_commands_for_lang(commands, texts, &language.code))
+            .language_code(language.code.clone())
+            .await
+        {
+            tracing::warn!(
+                "Failed to set bot commands for language {}: {}",
+                language.code,
+                err
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn init_tracing() {
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn"));
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+}
+
+async fn seed_configs_from_env(pool: &db::DbPool, config: &config::Config) {
+    let mut seeds: Vec<(&str, String)> = vec![
+        ("bank_name", config.bank_name.clone()),
+        ("required_channel_enabled", "1".to_string()),
+        ("required_channel_id", "@zvwboo".to_string()),
+        ("required_channel_url", "https://t.me/zvwboo".to_string()),
+    ];
+
+    let optional_seeds: Vec<(&str, &Option<String>)> = vec![
+        ("bank_account", &config.bank_account),
+        ("bank_account_name", &config.bank_account_name),
+        ("base_url", &config.base_url),
+        ("usdt_rate_custom_url", &config.crypto.rate_custom_url),
+    ];
+
+    for (key, val) in optional_seeds {
+        if let Some(v) = val {
+            seeds.push((key, v.clone()));
+        }
+    }
+    if let Ok(icon_admin_ids) = std::env::var("TELEGRAM_ICON_ADMIN_IDS") {
+        push_optional_seed(
+            &mut seeds,
+            "telegram_icon_admin_ids",
+            Some(icon_admin_ids.as_str()),
+        );
+    }
+
+    push_optional_seed(
+        &mut seeds,
+        "bep20_merchant_wallet",
+        config.crypto.bep20.merchant_wallet.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "bscscan_api_key",
+        config.crypto.bep20.bscscan_api_key.as_deref(),
+    );
+    if let Some(start_block) = config.crypto.bep20.start_block {
+        seeds.push(("bep20_start_block", start_block.to_string()));
+    }
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_api_key",
+        config.crypto.binance.api_key.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_secret",
+        config.crypto.binance.secret.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_api_secret",
+        config.crypto.binance.api_secret.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_cert_sn",
+        config.crypto.binance.cert_sn.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_receiver_pay_id",
+        config.crypto.binance.receiver_pay_id.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_receiver_name",
+        config.crypto.binance.receiver_name.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_webhook_url",
+        config.crypto.binance.webhook_url.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_return_url",
+        config.crypto.binance.return_url.as_deref(),
+    );
+    push_optional_seed(
+        &mut seeds,
+        "binance_pay_cancel_url",
+        config.crypto.binance.cancel_url.as_deref(),
+    );
+
+    seeds.extend([
+        (
+            "binance_pay_note_enabled",
+            if config.crypto.binance.note_enabled {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            },
+        ),
+        (
+            "binance_pay_poll_interval_seconds",
+            config.crypto.binance.poll_interval_seconds.to_string(),
+        ),
+        (
+            "binance_pay_history_lookback_minutes",
+            config.crypto.binance.history_lookback_minutes.to_string(),
+        ),
+        (
+            "binance_pay_recv_window_ms",
+            config.crypto.binance.recv_window_ms.to_string(),
+        ),
+        (
+            "binance_pay_match_grace_minutes",
+            config.crypto.binance.match_grace_minutes.to_string(),
+        ),
+        (
+            "binance_pay_note_prefix",
+            config.crypto.binance.note_prefix.clone(),
+        ),
+        (
+            "binance_pay_note_digits",
+            config.crypto.binance.note_digits.to_string(),
+        ),
+        (
+            "binance_pay_amount_tolerance_usdt",
+            config.crypto.binance.amount_tolerance_usdt.to_string(),
+        ),
+        (
+            "crypto_pay_ttl_minutes",
+            config.crypto.pay_ttl_minutes.to_string(),
+        ),
+        (
+            "usdt_rate_buffer_percent",
+            config.crypto.usdt_rate_buffer_percent.to_string(),
+        ),
+        (
+            "usdt_rate_cache_seconds",
+            config.crypto.usdt_rate_cache_seconds.to_string(),
+        ),
+        (
+            "usdt_rate_stale_seconds",
+            config.crypto.usdt_rate_stale_seconds.to_string(),
+        ),
+        (
+            "usd_vnd_fallback_rate",
+            config.crypto.usd_vnd_fallback_rate.to_string(),
+        ),
+        (
+            "bep20_usdt_contract",
+            config.crypto.bep20.usdt_contract.clone(),
+        ),
+        (
+            "bep20_required_confirmations",
+            config.crypto.bep20.required_confirmations.to_string(),
+        ),
+    ]);
+
+    for (key, value) in seeds {
+        if let Err(e) = sqlx::query("INSERT OR IGNORE INTO app_configs (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(pool)
+            .await
+        {
+            tracing::warn!("Failed to seed config {key}: {e}");
+        }
+    }
+
+    cleanup_legacy_i18n_configs(pool).await;
+    tracing::info!("Operational config values seeded from .env and defaults to DB");
+}
+
+fn push_optional_seed(seeds: &mut Vec<(&str, String)>, key: &'static str, value: Option<&str>) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    seeds.push((key, value.to_string()));
+}
+
+async fn cleanup_legacy_i18n_configs(pool: &db::DbPool) {
+    if let Err(e) = sqlx::query(
+        r#"
+        DELETE FROM app_configs
+        WHERE key = 'i18n_languages'
+           OR key LIKE '%_vi'
+           OR key LIKE '%_en'
+           OR key IN ('start', 'help', 'start_btn_shop', 'start_btn_wallet', 'start_btn_help')
+        "#,
+    )
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("Failed to clean legacy i18n config keys: {e}");
+    }
+}
+
+fn log_crypto_feature_status(ctx: &std::sync::Arc<app::AppContext>) {
+    if ctx.usdt_payments_enabled() {
+        tracing::info!("USDT payments: ENABLED");
+    } else {
+        tracing::info!("USDT payments: DISABLED");
+    }
+
+    if ctx.binance_pay_enabled() {
+        let env = match ctx.config.crypto.binance.env {
+            config::BinancePayEnv::Sandbox => "sandbox",
+            config::BinancePayEnv::Production => "production",
+        };
+        tracing::info!("Binance Pay: ENABLED ({env})");
+    } else {
+        let reason = ctx
+            .binance_pay_disabled_reason()
+            .unwrap_or_else(|| "not configured".to_string());
+        tracing::info!("Binance Pay: DISABLED ({reason})");
+    }
+
+    if ctx.bep20_enabled() {
+        let wallet = ctx.bep20_merchant_wallet().unwrap_or_default();
+        let short_wallet = if wallet.len() >= 10 {
+            format!("{}...{}", &wallet[..6], &wallet[wallet.len() - 4..])
+        } else {
+            wallet.to_string()
+        };
+        tracing::info!(
+            "BEP20 USDT: ENABLED (wallet: {}, confirmations: {})",
+            short_wallet,
+            ctx.bep20_required_confirmations()
+        );
+    } else {
+        let reason = ctx
+            .bep20_disabled_reason()
+            .unwrap_or_else(|| "not configured".to_string());
+        tracing::info!("BEP20 USDT: DISABLED ({reason})");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bot::texts::{BotTexts, LanguageInfo};
+    use std::collections::HashMap;
+    use teloxide::types::BotCommand;
+
+    fn test_config() -> config::Config {
+        config::Config {
+            telegram_token: "test-token".to_string(),
+            database_url: ":memory:".to_string(),
+            bank_name: "VCB".to_string(),
+            bank_account: None,
+            bank_account_name: None,
+            webhook_secret: "test-webhook-secret".to_string(),
+            admin_jwt_secret: "test-admin-jwt-secret-at-least-32-chars".to_string(),
+            admin_setup_code: "setup-code".to_string(),
+            admin_cookie_secure: false,
+            base_url: None,
+            i18n_dir: "i18n".to_string(),
+            port: 8080,
+            crypto: config::CryptoConfig::default(),
+        }
+    }
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE app_configs (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn config_value(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
+        use sqlx::Row;
+
+        sqlx::query("SELECT value FROM app_configs WHERE key = ?")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .unwrap()
+            .map(|row| row.get("value"))
+    }
+
+    #[tokio::test]
+    async fn seeding_keeps_i18n_out_of_app_configs_and_cleans_legacy_keys() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO app_configs (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)")
+            .bind("language_btn_vi")
+            .bind("legacy vi")
+            .bind("start_en")
+            .bind("legacy start")
+            .bind("i18n_languages")
+            .bind("[]")
+            .bind("required_channel_url")
+            .bind("https://t.me/custom")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        seed_configs_from_env(&pool, &test_config()).await;
+
+        assert_eq!(config_value(&pool, "language_btn_vi").await, None);
+        assert_eq!(config_value(&pool, "start_en").await, None);
+        assert_eq!(config_value(&pool, "i18n_languages").await, None);
+        assert_eq!(
+            config_value(&pool, "required_channel_url").await,
+            Some("https://t.me/custom".to_string())
+        );
+        assert_eq!(
+            config_value(&pool, "bank_name").await,
+            Some("VCB".to_string())
+        );
+        assert_eq!(config_value(&pool, "binance_pay_api_key").await, None);
+        assert_eq!(config_value(&pool, "binance_pay_secret").await, None);
+        assert_eq!(config_value(&pool, "binance_pay_cert_sn").await, None);
+        assert_eq!(config_value(&pool, "bep20_merchant_wallet").await, None);
+        assert_eq!(config_value(&pool, "bscscan_api_key").await, None);
+    }
+
+    #[test]
+    fn env_example_does_not_expose_admin_only_i18n_emoji_toggle() {
+        const ENV_EXAMPLE: &str = include_str!("../.env.example");
+        const ADMIN_ONLY_TOGGLE_ENV: &str = concat!("TELEGRAM_I18N_", "EMOJIS_ENABLED");
+
+        assert!(!ENV_EXAMPLE.contains(ADMIN_ONLY_TOGGLE_ENV));
+    }
+
+    #[test]
+    fn localized_commands_use_i18n_descriptions_by_language() {
+        let texts = BotTexts::from_language_maps(
+            vec![
+                LanguageInfo {
+                    code: "en".to_string(),
+                    label: "English".to_string(),
+                    fallback: "en".to_string(),
+                    enabled: true,
+                },
+                LanguageInfo {
+                    code: "vi".to_string(),
+                    label: "Tiếng Việt".to_string(),
+                    fallback: "en".to_string(),
+                    enabled: true,
+                },
+            ],
+            HashMap::from([(
+                "vi".to_string(),
+                HashMap::from([
+                    ("cmd_start".to_string(), "Bắt đầu".to_string()),
+                    ("cmd_shop".to_string(), "Xem sản phẩm".to_string()),
+                ]),
+            )]),
+        );
+        let base = vec![
+            BotCommand {
+                command: "start".to_string(),
+                description: "Start".to_string(),
+            },
+            BotCommand {
+                command: "shop".to_string(),
+                description: "View products".to_string(),
+            },
+        ];
+
+        let commands = localized_commands_for_lang(&base, &texts, "vi");
+
+        assert_eq!(commands[0].description, "Bắt đầu");
+        assert_eq!(commands[1].description, "Xem sản phẩm");
+    }
+}

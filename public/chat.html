@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Chat</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <style>
+    :root {
+      --primary-gradient: linear-gradient(135deg, #0d6efd 0%, #00d2ff 100%);
+      --glass-bg: rgba(255, 255, 255, 0.7);
+      --glass-border: rgba(255, 255, 255, 0.4);
+      --shadow-premium: 0 10px 40px rgba(0, 0, 0, 0.05);
+    }
+
+    body {
+      background: radial-gradient(circle at 0% 0%, #f0f7ff 0%, #fdfdff 50%, #f5f3ff 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container-fluid { padding-bottom: 1rem; }
+    h3 { letter-spacing: -0.5px; }
+
+    .section-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--shadow-premium);
+      border-radius: 20px;
+    }
+
+    .nav-pills { flex-wrap: nowrap; white-space: nowrap; }
+    .nav-pills .nav-link {
+      border-radius: 12px;
+      padding: 0.6rem 1rem;
+      font-weight: 500;
+      color: #6e6e73;
+    }
+    .nav-pills .nav-link.active {
+      background: var(--primary-gradient);
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(13, 110, 253, 0.3);
+    }
+
+    .layout-grid {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 1rem;
+      min-height: calc(100vh - 170px);
+    }
+
+    .subscriber-list,
+    .chat-history {
+      max-height: calc(100vh - 290px);
+      overflow: auto;
+    }
+
+    .subscriber-item {
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      transition: all .15s ease;
+      background: rgba(255, 255, 255, 0.7);
+    }
+    .subscriber-item:hover,
+    .subscriber-item.active {
+      border-color: #0d6efd;
+      background: #eff6ff;
+    }
+
+    .chat-bubble {
+      border-radius: 14px;
+      padding: .65rem .8rem;
+      max-width: min(80%, 560px);
+      word-break: break-word;
+    }
+    .chat-bubble.in { background: #f1f5f9; }
+    .chat-bubble.out { background: #dbeafe; }
+
+    .chat-meta { font-size: 12px; color: #64748b; }
+
+    @media (max-width: 992px) {
+      .layout-grid { grid-template-columns: 1fr; min-height: auto; }
+      .subscriber-list,
+      .chat-history { max-height: 40vh; }
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem !important; }
+      .container-fluid { padding: 0; }
+      .d-flex.gap-2 { flex-wrap: wrap; }
+      h3 { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body class="p-3 p-md-4">
+  <div class="container-fluid">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-3">
+      <div>
+        <h3 class="fw-bold mb-0" id="page-title"></h3>
+        <small class="text-muted" id="page-subtitle"></small>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <a class="btn btn-outline-primary btn-sm" href="/admin.html">Admin</a>
+        <button class="btn btn-outline-secondary btn-sm" id="refresh-all"></button>
+      </div>
+    </div>
+
+    <div id="alert-area" class="mb-3"></div>
+
+    <div class="layout-grid">
+      <div class="card section-card border-0">
+        <div class="card-body p-3">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h5 class="mb-0" id="subscribers-title"></h5>
+            <span class="badge text-bg-light" id="subscriber-count">0</span>
+          </div>
+          <div class="input-group mb-2">
+            <input id="subscriber-query" class="form-control" placeholder="">
+            <button class="btn btn-outline-secondary" id="clear-subscriber-query">×</button>
+          </div>
+          <div class="text-muted small d-none mb-2" id="subscribers-filter-loading">
+            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span><span id="loading-subscribers-text"></span>
+          </div>
+          <div class="subscriber-list d-flex flex-column gap-2" id="subscribers-list"></div>
+          <div class="d-flex justify-content-between align-items-center mt-2 small">
+            <button class="btn btn-sm btn-light border" id="subscribers-prev">← Trước</button>
+            <span class="text-muted" id="subscribers-page"></span>
+            <button class="btn btn-sm btn-light border" id="subscribers-next">Sau →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card section-card border-0 d-flex flex-column">
+        <div class="card-body p-3 d-flex flex-column h-100">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h5 class="mb-0" id="chat-title"></h5>
+            <button class="btn btn-light border btn-sm" id="refresh-chat"></button>
+          </div>
+
+          <div class="text-muted small d-none mb-2" id="chat-filter-loading">
+            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span><span id="loading-chat-text"></span>
+          </div>
+
+          <div class="chat-history flex-grow-1 d-flex flex-column gap-2 mb-2" id="chat-history"></div>
+
+          <div class="d-flex justify-content-between align-items-center mb-3 small">
+            <button class="btn btn-sm btn-light border" id="messages-prev">← Cũ hơn</button>
+            <span class="text-muted" id="messages-page"></span>
+            <button class="btn btn-sm btn-light border" id="messages-next">Mới hơn →</button>
+          </div>
+
+          <form id="chat-send-form" class="mt-auto">
+            <div class="input-group">
+              <input id="chat-input" class="form-control" placeholder="" autocomplete="off">
+              <button class="btn btn-primary" type="submit" id="chat-send-btn"></button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = '/api/admin';
+    const I18N = {
+      title: {
+        page: 'Chat quản trị',
+        subtitle: 'Danh sách khách · Lịch sử hội thoại',
+        subscribers: 'Khách hàng',
+      },
+      common: {
+        saveToken: 'Lưu token',
+        refresh: 'Làm mới',
+        chat: 'Hội thoại',
+        send: 'Gửi',
+        empty: 'Trống',
+      },
+      placeholder: {
+        querySubscriber: 'Tìm theo user/chat/username...',
+        chatInput: 'Nhập tin nhắn để gửi...',
+      },
+      state: {
+        noSubscriber: 'Chưa có subscriber.',
+        noChatSelected: 'Chọn khách bên trái để xem chat.',
+        noChatMessage: 'Chưa có tin nhắn nào.',
+        paging: 'Trang {page}/{pages}',
+      },
+      loading: {
+        subscribers: 'Đang tải danh sách khách...',
+        chat: 'Đang tải lịch sử chat...',
+      },
+      alert: {
+        requestFailed: 'Yêu cầu thất bại',
+        tokenSaved: 'Đã lưu token.',
+        loadSubscribersFailed: 'Tải danh sách khách thất bại',
+        loadMessagesFailed: 'Tải lịch sử chat thất bại',
+        selectSubscriberFirst: 'Vui lòng chọn khách trước khi gửi tin nhắn.',
+        emptyMessage: 'Nội dung tin nhắn không được trống.',
+        sendMessageSuccess: 'Đã gửi tin nhắn.',
+        sendMessageFailed: 'Gửi tin nhắn thất bại',
+      },
+    };
+
+    const SUBSCRIBERS_LIMIT = 30;
+    const MESSAGES_LIMIT = 30;
+
+    let selectedSubscriber = null;
+    let subscribers = [];
+    let subscribersTotal = 0;
+    let subscribersOffset = 0;
+    let messagesTotal = 0;
+    let messagesOffset = 0;
+
+    function alertBox(type, msg) {
+      const html = `<div class="alert alert-${type} alert-dismissible fade show" role="alert">
+        ${escapeHtml(msg)}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Đóng"></button>
+      </div>`;
+      $('#alert-area').html(html);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value);
+    }
+
+    function debounce(fn, delay) {
+      let timer = null;
+      return function (...args) {
+        const ctx = this;
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(ctx, args), delay);
+      };
+    }
+
+    function setFilterLoading(selector, isLoading) {
+      $(selector).toggleClass('d-none', !isLoading);
+    }
+
+    async function apiFetch(path, options = {}) {
+      const normalizedPath = path.startsWith('/admin/') ? path.replace('/admin', '') : path;
+      const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+
+      const res = await fetch(API_BASE + normalizedPath, Object.assign({}, options, { headers, credentials: 'same-origin' }));
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.ok === false)) {
+        const msg = data?.error?.message || res.statusText || I18N.alert.requestFailed;
+        throw new Error(msg);
+      }
+      return data?.data ?? data;
+    }
+
+    function applyI18N() {
+      $('#page-title').text(I18N.title.page);
+      $('#page-subtitle').text(I18N.title.subtitle);
+      $('#subscribers-title').text(I18N.title.subscribers);
+      $('#chat-title').text(I18N.common.chat);
+
+      $('#refresh-all').text(I18N.common.refresh);
+      $('#refresh-chat').text(I18N.common.refresh);
+      $('#chat-send-btn').text(I18N.common.send);
+
+      $('#subscriber-query').attr('placeholder', I18N.placeholder.querySubscriber);
+      $('#chat-input').attr('placeholder', I18N.placeholder.chatInput);
+      $('#loading-subscribers-text').text(I18N.loading.subscribers);
+      $('#loading-chat-text').text(I18N.loading.chat);
+    }
+
+    function formatSubscriberLabel(s) {
+      const name = s.full_name || [s.first_name, s.last_name].filter(Boolean).join(' ') || I18N.common.empty;
+      const username = s.username ? '@' + s.username : I18N.common.empty;
+      return { name, username };
+    }
+
+    function renderSubscribers() {
+      const $list = $('#subscribers-list');
+      if (!subscribers.length) {
+        $list.html(`<div class="text-muted small">${I18N.state.noSubscriber}</div>`);
+        $('#subscriber-count').text('0');
+        updateSubscribersPaging();
+        return;
+      }
+
+      const html = subscribers.map((s) => {
+        const label = formatSubscriberLabel(s);
+        const active = selectedSubscriber && Number(selectedSubscriber.chat_id) === Number(s.chat_id) ? 'active' : '';
+        return `
+          <button class="subscriber-item text-start p-2 ${active}" data-chat-id="${escapeAttr(s.chat_id)}" type="button">
+            <div class="fw-semibold">${escapeHtml(label.name)}</div>
+            <div class="small text-muted">${escapeHtml(label.username)}</div>
+            <div class="small text-muted">chat_id: ${escapeHtml(s.chat_id)} · user_id: ${escapeHtml(s.user_id)}</div>
+          </button>
+        `;
+      }).join('');
+
+      $list.html(html);
+      $('#subscriber-count').text(String(subscribersTotal));
+      updateSubscribersPaging();
+    }
+
+    function totalPages(total, limit) {
+      return Math.max(1, Math.ceil((total || 0) / limit));
+    }
+
+    function currentPage(offset, limit) {
+      return Math.floor((offset || 0) / limit) + 1;
+    }
+
+    function renderPagingLabel(page, pages) {
+      return I18N.state.paging.replace('{page}', String(page)).replace('{pages}', String(pages));
+    }
+
+    function updateSubscribersPaging() {
+      const pages = totalPages(subscribersTotal, SUBSCRIBERS_LIMIT);
+      const page = currentPage(subscribersOffset, SUBSCRIBERS_LIMIT);
+      $('#subscribers-page').text(renderPagingLabel(page, pages));
+      $('#subscribers-prev').prop('disabled', subscribersOffset <= 0);
+      $('#subscribers-next').prop('disabled', subscribersOffset + SUBSCRIBERS_LIMIT >= subscribersTotal);
+    }
+
+    function updateMessagesPaging() {
+      const pages = totalPages(messagesTotal, MESSAGES_LIMIT);
+      const page = currentPage(messagesOffset, MESSAGES_LIMIT);
+      $('#messages-page').text(renderPagingLabel(page, pages));
+      $('#messages-prev').prop('disabled', messagesOffset + MESSAGES_LIMIT >= messagesTotal);
+      $('#messages-next').prop('disabled', messagesOffset <= 0);
+    }
+
+    function formatMessageTime(value) {
+      if (!value) return '';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value);
+      return d.toLocaleString('vi-VN');
+    }
+
+    function renderMessages(messages) {
+      const $history = $('#chat-history');
+      if (!selectedSubscriber) {
+        $history.html(`<div class="text-muted">${I18N.state.noChatSelected}</div>`);
+        updateMessagesPaging();
+        return;
+      }
+      if (!messages.length) {
+        $history.html(`<div class="text-muted">${I18N.state.noChatMessage}</div>`);
+        updateMessagesPaging();
+        return;
+      }
+
+      const html = messages.map((m) => {
+        const isOut = m.direction === 'out' || m.role === 'assistant' || m.from_admin === true;
+        const bubbleCls = isOut ? 'out ms-auto' : 'in me-auto';
+        const content = m.text || m.content || m.message || I18N.common.empty;
+        const meta = [
+          m.sender || m.role || (isOut ? 'admin' : 'user'),
+          formatMessageTime(m.created_at || m.timestamp || m.sent_at),
+        ].filter(Boolean).join(' · ');
+
+        return `
+          <div class="d-flex flex-column ${isOut ? 'align-items-end' : 'align-items-start'}">
+            <div class="chat-bubble ${bubbleCls}">${escapeHtml(content)}</div>
+            <div class="chat-meta mt-1">${escapeHtml(meta)}</div>
+          </div>
+        `;
+      }).join('');
+
+      $history.html(html);
+      $history.scrollTop($history[0].scrollHeight);
+    }
+
+    async function loadSubscribers(offset = subscribersOffset) {
+      const q = $('#subscriber-query').val().trim();
+      const query = q ? `&query=${encodeURIComponent(q)}` : "";
+      subscribersOffset = Math.max(0, Number(offset) || 0);
+      setFilterLoading('#subscribers-filter-loading', true);
+      try {
+        const data = await apiFetch(`/chat/conversations?limit=${SUBSCRIBERS_LIMIT}&offset=${subscribersOffset}${query}`);
+        subscribers = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+        subscribersTotal = Number(data?.total || subscribers.length || 0);
+        if (selectedSubscriber) {
+          const found = subscribers.find((s) => Number(s.chat_id) === Number(selectedSubscriber.chat_id));
+          selectedSubscriber = found || null;
+        }
+        renderSubscribers();
+        if (selectedSubscriber) {
+          await loadMessages(selectedSubscriber.chat_id, 0);
+        } else {
+          messagesTotal = 0;
+          messagesOffset = 0;
+          renderMessages([]);
+          updateMessagesPaging();
+        }
+      } catch (e) {
+        alertBox('danger', `${I18N.alert.loadSubscribersFailed}: ${e.message}`);
+      } finally {
+        setFilterLoading('#subscribers-filter-loading', false);
+      }
+    }
+
+    async function loadMessages(chatId, offset = messagesOffset) {
+      messagesOffset = Math.max(0, Number(offset) || 0);
+      setFilterLoading('#chat-filter-loading', true);
+      try {
+        const data = await apiFetch(`/chat/messages?chat_id=${encodeURIComponent(chatId)}&limit=${MESSAGES_LIMIT}&offset=${messagesOffset}`);
+        const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+        messagesTotal = Number(data?.total || items.length || 0);
+        renderMessages(items);
+        updateMessagesPaging();
+      } catch (e) {
+        messagesTotal = 0;
+        renderMessages([]);
+        updateMessagesPaging();
+        alertBox('danger', `${I18N.alert.loadMessagesFailed}: ${e.message}`);
+      } finally {
+        setFilterLoading('#chat-filter-loading', false);
+      }
+    }
+
+    async function sendMessage() {
+      if (!selectedSubscriber) {
+        alertBox('warning', I18N.alert.selectSubscriberFirst);
+        return;
+      }
+      const text = $('#chat-input').val().trim();
+      if (!text) {
+        alertBox('warning', I18N.alert.emptyMessage);
+        return;
+      }
+
+      const $btn = $('#chat-send-btn');
+      $btn.prop('disabled', true);
+      try {
+        await apiFetch(`/chat/messages`, {
+          method: 'POST',
+          body: JSON.stringify({ chat_id: Number(selectedSubscriber.chat_id), text }),
+        });
+        $('#chat-input').val('');
+        alertBox('success', I18N.alert.sendMessageSuccess);
+        await loadMessages(selectedSubscriber.chat_id, 0);
+      } catch (e) {
+        alertBox('danger', `${I18N.alert.sendMessageFailed}: ${e.message}`);
+      } finally {
+        $btn.prop('disabled', false);
+      }
+    }
+
+    $(function () {
+      applyI18N();
+      renderMessages([]);
+
+      const debouncedSearchSubscribers = debounce(loadSubscribers, 300);
+
+      $('#refresh-all').on('click', () => loadSubscribers(0));
+      $('#refresh-chat').on('click', () => {
+        if (selectedSubscriber) loadMessages(selectedSubscriber.chat_id, messagesOffset);
+      });
+
+      $('#subscriber-query').on('input', debouncedSearchSubscribers);
+      $('#clear-subscriber-query').on('click', () => {
+        $('#subscriber-query').val('');
+        loadSubscribers(0);
+      });
+
+      $('#subscribers-list').on('click', '.subscriber-item', async function () {
+        const chatId = $(this).data('chat-id');
+        const found = subscribers.find((s) => Number(s.chat_id) === Number(chatId));
+        if (!found) return;
+        selectedSubscriber = found;
+        renderSubscribers();
+        await loadMessages(chatId, 0);
+      });
+
+      $('#chat-send-form').on('submit', async (e) => {
+        e.preventDefault();
+        await sendMessage();
+      });
+      $('#subscribers-prev').on('click', () => {
+        if (subscribersOffset <= 0) return;
+        loadSubscribers(Math.max(0, subscribersOffset - SUBSCRIBERS_LIMIT));
+      });
+
+      $('#subscribers-next').on('click', () => {
+        if (subscribersOffset + SUBSCRIBERS_LIMIT >= subscribersTotal) return;
+        loadSubscribers(subscribersOffset + SUBSCRIBERS_LIMIT);
+      });
+
+      $('#messages-prev').on('click', () => {
+        if (!selectedSubscriber || messagesOffset + MESSAGES_LIMIT >= messagesTotal) return;
+        loadMessages(selectedSubscriber.chat_id, messagesOffset + MESSAGES_LIMIT);
+      });
+
+      $('#messages-next').on('click', () => {
+        if (!selectedSubscriber || messagesOffset <= 0) return;
+        loadMessages(selectedSubscriber.chat_id, Math.max(0, messagesOffset - MESSAGES_LIMIT));
+      });
+
+      updateSubscribersPaging();
+      updateMessagesPaging();
+      loadSubscribers(0);
+    });
+  </script>
+</body>
+</html>
