@@ -317,6 +317,7 @@ async fn shop_handle_callback(
                         "🔕 Đã tắt thông báo sản phẩm mới lên kho.",
                     ),
                 )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                 .await?;
         }
     } else if data == "start:shop" {
@@ -439,6 +440,7 @@ async fn shop_handle_callback(
                                     "File stock is currently out. Please choose another product.",
                                 ),
                             )
+                            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                             .await?;
                         return Ok(());
                     }
@@ -563,6 +565,7 @@ async fn shop_handle_callback(
                         "Session expired. Please type /shop to buy again.",
                     ),
                 )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                 .await?;
         }
     } else if data.starts_with("plan:") {
@@ -583,6 +586,7 @@ async fn shop_handle_callback(
                                     "This plan is invalid for this product.",
                                 ),
                             )
+                            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                             .await?;
                     } else {
                         dialogue
@@ -618,6 +622,7 @@ async fn shop_handle_callback(
                                     ],
                                 ),
                             )
+                            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                             .await?;
                     }
                 } else {
@@ -626,6 +631,7 @@ async fn shop_handle_callback(
                             msg.chat().id,
                             tl(&ctx, &lang, "plan_not_found", "Plan does not exist."),
                         )
+                        .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                         .await?;
                 }
             }
@@ -640,6 +646,7 @@ async fn shop_handle_callback(
                         "Session expired. Please type /shop to try again.",
                     ),
                 )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                 .await?;
         }
     } else if let Some(order_id) = data.strip_prefix("cancel:") {
@@ -655,6 +662,7 @@ async fn shop_handle_callback(
                         msg.chat().id,
                         tl(&ctx, &lang, "order_not_found", "Order not found."),
                     )
+                    .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(());
             };
@@ -669,6 +677,7 @@ async fn shop_handle_callback(
                             "You cannot cancel this order.",
                         ),
                     )
+                    .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(());
             }
@@ -683,6 +692,7 @@ async fn shop_handle_callback(
                             "This order is already paid and cannot be cancelled.",
                         ),
                     )
+                    .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(());
             }
@@ -707,6 +717,7 @@ async fn shop_handle_callback(
                     msg.chat().id,
                     tl(&ctx, &lang, "order_cancelled", "Order has been cancelled."),
                 )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                 .await?;
             send_products(ctx.clone(), ctx.bot.clone(), msg.chat().id, 0, None, &lang).await?;
         }
@@ -731,6 +742,7 @@ async fn shop_handle_callback(
                     "Invalid action. Please try again.",
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
     }
 
@@ -767,6 +779,7 @@ async fn handle_crypto_callback(
                     "Invalid payment action.",
                 ),
             )
+            .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
             .await?;
     }
     Ok(())
@@ -821,6 +834,7 @@ async fn handle_binance_checkout(
                         &[("error", err.to_string())],
                     ),
                 )
+                .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
                 .await?;
         }
     }
@@ -872,6 +886,7 @@ async fn handle_bep20_checkout(
                         &[("error", err.to_string())],
                     ),
                 )
+                .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
                 .await?;
         }
     }
@@ -926,6 +941,17 @@ fn build_crypto_payment_keyboard(
     ])
 }
 
+fn crypto_action_result_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
+    shop_action_result_keyboard(ctx, lang)
+}
+
+fn shop_action_result_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        i18n::inline_button_callback(ctx, lang, "shop_back_btn", "⬅️ Quay lại", "start:shop"),
+        i18n::inline_button_callback(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
+    ]])
+}
+
 enum CryptoCopyField {
     Address,
     Amount,
@@ -950,6 +976,7 @@ async fn handle_crypto_copy(
                     "Payment request not found.",
                 ),
             )
+            .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     };
@@ -982,6 +1009,7 @@ async fn handle_crypto_check(
                     "Payment request not found.",
                 ),
             )
+            .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     };
@@ -993,7 +1021,10 @@ async fn handle_crypto_check(
     {
         match sync_binance_payment(ctx.clone(), &payment).await {
             Ok(Some(message)) => {
-                ctx.bot.send_message(chat_id, message).await?;
+                ctx.bot
+                    .send_message(chat_id, message)
+                    .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
+                    .await?;
                 return Ok(());
             }
             Ok(None) => {}
@@ -1009,6 +1040,7 @@ async fn handle_crypto_check(
                             &[("error", err.to_string())],
                         ),
                     )
+                    .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(());
             }
@@ -1055,7 +1087,10 @@ async fn handle_crypto_check(
             "Payment is under manual review. Please wait for admin support.",
         ),
     };
-    ctx.bot.send_message(chat_id, message).await?;
+    ctx.bot
+        .send_message(chat_id, message)
+        .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
+        .await?;
     Ok(())
 }
 
@@ -1099,6 +1134,7 @@ async fn handle_crypto_cancel(
                     "Payment request not found.",
                 ),
             )
+            .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     };
@@ -1119,6 +1155,7 @@ async fn handle_crypto_cancel(
                     "Only pending payment requests can be cancelled.",
                 ),
             )
+            .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1143,6 +1180,7 @@ async fn handle_crypto_cancel(
                     )
                 },
             )
+            .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1166,6 +1204,7 @@ async fn handle_crypto_cancel(
                 )
             },
         )
+        .reply_markup(crypto_action_result_keyboard(&ctx, &lang))
         .await?;
     Ok(())
 }
@@ -1248,6 +1287,7 @@ async fn handle_pay_with_wallet(
                 chat_id,
                 tl(&ctx, &lang, "order_not_found", "Order not found."),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     };
@@ -1263,6 +1303,7 @@ async fn handle_pay_with_wallet(
                     "You cannot pay this order.",
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1278,6 +1319,7 @@ async fn handle_pay_with_wallet(
                     "⚠️ This order is no longer waiting for payment.",
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1299,6 +1341,7 @@ async fn handle_pay_with_wallet(
                     ],
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1431,6 +1474,7 @@ async fn handle_qty_message(
                     "Invalid quantity. Enter 1..999.",
                 ),
             )
+            .reply_markup(quantity_keyboard(&ctx, &lang, false))
             .await?;
         return Ok(());
     }
@@ -1455,6 +1499,7 @@ async fn handle_qty_chosen(
                 chat_id,
                 tl(&ctx, lang, "product_not_found", "Product does not exist."),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, lang))
             .await?;
         dialogue.update(State::Idle).await?;
         return Ok(());
@@ -1487,6 +1532,7 @@ async fn handle_qty_chosen(
                     &[("prompt", prompt.clone())],
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, lang))
             .await?;
         return Ok(());
     }
@@ -1520,6 +1566,7 @@ async fn handle_info_message(
                     "Information cannot be empty. Please enter it again (example: email).",
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1535,6 +1582,7 @@ async fn handle_info_message(
                     "Information is too long (maximum 200 characters).",
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1568,12 +1616,14 @@ pub(crate) async fn send_products(
                 msg_id,
                 tl(&ctx, lang, "no_products", "There are no products yet."),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, lang))
             .await?;
         } else {
             bot.send_message(
                 chat_id,
                 tl(&ctx, lang, "no_products", "There are no products yet."),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, lang))
             .await?;
         }
         return Ok(());
@@ -1836,6 +1886,7 @@ async fn process_order(
                     "Cannot identify user. Please try again later.",
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1848,6 +1899,7 @@ async fn process_order(
                     chat_id,
                     tl(&ctx, &lang, "not_found_product", "Product does not exist."),
                 )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                 .await?;
             return Ok(());
         }
@@ -1889,6 +1941,7 @@ async fn process_order(
                     &[("prompt", prompt.clone())],
                 ),
             )
+            .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1918,6 +1971,7 @@ async fn process_order(
                             "This plan is invalid for this product.",
                         ),
                     )
+                    .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(());
             }
@@ -1932,6 +1986,7 @@ async fn process_order(
                     chat_id,
                     tl(&ctx, &lang, "plan_not_found", "Plan does not exist."),
                 )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                 .await?;
             return Ok(());
         }
@@ -3730,6 +3785,38 @@ mod tests {
         assert!(callbacks.contains(&"start:shop"));
     }
 
+    #[tokio::test]
+    async fn crypto_action_result_keyboard_has_back_to_shop() {
+        let ctx = test_ctx();
+        let keyboard = crypto_action_result_keyboard(&ctx, "vi");
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let rows = json["inline_keyboard"].as_array().unwrap();
+        let callbacks = rows
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(callbacks.contains(&"start:shop"));
+        assert!(callbacks.contains(&"start:wallet"));
+    }
+
+    #[tokio::test]
+    async fn shop_action_result_keyboard_has_back_to_shop_and_wallet() {
+        let ctx = test_ctx();
+        let keyboard = shop_action_result_keyboard(&ctx, "vi");
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let rows = json["inline_keyboard"].as_array().unwrap();
+        let callbacks = rows
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(callbacks.contains(&"start:shop"));
+        assert!(callbacks.contains(&"start:wallet"));
+    }
+
     #[test]
     fn legacy_continue_shopping_callback_is_routed_to_shop() {
         assert!(is_shop_callback_data("shopnew:0"));
@@ -4075,6 +4162,7 @@ impl AppPlugin for ShopCommandPlugin {
                             "📅 Choose a plan/month using the buttons below to continue.",
                         ),
                     )
+                    .reply_markup(shop_action_result_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(true);
             }

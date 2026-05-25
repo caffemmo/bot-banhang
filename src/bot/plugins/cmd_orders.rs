@@ -48,7 +48,9 @@ pub async fn send_orders(
             &lang,
             "You do not have any successful orders yet.",
         );
-        i18n::send_message_for_key(&ctx, chat_id, "no_orders", text).await?;
+        bot.send_message(chat_id, text)
+            .reply_markup(orders_empty_keyboard())
+            .await?;
         return Ok(());
     }
 
@@ -120,6 +122,13 @@ fn order_not_found_keyboard() -> InlineKeyboardMarkup {
             "start:shop",
         )],
     ])
+}
+
+fn orders_empty_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "🛒 Xem sản phẩm",
+        "start:shop",
+    )]])
 }
 
 fn order_button_label(order: &OrderWithProduct) -> String {
@@ -268,9 +277,15 @@ async fn show_orders_history(
             "You do not have any successful orders yet.",
         );
         if let Some(message_id) = message_id {
-            ctx.bot.edit_message_text(chat_id, message_id, text).await?;
+            ctx.bot
+                .edit_message_text(chat_id, message_id, text)
+                .reply_markup(orders_empty_keyboard())
+                .await?;
         } else {
-            i18n::send_message_for_key(ctx, chat_id, "no_orders", text).await?;
+            ctx.bot
+                .send_message(chat_id, text)
+                .reply_markup(orders_empty_keyboard())
+                .await?;
         }
         return Ok(());
     }
@@ -324,7 +339,10 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
         } else {
             "⚠️ Chưa cấu hình Telegram admin ID để nhận hỗ trợ."
         };
-        ctx.bot.send_message(chat_id, text).await?;
+        ctx.bot
+            .send_message(chat_id, text)
+            .reply_markup(order_not_found_keyboard())
+            .await?;
         return Ok(());
     }
 
@@ -399,6 +417,7 @@ impl AppPlugin for OrdersCommandPlugin {
             if order_id.is_empty() {
                 ctx.bot
                     .send_message(msg.chat.id, "Dùng: /order <order_id>")
+                    .reply_markup(orders_empty_keyboard())
                     .await?;
                 return Ok(true);
             }
@@ -528,6 +547,20 @@ mod tests {
 
         assert_eq!(last_row[0]["text"], "⬅️ Quay lại");
         assert_eq!(last_row[0]["callback_data"], "start:shop");
+    }
+
+    #[test]
+    fn orders_empty_keyboard_has_back_to_shop() {
+        let keyboard = orders_empty_keyboard();
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let rows = json["inline_keyboard"].as_array().unwrap();
+        let callbacks = rows
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(callbacks.contains(&"start:shop"));
     }
 
     #[test]

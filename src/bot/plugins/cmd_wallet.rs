@@ -353,6 +353,8 @@ impl AppPlugin for WalletCommandPlugin {
             || data.starts_with("topupamt:")
             || data.starts_with("topupusdtamt:")
             || data.starts_with("topupbinanceamt:")
+            || data.starts_with("wallettopupcheck:")
+            || data.starts_with("wallettopupcancel:")
             || data.starts_with("walletbinancecheck:")
             || data.starts_with("walletbinancecancel:")
             || data.starts_with("canceltopup:")
@@ -555,6 +557,10 @@ async fn handle_wallet_callback(
             let amount: i64 = amount_str.parse().unwrap_or(0);
             process_binance_topup_amount(ctx, chat_id, user_id, amount, dialogue).await?;
         }
+    } else if let Some(payment_id) = data.strip_prefix("wallettopupcheck:") {
+        handle_wallet_crypto_topup_check(ctx, chat_id, user_id, payment_id, false).await?;
+    } else if let Some(payment_id) = data.strip_prefix("wallettopupcancel:") {
+        handle_wallet_crypto_topup_cancel(ctx, chat_id, user_id, payment_id, false).await?;
     } else if let Some(payment_id) = data.strip_prefix("walletbinancecheck:") {
         handle_binance_topup_check(ctx, chat_id, user_id, payment_id).await?;
     } else if let Some(payment_id) = data.strip_prefix("walletbinancecancel:") {
@@ -759,6 +765,7 @@ async fn process_topup_amount(
                     "⚠️ Receiving bank account is not configured. Please contact admin.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -852,6 +859,7 @@ async fn process_usdt_topup_amount(
                         &[("error", err.to_string())],
                     ),
                 )
+                .reply_markup(wallet_back_keyboard(ctx, &lang))
                 .await?;
         }
     }
@@ -901,6 +909,7 @@ async fn process_binance_topup_amount(
                         &[("error", err.to_string())],
                     ),
                 )
+                .reply_markup(wallet_back_keyboard(ctx, &lang))
                 .await?;
         }
     }
@@ -930,8 +939,66 @@ async fn send_usdt_topup_instructions(
     ctx.bot
         .send_message(chat_id, text)
         .parse_mode(ParseMode::Html)
+        .reply_markup(wallet_crypto_topup_keyboard(ctx, lang, payment.id, true))
         .await?;
     Ok(())
+}
+
+fn wallet_back_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        i18n::t(ctx, lang, "wallet_btn_back", "⬅️ Back"),
+        "start:wallet",
+    )]])
+}
+
+fn wallet_crypto_topup_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    payment_id: i64,
+    allow_check: bool,
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if allow_check {
+        rows.push(vec![
+            InlineKeyboardButton::callback(
+                i18n::t(ctx, lang, "check_crypto_btn", "Check payment"),
+                format!("wallettopupcheck:{payment_id}"),
+            ),
+            InlineKeyboardButton::callback(
+                i18n::t(ctx, lang, "cancel_crypto_btn", "Cancel USDT"),
+                format!("wallettopupcancel:{payment_id}"),
+            ),
+        ]);
+    } else {
+        rows.push(vec![InlineKeyboardButton::callback(
+            i18n::t(ctx, lang, "cancel_crypto_btn", "Cancel USDT"),
+            format!("wallettopupcancel:{payment_id}"),
+        )]);
+    }
+    rows.push(vec![InlineKeyboardButton::callback(
+        i18n::t(ctx, lang, "wallet_btn_back", "⬅️ Back"),
+        "start:wallet",
+    )]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn topup_cancelled_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback(
+                i18n::t(ctx, lang, "wallet_btn_topup_again", "💰 Top up again"),
+                "wallet:topup",
+            ),
+            InlineKeyboardButton::callback(
+                i18n::t(ctx, lang, "wallet_btn_back", "⬅️ Back"),
+                "start:wallet",
+            ),
+        ],
+        vec![InlineKeyboardButton::callback(
+            i18n::t(ctx, lang, "start_btn_shop", "🛒 Shop"),
+            "start:shop",
+        )],
+    ])
 }
 
 async fn send_binance_topup_instructions(
@@ -957,20 +1024,10 @@ async fn send_binance_topup_instructions(
             ("expires_at", payment.expires_at.clone()),
         ],
     );
-    let keyboard = InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback(
-            i18n::t(ctx, lang, "check_crypto_btn", "Check payment"),
-            format!("walletbinancecheck:{}", payment.id),
-        ),
-        InlineKeyboardButton::callback(
-            i18n::t(ctx, lang, "cancel_crypto_btn", "Cancel USDT"),
-            format!("walletbinancecancel:{}", payment.id),
-        ),
-    ]]);
     ctx.bot
         .send_message(chat_id, text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(keyboard)
+        .reply_markup(wallet_crypto_topup_keyboard(ctx, lang, payment.id, true))
         .await?;
     Ok(())
 }
@@ -980,6 +1037,16 @@ async fn handle_binance_topup_check(
     chat_id: teloxide::types::ChatId,
     user_id: i64,
     payment_id: &str,
+) -> Result<()> {
+    handle_wallet_crypto_topup_check(ctx, chat_id, user_id, payment_id, true).await
+}
+
+async fn handle_wallet_crypto_topup_check(
+    ctx: &Arc<AppContext>,
+    chat_id: teloxide::types::ChatId,
+    user_id: i64,
+    payment_id: &str,
+    require_binance: bool,
 ) -> Result<()> {
     let lang = i18n::user_lang_by_id(ctx, user_id).await;
     let Some(payment) = wallet_crypto_payment_for_user(ctx, payment_id, user_id, chat_id.0).await?
@@ -994,10 +1061,13 @@ async fn handle_binance_topup_check(
                     "Payment request not found.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     };
-    if payment.method != CryptoPaymentMethod::BinancePay || payment.purpose != "wallet_topup" {
+    if payment.purpose != "wallet_topup"
+        || (require_binance && payment.method != CryptoPaymentMethod::BinancePay)
+    {
         ctx.bot
             .send_message(
                 chat_id,
@@ -1008,6 +1078,7 @@ async fn handle_binance_topup_check(
                     "Invalid payment action.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1020,28 +1091,33 @@ async fn handle_binance_topup_check(
                 chat_id,
                 wallet_crypto_status_message(ctx, &lang, &payment, true),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
 
-    if let Err(err) = binance_worker::run_binance_pay_tick(ctx.clone()).await {
-        warn!(
-            "on-demand Binance Pay note scan failed for {}: {err}",
-            payment.id
-        );
-    }
-    let refreshed = crypto_repo::find_crypto_payment_by_id(&ctx.pool, payment.id)
-        .await?
-        .unwrap_or(payment);
+    let refreshed = if payment.method == CryptoPaymentMethod::BinancePay {
+        if let Err(err) = binance_worker::run_binance_pay_tick(ctx.clone()).await {
+            warn!(
+                "on-demand Binance Pay note scan failed for {}: {err}",
+                payment.id
+            );
+        }
+        crypto_repo::find_crypto_payment_by_id(&ctx.pool, payment.id)
+            .await?
+            .unwrap_or(payment)
+    } else {
+        payment
+    };
     let message = if refreshed.status == CryptoPaymentStatus::Completed {
         i18n::tr(
             ctx,
             &lang,
             "topup_binance_completed",
-            "Binance Pay top-up completed. Wallet credited: {amount}.",
+            "Payment completed. Wallet credited: {amount}.",
             &[("amount", format_vnd(refreshed.amount_vnd))],
         )
-    } else {
+    } else if refreshed.method == CryptoPaymentMethod::BinancePay {
         i18n::tr(
             ctx,
             &lang,
@@ -1049,8 +1125,13 @@ async fn handle_binance_topup_check(
             "Hệ thống chưa thấy giao dịch Binance Pay khớp mã {memo}.\nVui lòng kiểm tra đã nhập đúng ghi chú và đúng số USDT.",
             &[("memo", refreshed.memo.clone())],
         )
+    } else {
+        wallet_crypto_status_message(ctx, &lang, &refreshed, true)
     };
-    ctx.bot.send_message(chat_id, message).await?;
+    ctx.bot
+        .send_message(chat_id, message)
+        .reply_markup(wallet_back_keyboard(ctx, &lang))
+        .await?;
     Ok(())
 }
 
@@ -1059,6 +1140,16 @@ async fn handle_binance_topup_cancel(
     chat_id: teloxide::types::ChatId,
     user_id: i64,
     payment_id: &str,
+) -> Result<()> {
+    handle_wallet_crypto_topup_cancel(ctx, chat_id, user_id, payment_id, true).await
+}
+
+async fn handle_wallet_crypto_topup_cancel(
+    ctx: &Arc<AppContext>,
+    chat_id: teloxide::types::ChatId,
+    user_id: i64,
+    payment_id: &str,
+    require_binance: bool,
 ) -> Result<()> {
     let lang = i18n::user_lang_by_id(ctx, user_id).await;
     let Some(payment) = wallet_crypto_payment_for_user(ctx, payment_id, user_id, chat_id.0).await?
@@ -1073,11 +1164,12 @@ async fn handle_binance_topup_cancel(
                     "Payment request not found.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     };
-    if payment.method != CryptoPaymentMethod::BinancePay
-        || payment.purpose != "wallet_topup"
+    if payment.purpose != "wallet_topup"
+        || (require_binance && payment.method != CryptoPaymentMethod::BinancePay)
         || !matches!(payment.status, CryptoPaymentStatus::Pending)
     {
         ctx.bot
@@ -1090,6 +1182,7 @@ async fn handle_binance_topup_cancel(
                     "Only pending payment requests can be cancelled.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1113,6 +1206,7 @@ async fn handle_binance_topup_cancel(
                 )
             },
         )
+        .reply_markup(topup_cancelled_keyboard(ctx, &lang))
         .await?;
     Ok(())
 }
@@ -1302,6 +1396,7 @@ async fn handle_cancel_topup(
                     "⚠️ Top-up request was not found.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     };
@@ -1317,6 +1412,7 @@ async fn handle_cancel_topup(
                     "⚠️ You cannot cancel this request.",
                 ),
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1341,6 +1437,7 @@ async fn handle_cancel_topup(
                     )
                 },
             )
+            .reply_markup(wallet_back_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -1353,16 +1450,7 @@ async fn handle_cancel_topup(
         "topup_cancelled",
         "✅ Top-up request has been cancelled.",
     );
-    let keyboard = InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback(
-            i18n::t(ctx, &lang, "wallet_btn_topup_again", "💰 Top up again"),
-            "wallet:topup",
-        ),
-        InlineKeyboardButton::callback(
-            i18n::t(ctx, &lang, "start_btn_shop", "🛒 Shop"),
-            "start:shop",
-        ),
-    ]]);
+    let keyboard = topup_cancelled_keyboard(ctx, &lang);
 
     let edit_result = ctx
         .bot
@@ -1640,5 +1728,36 @@ mod tests {
         let last_row = rows.last().unwrap().as_array().unwrap();
 
         assert_eq!(last_row[0]["callback_data"], "wallet:show");
+    }
+
+    #[tokio::test]
+    async fn wallet_crypto_topup_keyboard_has_back_to_wallet() {
+        let ctx = test_ctx();
+        let keyboard = wallet_crypto_topup_keyboard(&ctx, "vi", 9, true);
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let rows = json["inline_keyboard"].as_array().unwrap();
+        let callbacks = rows
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(callbacks.contains(&"start:wallet"));
+    }
+
+    #[tokio::test]
+    async fn topup_cancelled_keyboard_has_back_to_wallet() {
+        let ctx = test_ctx();
+        let keyboard = topup_cancelled_keyboard(&ctx, "vi");
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let rows = json["inline_keyboard"].as_array().unwrap();
+        let callbacks = rows
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(callbacks.contains(&"start:wallet"));
+        assert!(callbacks.contains(&"start:shop"));
     }
 }
