@@ -16,6 +16,27 @@ if [ ! -d "$MASTER_DIR" ] || [ ! -f "$MASTER_DIR/botbanhang" ]; then
     exit 1
 fi
 
+generate_hex() {
+    local bytes="$1"
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex "$bytes"
+    else
+        od -An -N"$bytes" -tx1 /dev/urandom | tr -d ' \n'
+        echo
+    fi
+}
+
+generate_digits() {
+    local len="$1"
+    local out=""
+    local chunk
+    while [ "${#out}" -lt "$len" ]; do
+        chunk=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%010u", $1}')
+        out="${out}${chunk}"
+    done
+    printf "%s\n" "${out:0:$len}"
+}
+
 read -r -p "Nhập phần tên phụ cho bot mới (ví dụ nhập 'shop2' sẽ tạo 'botbanhang_shop2'): " SUFFIX
 if [[ ! "$SUFFIX" =~ ^[a-zA-Z0-9_-]+$ ]]; then
     echo "Lỗi: Tên không hợp lệ. Chỉ sử dụng chữ cái, số, dấu gạch dưới (_) và dấu gạch ngang (-)."
@@ -51,12 +72,20 @@ DATABASE_URL=${DATABASE_URL:-sqlite://shop.db}
 
 read -r -p "Nhập ADMIN_SETUP_CODE (Mã cài đặt Admin) [Mặc định: ngẫu nhiên 9 số]: " ADMIN_SETUP_CODE
 if [ -z "$ADMIN_SETUP_CODE" ]; then
-    ADMIN_SETUP_CODE=$(tr -dc '0-9' < /dev/urandom | fold -w 9 | head -n 1)
+    ADMIN_SETUP_CODE=$(generate_digits 9)
+fi
+if [ "${#ADMIN_SETUP_CODE}" -lt 8 ]; then
+    echo "Lỗi: ADMIN_SETUP_CODE phải có ít nhất 8 ký tự."
+    exit 1
 fi
 
 read -r -p "Nhập ADMIN_JWT_SECRET (Mã bảo mật JWT) [Mặc định: ngẫu nhiên 32 ký tự]: " ADMIN_JWT_SECRET
 if [ -z "$ADMIN_JWT_SECRET" ]; then
-    ADMIN_JWT_SECRET=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w 32 | head -n 1)
+    ADMIN_JWT_SECRET=$(generate_hex 16)
+fi
+if [ "${#ADMIN_JWT_SECRET}" -lt 32 ]; then
+    echo "Lỗi: ADMIN_JWT_SECRET phải có ít nhất 32 ký tự."
+    exit 1
 fi
 
 echo "==> Đang tạo cấu trúc thư mục tại $TARGET_DIR..."
@@ -72,10 +101,11 @@ if [ -d "$MASTER_DIR/i18n" ]; then
 fi
 
 echo "==> Đang tạo file cấu hình .env..."
+WEBHOOK_SECRET=$(generate_hex 32)
 cat <<EOF > "$TARGET_DIR/.env"
 TELOXIDE_TOKEN=$TELOXIDE_TOKEN
 DATABASE_URL=$DATABASE_URL
-WEBHOOK_SECRET=$(tr -dc 'a-f0-9' < /dev/urandom | fold -w 64 | head -n 1)
+WEBHOOK_SECRET=$WEBHOOK_SECRET
 PORT=$PORT
 LOG_LEVEL=info
 ADMIN_JWT_SECRET=$ADMIN_JWT_SECRET
