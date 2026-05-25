@@ -37,10 +37,14 @@ Bot chạy long-polling; server Axum mở cổng PORT (mặc định 8080).
 
 ## Webhook thanh toán (mẫu)
 
+URL webhook SePay: `https://<domain-cua-ban>/webhook/payment`.
+Trong UI SePay chỉ nhập giá trị `WEBHOOK_SECRET`, không nhập thêm chữ `Apikey`.
+Backend nhận cả `Authorization: <WEBHOOK_SECRET>`, `Authorization: Apikey <WEBHOOK_SECRET>` và header cũ `X-Webhook-Secret`.
+
 ```bash
 curl -X POST http://localhost:8080/webhook/payment \
   -H "Content-Type: application/json" \
-  -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  -H "Authorization: $WEBHOOK_SECRET" \
   -d '{"memo":"MEMO123","amount":50000,"status":"paid","tx_id":"TX123"}'
 ```
 

@@ -437,6 +437,7 @@ fn authorize_webhook(ctx: &AppContext, headers: &HeaderMap) -> bool {
     // Support both legacy header and SePay-style API key header.
     // - Legacy: X-Webhook-Secret: <secret>
     // - SePay:  Authorization: Apikey <secret>
+    // - SePay UI key field: Authorization: <secret>
 
     // SePay-style
     if let Some(auth) = headers
@@ -444,14 +445,17 @@ fn authorize_webhook(ctx: &AppContext, headers: &HeaderMap) -> bool {
         .and_then(|v| v.to_str().ok())
     {
         let auth = auth.trim();
-        // accept: "Apikey <key>" (case-insensitive prefix)
-        if let Some(rest) = auth
-            .strip_prefix("Apikey ")
-            .or_else(|| auth.strip_prefix("APIKEY "))
-            .or_else(|| auth.strip_prefix("apikey "))
-            && rest.trim() == ctx.config.webhook_secret
-        {
+        if auth == ctx.config.webhook_secret {
             return true;
+        }
+
+        // Accept: "Apikey <key>" with any casing for the scheme.
+        if let Some((scheme, secret)) = auth.split_once(char::is_whitespace) {
+            if scheme.eq_ignore_ascii_case("apikey")
+                && secret.trim() == ctx.config.webhook_secret
+            {
+                return true;
+            }
         }
     }
 
@@ -936,6 +940,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn authorize_webhook_accepts_bare_authorization_secret() {
+        let ctx = test_ctx();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "webhook-secret".parse().unwrap(),
+        );
+
+        assert!(authorize_webhook(&ctx, &headers));
     }
 
     async fn test_pool() -> SqlitePool {

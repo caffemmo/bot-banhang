@@ -78,7 +78,7 @@ nano .env
 Các biến quan trọng:
 - `TELOXIDE_TOKEN`: token bot Telegram
 - `DATABASE_URL`: mặc định `sqlite://shop.db`
-- `WEBHOOK_SECRET`: secret để SePay gọi webhook (header `Authorization: Apikey <secret>`)
+- `WEBHOOK_SECRET`: secret để SePay gọi webhook. Trong UI SePay chỉ nhập giá trị secret, không nhập thêm chữ `Apikey`.
 - `ADMIN_JWT_SECRET`: secret ký JWT cho phiên admin, tối thiểu 32 ký tự ngẫu nhiên
 - `ADMIN_SETUP_CODE`: mã bí mật để tạo admin đầu tiên, tạo admin mới và đổi mật khẩu admin
 - `ADMIN_COOKIE_SECURE`: đặt `true` khi chạy HTTPS production
@@ -133,7 +133,8 @@ Test nhanh:
 ### SePay gọi webhook
 
 - URL: `POST /webhook/payment`
-- Header auth: `Authorization: Apikey <WEBHOOK_SECRET>`
+- Header auth backend nhận cả `Authorization: <WEBHOOK_SECRET>` và `Authorization: Apikey <WEBHOOK_SECRET>`.
+- Khi cấu hình trong UI SePay, nhập mỗi giá trị `WEBHOOK_SECRET`; không nhập chữ `Apikey`.
 - Body JSON: theo format SePay (ví dụ):
 
 ```json
@@ -162,7 +163,7 @@ Lưu ý quan trọng:
 ```bash
 curl -X POST http://localhost:8080/webhook/payment \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Apikey $WEBHOOK_SECRET" \
+  -H "Authorization: $WEBHOOK_SECRET" \
   -d '{
     "id": 1,
     "gateway": "Vietcombank",
