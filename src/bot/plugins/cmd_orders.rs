@@ -14,15 +14,6 @@ use crate::domains::users::repo as users_repo;
 
 pub struct OrdersCommandPlugin;
 
-fn format_status(status: &OrderStatus) -> &'static str {
-    match status {
-        OrderStatus::Pending => "pending",
-        OrderStatus::Paid => "paid",
-        OrderStatus::Cancel => "cancel",
-        OrderStatus::Expired => "expired",
-    }
-}
-
 pub async fn send_orders(
     ctx: Arc<AppContext>,
     bot: teloxide::Bot,
@@ -49,24 +40,33 @@ pub async fn send_orders(
             "You do not have any successful orders yet.",
         );
         bot.send_message(chat_id, text)
-            .reply_markup(orders_empty_keyboard())
+            .reply_markup(orders_empty_keyboard(&ctx, &lang))
             .await?;
         return Ok(());
     }
 
-    let text = order_history_text(&lang);
-    let keyboard = order_history_keyboard(&orders, &lang);
+    let text = order_history_text(&ctx, &lang);
+    let keyboard = order_history_keyboard(&ctx, &lang, &orders);
     bot.send_message(chat_id, text)
         .reply_markup(keyboard)
         .await?;
     Ok(())
 }
 
-fn order_history_text(_lang: &str) -> String {
-    "🧾 LỊCH SỬ MUA HÀNG\n\nChọn mã đơn bên dưới để xem chi tiết.".to_string()
+fn order_history_text(ctx: &AppContext, lang: &str) -> String {
+    i18n::t(
+        ctx,
+        lang,
+        "orders_history_text",
+        "🧾 LỊCH SỬ MUA HÀNG\n\nChọn mã đơn bên dưới để xem chi tiết.",
+    )
 }
 
-fn order_history_keyboard(orders: &[OrderWithProduct], _lang: &str) -> InlineKeyboardMarkup {
+fn order_history_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    orders: &[OrderWithProduct],
+) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     for order in orders
         .iter()
@@ -77,7 +77,10 @@ fn order_history_keyboard(orders: &[OrderWithProduct], _lang: &str) -> InlineKey
             format!("order:{}", order.order.id),
         )]);
     }
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "orders_back_shop_btn",
         "⬅️ Quay lại",
         "start:shop",
     )]);
@@ -88,44 +91,69 @@ fn product_is_active(order: &OrderWithProduct) -> bool {
     order.product.is_active.unwrap_or(1) != 0
 }
 
-fn order_detail_keyboard(order: &OrderWithProduct) -> InlineKeyboardMarkup {
+fn order_detail_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    order: &OrderWithProduct,
+) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     if product_is_active(order) {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "order_rebuy_btn",
             "🛒 Mua lại sản phẩm này",
             format!("buy:{}", order.product.id),
         )]);
     }
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "order_support_btn",
         "💬 Hỗ trợ đơn này",
         format!("order_support:{}", order.order.id),
     )]);
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "orders_history_back_btn",
         "⬅️ Lịch sử mua hàng",
         "orders:list",
     )]);
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "orders_empty_shop_btn",
         "🛒 Xem sản phẩm",
         "start:shop",
     )]);
     InlineKeyboardMarkup::new(rows)
 }
 
-fn order_not_found_keyboard() -> InlineKeyboardMarkup {
+fn order_not_found_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback(
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "orders_history_back_btn",
             "⬅️ Lịch sử mua hàng",
             "orders:list",
         )],
-        vec![InlineKeyboardButton::callback(
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "orders_empty_shop_btn",
             "🛒 Xem sản phẩm",
             "start:shop",
         )],
     ])
 }
 
-fn orders_empty_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+fn orders_empty_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "orders_empty_shop_btn",
         "🛒 Xem sản phẩm",
         "start:shop",
     )]])
@@ -136,15 +164,51 @@ fn order_button_label(order: &OrderWithProduct) -> String {
     format!("{} — {}", order.order.id, product_name)
 }
 
-fn format_order_detail_text(order: &OrderWithProduct) -> String {
+fn order_detail_line(
+    ctx: &AppContext,
+    lang: &str,
+    key: &str,
+    default_label: &str,
+    value: impl std::fmt::Display,
+) -> String {
+    format!("{}: {}", i18n::t(ctx, lang, key, default_label), value)
+}
+
+fn format_status(ctx: &AppContext, lang: &str, status: &OrderStatus) -> String {
+    match status {
+        OrderStatus::Pending => i18n::t(ctx, lang, "order_status_pending", "pending"),
+        OrderStatus::Paid => i18n::t(ctx, lang, "order_status_paid", "paid"),
+        OrderStatus::Cancel => i18n::t(ctx, lang, "order_status_cancel", "cancel"),
+        OrderStatus::Expired => i18n::t(ctx, lang, "order_status_expired", "expired"),
+    }
+}
+
+fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProduct) -> String {
     let mut lines = vec![
-        "🧾 CHI TIẾT ĐƠN HÀNG".to_string(),
+        i18n::t(ctx, lang, "order_detail_title", "🧾 CHI TIẾT ĐƠN HÀNG"),
         String::new(),
-        format!("Mã đơn: {}", order.order.id),
-        format!("Sản phẩm: {}", order.product.name),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_id_label",
+            "Mã đơn",
+            &order.order.id,
+        ),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_product_label",
+            "Sản phẩm",
+            &order.product.name,
+        ),
     ];
     if !product_is_active(order) {
-        lines.push("Trạng thái sản phẩm: Sản phẩm đã ngừng bán".to_string());
+        lines.push(i18n::t(
+            ctx,
+            lang,
+            "order_detail_inactive_product",
+            "Trạng thái sản phẩm: Sản phẩm đã ngừng bán",
+        ));
     }
     if let Some(plan_label) = order
         .order
@@ -153,17 +217,56 @@ fn format_order_detail_text(order: &OrderWithProduct) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        lines.push(format!("Gói: {plan_label}"));
+        lines.push(order_detail_line(
+            ctx,
+            lang,
+            "order_detail_plan_label",
+            "Gói",
+            plan_label,
+        ));
     }
     lines.extend([
-        format!("Số lượng: {}", order.order.qty),
-        format!("Tổng tiền: {}", format_vnd(order.order.amount)),
-        format!("Trạng thái: {}", format_status(&order.order.status)),
-        format!("Nội dung chuyển khoản: {}", order.order.bank_memo),
-        format!("Thời gian tạo: {}", order.order.created_at),
-        format!(
-            "Thời gian thanh toán: {}",
-            order.order.paid_at.as_deref().unwrap_or("-")
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_qty_label",
+            "Số lượng",
+            order.order.qty,
+        ),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_amount_label",
+            "Tổng tiền",
+            format_vnd(order.order.amount),
+        ),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_status_label",
+            "Trạng thái",
+            format_status(ctx, lang, &order.order.status),
+        ),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_bank_memo_label",
+            "Nội dung chuyển khoản",
+            &order.order.bank_memo,
+        ),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_created_at_label",
+            "Thời gian tạo",
+            &order.order.created_at,
+        ),
+        order_detail_line(
+            ctx,
+            lang,
+            "order_detail_paid_at_label",
+            "Thời gian thanh toán",
+            order.order.paid_at.as_deref().unwrap_or("-"),
         ),
     ]);
     if let Some(tx_id) = order
@@ -173,7 +276,13 @@ fn format_order_detail_text(order: &OrderWithProduct) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        lines.push(format!("Mã giao dịch: {tx_id}"));
+        lines.push(order_detail_line(
+            ctx,
+            lang,
+            "order_detail_tx_id_label",
+            "Mã giao dịch",
+            tx_id,
+        ));
     }
     if let Some(customer_input) = order
         .order
@@ -182,7 +291,13 @@ fn format_order_detail_text(order: &OrderWithProduct) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        lines.push(format!("Thông tin đã nhập: {customer_input}"));
+        lines.push(order_detail_line(
+            ctx,
+            lang,
+            "order_detail_customer_input_label",
+            "Thông tin đã nhập",
+            customer_input,
+        ));
     }
     if let Some(delivered_data) = order
         .order
@@ -192,7 +307,15 @@ fn format_order_detail_text(order: &OrderWithProduct) -> String {
         .filter(|value| !value.is_empty())
     {
         lines.push(String::new());
-        lines.push("Dữ liệu giao hàng:".to_string());
+        lines.push(format!(
+            "{}:",
+            i18n::t(
+                ctx,
+                lang,
+                "order_detail_delivered_data_label",
+                "Dữ liệu giao hàng"
+            )
+        ));
         lines.push(delivered_data.to_string());
     }
     lines.join("\n")
@@ -279,18 +402,18 @@ async fn show_orders_history(
         if let Some(message_id) = message_id {
             ctx.bot
                 .edit_message_text(chat_id, message_id, text)
-                .reply_markup(orders_empty_keyboard())
+                .reply_markup(orders_empty_keyboard(ctx, lang))
                 .await?;
         } else {
             ctx.bot
                 .send_message(chat_id, text)
-                .reply_markup(orders_empty_keyboard())
+                .reply_markup(orders_empty_keyboard(ctx, lang))
                 .await?;
         }
         return Ok(());
     }
-    let text = order_history_text(lang);
-    let keyboard = order_history_keyboard(&orders, lang);
+    let text = order_history_text(ctx, lang);
+    let keyboard = order_history_keyboard(ctx, lang, &orders);
     if let Some(message_id) = message_id {
         ctx.bot
             .edit_message_text(chat_id, message_id, text)
@@ -329,7 +452,7 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
                     message_id,
                     ctx.get_text_lang("order_not_found", &lang, "Order not found."),
                 )
-                .reply_markup(order_not_found_keyboard())
+                .reply_markup(order_not_found_keyboard(ctx, &lang))
                 .await?;
             return Ok(());
         };
@@ -341,7 +464,7 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
         };
         ctx.bot
             .send_message(chat_id, text)
-            .reply_markup(order_not_found_keyboard())
+            .reply_markup(order_not_found_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
@@ -356,14 +479,18 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
                 message_id,
                 ctx.get_text_lang("order_not_found", &lang, "Order not found."),
             )
-            .reply_markup(order_not_found_keyboard())
+            .reply_markup(order_not_found_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     };
 
     ctx.bot
-        .edit_message_text(chat_id, message_id, format_order_detail_text(&order))
-        .reply_markup(order_detail_keyboard(&order))
+        .edit_message_text(
+            chat_id,
+            message_id,
+            format_order_detail_text(ctx, &lang, &order),
+        )
+        .reply_markup(order_detail_keyboard(ctx, &lang, &order))
         .await?;
     Ok(())
 }
@@ -416,8 +543,11 @@ impl AppPlugin for OrdersCommandPlugin {
             let lang = i18n::user_lang(&ctx, user.id.0 as i64, user.language_code.as_deref()).await;
             if order_id.is_empty() {
                 ctx.bot
-                    .send_message(msg.chat.id, "Dùng: /order <order_id>")
-                    .reply_markup(orders_empty_keyboard())
+                    .send_message(
+                        msg.chat.id,
+                        i18n::t(&ctx, &lang, "order_usage_text", "Dùng: /order <order_id>"),
+                    )
+                    .reply_markup(orders_empty_keyboard(&ctx, &lang))
                     .await?;
                 return Ok(true);
             }
@@ -425,8 +555,8 @@ impl AppPlugin for OrdersCommandPlugin {
                 repo::get_paid_order_for_user(&ctx.pool, &order_id, user.id.0 as i64).await?
             {
                 ctx.bot
-                    .send_message(msg.chat.id, format_order_detail_text(&order))
-                    .reply_markup(order_detail_keyboard(&order))
+                    .send_message(msg.chat.id, format_order_detail_text(&ctx, &lang, &order))
+                    .reply_markup(order_detail_keyboard(&ctx, &lang, &order))
                     .await?;
             } else {
                 ctx.bot
@@ -434,7 +564,7 @@ impl AppPlugin for OrdersCommandPlugin {
                         msg.chat.id,
                         ctx.get_text_lang("order_not_found", &lang, "Order not found."),
                     )
-                    .reply_markup(order_not_found_keyboard())
+                    .reply_markup(order_not_found_keyboard(&ctx, &lang))
                     .await?;
             }
             let _ = dialogue.update(State::Idle).await;
@@ -464,8 +594,45 @@ impl AppPlugin for OrdersCommandPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bot::texts::BotTexts;
+    use crate::config::Config;
     use crate::domains::orders::models::{Order, OrderReservationMode, OrderWithProduct};
     use crate::domains::products::models::Product;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::collections::HashMap;
+    use teloxide::Bot;
+
+    fn test_ctx_with_texts(texts: HashMap<String, String>) -> Arc<AppContext> {
+        let pool = SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            Config {
+                telegram_token: "test-token".to_string(),
+                database_url: "sqlite::memory:".to_string(),
+                bank_name: "VCB".to_string(),
+                bank_account: Some("123".to_string()),
+                bank_account_name: None,
+                webhook_secret: "secret".to_string(),
+                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
+                admin_setup_code: "setupcode".to_string(),
+                admin_cookie_secure: false,
+                base_url: None,
+                i18n_dir: "i18n".to_string(),
+                port: 8080,
+                crypto: crate::config::CryptoConfig::default(),
+            },
+            HashMap::new(),
+            BotTexts::from_map(texts),
+            vec![],
+        )
+    }
+
+    fn test_ctx() -> Arc<AppContext> {
+        test_ctx_with_texts(HashMap::new())
+    }
 
     fn test_order(id: &str, status: OrderStatus, memo: &str) -> OrderWithProduct {
         OrderWithProduct {
@@ -515,12 +682,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn order_history_keyboard_uses_order_id_callbacks_for_paid_orders_only() {
+    #[tokio::test]
+    async fn order_history_keyboard_uses_order_id_callbacks_for_paid_orders_only() {
         let paid = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
         let pending = test_order("order-pending-1", OrderStatus::Pending, "DHPEND1234");
+        let ctx = test_ctx();
 
-        let keyboard = order_history_keyboard(&[paid, pending], "vi");
+        let keyboard = order_history_keyboard(&ctx, "vi", &[paid, pending]);
         let json = serde_json::to_value(&keyboard).unwrap();
         let rows = json["inline_keyboard"].as_array().unwrap();
 
@@ -536,11 +704,12 @@ mod tests {
         assert_eq!(rows[1][0]["callback_data"], "start:shop");
     }
 
-    #[test]
-    fn order_history_keyboard_uses_back_label_for_shop_return() {
+    #[tokio::test]
+    async fn order_history_keyboard_uses_back_label_for_shop_return() {
         let paid = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
+        let ctx = test_ctx();
 
-        let keyboard = order_history_keyboard(&[paid], "vi");
+        let keyboard = order_history_keyboard(&ctx, "vi", &[paid]);
         let json = serde_json::to_value(&keyboard).unwrap();
         let rows = json["inline_keyboard"].as_array().unwrap();
         let last_row = rows.last().unwrap().as_array().unwrap();
@@ -549,9 +718,10 @@ mod tests {
         assert_eq!(last_row[0]["callback_data"], "start:shop");
     }
 
-    #[test]
-    fn orders_empty_keyboard_has_back_to_shop() {
-        let keyboard = orders_empty_keyboard();
+    #[tokio::test]
+    async fn orders_empty_keyboard_has_back_to_shop() {
+        let ctx = test_ctx();
+        let keyboard = orders_empty_keyboard(&ctx, "vi");
         let json = serde_json::to_value(&keyboard).unwrap();
         let rows = json["inline_keyboard"].as_array().unwrap();
         let callbacks = rows
@@ -563,11 +733,34 @@ mod tests {
         assert!(callbacks.contains(&"start:shop"));
     }
 
-    #[test]
-    fn order_detail_text_contains_full_paid_order_information() {
-        let order = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
+    #[tokio::test]
+    async fn orders_empty_keyboard_uses_admin_text() {
+        let ctx = test_ctx_with_texts(HashMap::from([(
+            "orders_empty_shop_btn_vi".to_string(),
+            "🛍️ Đi shop".to_string(),
+        )]));
+        let keyboard = orders_empty_keyboard(&ctx, "vi");
+        let json = serde_json::to_value(&keyboard).unwrap();
 
-        let text = format_order_detail_text(&order);
+        assert_eq!(json["inline_keyboard"][0][0]["text"], "🛍️ Đi shop");
+    }
+
+    #[tokio::test]
+    async fn order_history_text_uses_admin_text() {
+        let ctx = test_ctx_with_texts(HashMap::from([(
+            "orders_history_text_vi".to_string(),
+            "Lịch sử tùy chỉnh".to_string(),
+        )]));
+
+        assert_eq!(order_history_text(&ctx, "vi"), "Lịch sử tùy chỉnh");
+    }
+
+    #[tokio::test]
+    async fn order_detail_text_contains_full_paid_order_information() {
+        let order = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
+        let ctx = test_ctx();
+
+        let text = format_order_detail_text(&ctx, "vi", &order);
 
         assert!(text.contains("order-paid-1"));
         assert!(text.contains("Gói VIP"));
@@ -582,18 +775,19 @@ mod tests {
         assert!(text.contains("buyer@example.com"));
     }
 
-    #[test]
-    fn order_detail_keyboard_allows_rebuy_only_for_active_products() {
+    #[tokio::test]
+    async fn order_detail_keyboard_allows_rebuy_only_for_active_products() {
         let active = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
         let mut inactive = active.clone();
         inactive.product.is_active = Some(0);
+        let ctx = test_ctx();
 
-        let active_keyboard = order_detail_keyboard(&active);
+        let active_keyboard = order_detail_keyboard(&ctx, "vi", &active);
         let active_json = serde_json::to_value(&active_keyboard).unwrap();
         let active_rows = active_json["inline_keyboard"].as_array().unwrap();
         assert_eq!(active_rows[0][0]["callback_data"], "buy:1");
 
-        let inactive_keyboard = order_detail_keyboard(&inactive);
+        let inactive_keyboard = order_detail_keyboard(&ctx, "vi", &inactive);
         let inactive_json = serde_json::to_value(&inactive_keyboard).unwrap();
         let inactive_rows = inactive_json["inline_keyboard"].as_array().unwrap();
         let callbacks = inactive_rows
@@ -604,12 +798,13 @@ mod tests {
         assert!(!callbacks.contains(&"buy:1"));
     }
 
-    #[test]
-    fn order_detail_text_marks_inactive_product_as_unavailable() {
+    #[tokio::test]
+    async fn order_detail_text_marks_inactive_product_as_unavailable() {
         let mut order = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
         order.product.is_active = Some(0);
+        let ctx = test_ctx();
 
-        let text = format_order_detail_text(&order);
+        let text = format_order_detail_text(&ctx, "vi", &order);
 
         assert!(text.contains("Sản phẩm đã ngừng bán"));
     }
