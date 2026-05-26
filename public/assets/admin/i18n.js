@@ -24,6 +24,10 @@
         match: key => key.startsWith('broadcast_'),
       },
       {
+        title: 'Admin & thông báo nội bộ',
+        match: key => key.startsWith('admin_'),
+      },
+      {
         title: 'Shop & sản phẩm',
         match: key => [
           'cmd_shop', 'open_shop_btn', 'no_products', 'shop_page_title',

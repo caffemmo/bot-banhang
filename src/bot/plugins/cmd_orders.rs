@@ -1,3 +1,4 @@
+use chrono::{DateTime, FixedOffset};
 use std::sync::Arc;
 use teloxide::payloads::{EditMessageTextSetters, SendMessageSetters};
 use teloxide::requests::Requester;
@@ -58,7 +59,7 @@ fn order_history_text(ctx: &AppContext, lang: &str) -> String {
         ctx,
         lang,
         "orders_history_text",
-        "🧾 LỊCH SỬ MUA HÀNG\n\nChọn mã đơn bên dưới để xem chi tiết.",
+        "🧾 LỊCH SỬ MUA HÀNG\n\nChọn nội dung chuyển khoản bên dưới để xem chi tiết.",
     )
 }
 
@@ -161,7 +162,7 @@ fn orders_empty_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
 
 fn order_button_label(order: &OrderWithProduct) -> String {
     let product_name = truncate_chars(order.product.name.trim(), 28);
-    format!("{} — {}", order.order.id, product_name)
+    format!("{} — {}", order.order.bank_memo, product_name)
 }
 
 fn order_detail_line(
@@ -183,17 +184,24 @@ fn format_status(ctx: &AppContext, lang: &str, status: &OrderStatus) -> String {
     }
 }
 
+fn format_paid_at_display(raw: Option<&str>) -> String {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "-".to_string();
+    };
+    let vn_offset = FixedOffset::east_opt(7 * 3600).expect("valid Vietnam UTC offset");
+    DateTime::parse_from_rfc3339(raw)
+        .map(|dt| {
+            dt.with_timezone(&vn_offset)
+                .format("%H:%M:%S %d/%m/%Y")
+                .to_string()
+        })
+        .unwrap_or_else(|_| raw.to_string())
+}
+
 fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProduct) -> String {
     let mut lines = vec![
         i18n::t(ctx, lang, "order_detail_title", "🧾 CHI TIẾT ĐƠN HÀNG"),
         String::new(),
-        order_detail_line(
-            ctx,
-            lang,
-            "order_detail_id_label",
-            "Mã đơn",
-            &order.order.id,
-        ),
         order_detail_line(
             ctx,
             lang,
@@ -257,16 +265,9 @@ fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProdu
         order_detail_line(
             ctx,
             lang,
-            "order_detail_created_at_label",
-            "Thời gian tạo",
-            &order.order.created_at,
-        ),
-        order_detail_line(
-            ctx,
-            lang,
             "order_detail_paid_at_label",
             "Thời gian thanh toán",
-            order.order.paid_at.as_deref().unwrap_or("-"),
+            format_paid_at_display(order.order.paid_at.as_deref()),
         ),
     ]);
     if let Some(tx_id) = order
@@ -683,7 +684,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn order_history_keyboard_uses_order_id_callbacks_for_paid_orders_only() {
+    async fn order_history_keyboard_labels_paid_orders_by_bank_memo() {
         let paid = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
         let pending = test_order("order-pending-1", OrderStatus::Pending, "DHPEND1234");
         let ctx = test_ctx();
@@ -693,13 +694,10 @@ mod tests {
         let rows = json["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["callback_data"], "order:order-paid-1");
-        assert!(rows[0][0]["text"].as_str().unwrap().contains("Gói VIP"));
-        assert!(
-            rows[0][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("order-paid-1")
-        );
+        let label = rows[0][0]["text"].as_str().unwrap();
+        assert!(label.contains("Gói VIP"));
+        assert!(label.contains("DHPAID1234"));
+        assert!(!label.contains("order-paid-1"));
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1][0]["callback_data"], "start:shop");
     }
@@ -756,20 +754,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn order_detail_text_contains_full_paid_order_information() {
+    async fn order_detail_text_hides_internal_fields_and_formats_paid_time() {
         let order = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
         let ctx = test_ctx();
 
         let text = format_order_detail_text(&ctx, "vi", &order);
 
-        assert!(text.contains("order-paid-1"));
+        assert!(!text.contains("order-paid-1"));
+        assert!(!text.contains("Mã đơn"));
+        assert!(!text.contains("Thời gian tạo"));
+        assert!(!text.contains("2026-05-24T10:00:00Z"));
         assert!(text.contains("Gói VIP"));
         assert!(text.contains("2"));
         assert!(text.contains("120.000đ"));
         assert!(text.contains("paid"));
         assert!(text.contains("DHPAID1234"));
-        assert!(text.contains("2026-05-24T10:00:00Z"));
-        assert!(text.contains("2026-05-24T10:02:00Z"));
+        assert!(text.contains("17:02:00 24/05/2026"));
+        assert!(!text.contains("2026-05-24T10:02:00Z"));
         assert!(text.contains("TX123"));
         assert!(text.contains("license-key-1"));
         assert!(text.contains("buyer@example.com"));

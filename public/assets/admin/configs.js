@@ -32,6 +32,8 @@
         icon: '🧩',
         fields: [
           { key: 'telegram_icon_admin_ids', label: 'Admin IDs được lấy thông tin media Telegram', value: '' },
+          { key: 'order_notifications_enabled', label: 'Bật thông báo đơn thanh toán thành công', value: '0' },
+          { key: 'order_notification_admin_ids', label: 'Admin IDs nhận thông báo đơn hàng', value: '' },
         ]
       },
       {
@@ -142,7 +144,7 @@
 
     function buildConfigFieldHtml(key, value) {
       value = value == null ? '' : String(value);
-      if (key === 'required_channel_enabled' || key === 'telegram_i18n_emojis_enabled' || key === 'stock_auto_broadcast_enabled') {
+      if (key === 'required_channel_enabled' || key === 'telegram_i18n_emojis_enabled' || key === 'stock_auto_broadcast_enabled' || key === 'order_notifications_enabled') {
         const isSelected1 = value === '1' ? 'selected' : '';
         const isSelected0 = value === '0' ? 'selected' : '';
         return `
@@ -152,7 +154,7 @@
           </select>
         `;
       }
-      if (key === 'telegram_icon_admin_ids') {
+      if (key === 'telegram_icon_admin_ids' || key === 'order_notification_admin_ids') {
         return `
           <textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="3"
             placeholder="123456789, 987654321">${escapeHtml(value)}</textarea>

@@ -245,6 +245,14 @@ impl AppContext {
             .collect()
     }
 
+    pub fn order_notifications_enabled(&self) -> bool {
+        is_enabled_config_value(&self.get_config_value("order_notifications_enabled", "0"))
+    }
+
+    pub fn order_notification_admin_ids(&self) -> Vec<i64> {
+        parse_admin_id_list(&self.get_config_value("order_notification_admin_ids", ""))
+    }
+
     #[allow(dead_code)]
     pub fn i18n_emoji_for_key(&self, key: &str) -> Option<String> {
         self.i18n_emoji_prefix_for_key(key)
@@ -571,6 +579,20 @@ fn config_value_from_map(configs: &HashMap<String, String>, key: &str, default: 
         .get(key)
         .cloned()
         .unwrap_or_else(|| default.to_string())
+}
+
+fn is_enabled_config_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn parse_admin_id_list(value: &str) -> Vec<i64> {
+    value
+        .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+        .filter_map(|raw| raw.trim().parse::<i64>().ok())
+        .collect()
 }
 
 pub fn normalize_order_memo_prefix(raw: &str) -> Option<String> {
@@ -927,6 +949,54 @@ mod tests {
         assert!(ctx.is_telegram_icon_admin(456));
         assert!(ctx.is_telegram_icon_admin(789));
         assert!(!ctx.is_telegram_icon_admin(111));
+    }
+
+    #[tokio::test]
+    async fn order_notification_admin_ids_accept_commas_newlines_and_spaces() {
+        let env_config = Config::from_env_map(&required_env()).unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        let ctx = AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            env_config,
+            HashMap::from([(
+                "order_notification_admin_ids".to_string(),
+                "123, 456\n789 invalid".to_string(),
+            )]),
+            BotTexts::default(),
+            vec![],
+        );
+
+        assert_eq!(ctx.order_notification_admin_ids(), vec![123, 456, 789]);
+    }
+
+    #[tokio::test]
+    async fn order_notifications_enabled_accepts_admin_toggle_values() {
+        let env_config = Config::from_env_map(&required_env()).unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        let enabled = AppContext::new(
+            Bot::new("test-token"),
+            pool.clone(),
+            env_config.clone(),
+            HashMap::from([("order_notifications_enabled".to_string(), "on".to_string())]),
+            BotTexts::default(),
+            vec![],
+        );
+        let disabled = AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            env_config,
+            HashMap::from([("order_notifications_enabled".to_string(), "0".to_string())]),
+            BotTexts::default(),
+            vec![],
+        );
+
+        assert!(enabled.order_notifications_enabled());
+        assert!(!disabled.order_notifications_enabled());
     }
 
     #[tokio::test]

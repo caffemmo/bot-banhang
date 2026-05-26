@@ -199,6 +199,14 @@ async fn seed_configs_from_env(pool: &db::DbPool, config: &config::Config) {
             Some(icon_admin_ids.as_str()),
         );
     }
+    seeds.push(("order_notifications_enabled", "0".to_string()));
+    if let Ok(order_admin_ids) = std::env::var("ORDER_NOTIFICATION_ADMIN_IDS") {
+        push_optional_seed(
+            &mut seeds,
+            "order_notification_admin_ids",
+            Some(order_admin_ids.as_str()),
+        );
+    }
 
     push_optional_seed(
         &mut seeds,

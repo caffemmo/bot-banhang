@@ -1,5 +1,6 @@
 {
   "action_invalid": "Invalid action. Please try again.",
+  "admin_order_paid_notification": "✅ NEW PAID ORDER\n\n🧾 Order ID: {order_id}\n🔖 Memo: {memo}\n📦 Product: {product}\n🎚️ Plan: {plan}\n🔢 Quantity: {qty}\n💰 Amount: {amount} VND\n👤 User ID: {user_id}\n💬 Chat ID: {chat_id}\n🧍 Customer: {customer}\n💳 Payment ref: {payment_ref}\n🔌 Source: {source}\n🕒 Paid at: {paid_at}",
   "back_btn": "⬅️ Back",
   "bep20_payment_error": "Could not create USDT BEP20 payment: {error}",
   "bep20_payment_instructions": "🟢 USDT BEP20 payment\n\n• Network: BNB Smart Chain (BEP20)\n• Amount to send: {amount} USDT\n• Receiving address: {address}\n• Order: {order_id}\n• Expires: {expires_at}\n\n⚠️ Send exactly {amount} USDT on BNB Smart Chain (BEP20). Do not round, underpay, or overpay. Wrong amount or wrong network requires manual review and may delay delivery.",

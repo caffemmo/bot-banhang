@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use tracing::{error, warn};
 
 use crate::app::AppContext;
+use crate::domains::orders::admin_notify::notify_admins_order_paid;
 use crate::domains::orders::api::{is_order_expired, parse_reserved_ids, send_product_file};
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::repo;
@@ -166,6 +167,11 @@ pub async fn fulfill_paid_order(
 
     if let Err(err) = send_product_file(&ctx, &order_with_product, &delivered_data).await {
         error!("send product file failed for order {order_id}: {err}");
+    }
+    if let Err(err) =
+        notify_admins_order_paid(&ctx, &order_with_product, payment_ref, paid_at, &source).await
+    {
+        error!("send paid-order admin notification failed for order {order_id}: {err}");
     }
 
     Ok(FulfillOutcome::Delivered)

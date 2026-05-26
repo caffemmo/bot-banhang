@@ -1,3 +1,4 @@
+pub mod admin_notify;
 pub mod api;
 pub mod fulfillment;
 pub mod models;
