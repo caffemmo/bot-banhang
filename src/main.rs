@@ -9,6 +9,7 @@ mod domains;
 use crate::bot::texts::BotTexts;
 use anyhow::Result;
 use config::Config;
+use std::path::Path;
 use teloxide::payloads::SetMyCommandsSetters;
 use teloxide::requests::Requester;
 use teloxide::types::BotCommand;
@@ -17,6 +18,9 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> Result<()> {
     artifact_signature::keep_marker();
+    if run_cli_command()? {
+        return Ok(());
+    }
     init_tracing();
 
     let config = Config::from_env()?;
@@ -96,6 +100,27 @@ async fn main() -> Result<()> {
 
     let _ = tokio::try_join!(bot_task, server_task, worker_task)?;
     Ok(())
+}
+
+fn run_cli_command() -> Result<bool> {
+    let args = std::env::args().collect::<Vec<_>>();
+    if args.len() <= 1 {
+        return Ok(false);
+    }
+
+    match args[1].as_str() {
+        "merge-i18n" => {
+            if args.len() != 4 {
+                anyhow::bail!(
+                    "usage: {} merge-i18n SOURCE_I18N_DIR TARGET_I18N_DIR",
+                    args[0]
+                );
+            }
+            domains::i18n::repo::merge_i18n_dirs(Path::new(&args[2]), Path::new(&args[3]))?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
 }
 
 fn localized_commands_for_lang(

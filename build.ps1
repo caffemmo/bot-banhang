@@ -24,8 +24,10 @@ if ($CopyToManagerArtifacts) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "target\\release\\botbanhang.exe") -Destination (Join-Path $artifactDir "botbanhang.exe") -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "public") -Destination (Join-Path $artifactDir "public") -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "i18n") -Destination (Join-Path $artifactDir "i18n") -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "scripts") -Destination (Join-Path $artifactDir "scripts") -Recurse -Force
     Write-Host "Copied Windows artifact to:"
     Write-Host " - $artifactDir\\botbanhang.exe"
     Write-Host " - $artifactDir\\public"
     Write-Host " - $artifactDir\\i18n"
+    Write-Host " - $artifactDir\\scripts"
 }

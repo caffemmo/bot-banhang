@@ -101,6 +101,11 @@ if (Test-Path -LiteralPath $i18nArtifact) {
     Remove-Item -LiteralPath $i18nArtifact -Recurse -Force
 }
 Copy-Item -LiteralPath (Join-Path $repo "i18n") -Destination $i18nArtifact -Recurse -Force
+$scriptsArtifact = Join-Path $artifactDir "scripts"
+if (Test-Path -LiteralPath $scriptsArtifact) {
+    Remove-Item -LiteralPath $scriptsArtifact -Recurse -Force
+}
+Copy-Item -LiteralPath (Join-Path $repo "scripts") -Destination $scriptsArtifact -Recurse -Force
 
 if (Test-Path -LiteralPath $bundleDir) {
     Remove-Item -LiteralPath $bundleDir -Recurse -Force
@@ -109,14 +114,16 @@ New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $bundleDir "artifact-manifest.json") -Force
 Copy-Item -LiteralPath (Join-Path $artifactDir "public") -Destination (Join-Path $bundleDir "public") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $artifactDir "i18n") -Destination (Join-Path $bundleDir "i18n") -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $artifactDir "scripts") -Destination (Join-Path $bundleDir "scripts") -Recurse -Force
 if (Test-Path -LiteralPath $bundleZip) {
     Remove-Item -LiteralPath $bundleZip -Force
 }
-Compress-Archive -LiteralPath (Join-Path $bundleDir "artifact-manifest.json"), (Join-Path $bundleDir "public"), (Join-Path $bundleDir "i18n") -DestinationPath $bundleZip -CompressionLevel Optimal
+Compress-Archive -LiteralPath (Join-Path $bundleDir "artifact-manifest.json"), (Join-Path $bundleDir "public"), (Join-Path $bundleDir "i18n"), (Join-Path $bundleDir "scripts") -DestinationPath $bundleZip -CompressionLevel Optimal
 
 Write-Host "Copied signed Linux artifacts to:" -ForegroundColor Green
 Write-Host " - $artifactDir\\botbanhang"
 Write-Host " - $manifestPath"
 Write-Host " - $artifactDir\\public"
 Write-Host " - $artifactDir\\i18n"
+Write-Host " - $artifactDir\\scripts"
 Write-Host " - $bundleZip"

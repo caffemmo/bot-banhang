@@ -31,3 +31,4 @@ Invoke-Scp -Source "bot_update.sh" -Destination $target
 Invoke-Scp -Source "bot_list.sh" -Destination $target
 Invoke-Scp -Source ".env" -Destination $target
 Invoke-Scp -Source "public" -Destination "$target/public" -Recursive
+Invoke-Scp -Source "scripts" -Destination "$target/scripts" -Recursive

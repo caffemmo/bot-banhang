@@ -27,7 +27,7 @@ Quy trinh deploy gom cac buoc:
 1. Kiem tra code local.
 2. Chay format/test neu can.
 3. Build binary Linux bang Docker tren may Windows.
-4. Dong goi binary, `deploy.sh`, va thu muc `public/`.
+4. Dong goi binary, `deploy.sh`, `public/`, `i18n/`, va `scripts/`.
 5. Upload file `.tar.gz` len VPS.
 6. Giai nen tren VPS.
 7. Chay `deploy.sh`; script se stop service, backup binary/DB hien tai, roi moi copy binary moi vao `/opt/botbanhang`.
@@ -193,6 +193,8 @@ Goi deploy can gom:
 botbanhang
 deploy.sh
 public/
+i18n/
+scripts/
 ```
 
 Tao thu muc staging va nen thanh `.tar.gz`:
@@ -213,6 +215,8 @@ New-Item -ItemType Directory -Path $staging | Out-Null
 Copy-Item -LiteralPath 'target-docker-deploy\release\botbanhang' -Destination (Join-Path $staging 'botbanhang') -Force
 Copy-Item -LiteralPath 'deploy.sh' -Destination (Join-Path $staging 'deploy.sh') -Force
 Copy-Item -LiteralPath 'public' -Destination (Join-Path $staging 'public') -Recurse -Force
+Copy-Item -LiteralPath 'i18n' -Destination (Join-Path $staging 'i18n') -Recurse -Force
+Copy-Item -LiteralPath 'scripts' -Destination (Join-Path $staging 'scripts') -Recurse -Force
 
 if (Test-Path -LiteralPath 'botbanhang-deploy.tar.gz') {
     Remove-Item -LiteralPath 'botbanhang-deploy.tar.gz' -Force
@@ -259,9 +263,10 @@ ssh root@ipvps "rm -rf /tmp/botbanhang-deploy && mkdir -p /tmp/botbanhang-deploy
 9. Copy binary moi vao `/opt/botbanhang/botbanhang`.
 10. Copy `.env` neu trong goi deploy co `.env`.
 11. Copy `public/` vao `/opt/botbanhang/public`.
-12. Ghi systemd service vao `/etc/systemd/system/botbanhang.service`.
-13. Reload systemd.
-14. Enable va start service.
+12. Merge `i18n/` vao `/opt/botbanhang/i18n`: giu gia tri runtime da sua, chi them language/file/key con thieu tu artifact. Buoc merge dung chinh binary `botbanhang`, khong can cai Python tren VPS.
+13. Ghi systemd service vao `/etc/systemd/system/botbanhang.service`.
+14. Reload systemd.
+15. Enable va start service.
 
 Vi service da stop truoc khi backup DB, cac file SQLite duoc copy o trang thai on dinh:
 
@@ -435,6 +440,8 @@ shop.db-shm
 shop.db-wal
 .env
 public/
+i18n/
+scripts/
 src/
 migrations/
 ```
@@ -462,6 +469,8 @@ New-Item -ItemType Directory -Path $staging | Out-Null
 Copy-Item -LiteralPath 'target-docker-deploy\release\botbanhang' -Destination (Join-Path $staging 'botbanhang') -Force
 Copy-Item -LiteralPath 'deploy.sh' -Destination (Join-Path $staging 'deploy.sh') -Force
 Copy-Item -LiteralPath 'public' -Destination (Join-Path $staging 'public') -Recurse -Force
+Copy-Item -LiteralPath 'i18n' -Destination (Join-Path $staging 'i18n') -Recurse -Force
+Copy-Item -LiteralPath 'scripts' -Destination (Join-Path $staging 'scripts') -Recurse -Force
 if (Test-Path -LiteralPath 'botbanhang-deploy.tar.gz') { Remove-Item -LiteralPath 'botbanhang-deploy.tar.gz' -Force }
 tar -czf botbanhang-deploy.tar.gz -C dist-deploy-current .
 
@@ -626,6 +635,6 @@ Khong copy de len cac file du lieu production neu khong co chu y:
 /opt/botbanhang/.env
 ```
 
-`deploy.sh` backup DB va binary truoc khi thay binary moi. Sau do script chi copy binary va `public/`. No tao thu muc storage neu chua co, nhung khong xoa `storage/product_files`.
+`deploy.sh` backup DB va binary truoc khi thay binary moi. Sau do script copy binary, `public/`, va merge `i18n/` theo kieu giu gia tri runtime da sua, chi them key con thieu. No tao thu muc storage neu chua co, nhung khong xoa `storage/product_files`.
 
 Dieu nay giup file san pham da upload va DB production khong bi mat khi deploy lai.

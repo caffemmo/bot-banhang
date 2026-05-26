@@ -10,6 +10,7 @@ on:
       - "Cargo.lock"
       - "deploy.sh"
       - "bot_*.sh"
+      - "scripts/**"
       - "public/**"
       - "i18n/**"
       - ".github/workflows/deploy.yml"
@@ -75,6 +76,7 @@ jobs:
           cp target/x86_64-unknown-linux-musl/release/botbanhang dist/
           cp deploy.sh dist/
           cp bot_clone.sh bot_update.sh bot_list.sh dist/ 2>/dev/null || true
+          if [ -d scripts ]; then cp -r scripts dist/; fi
           if [ -d public ]; then cp -r public dist/; fi
           if [ -d i18n ]; then cp -r i18n dist/; fi
           tar -czf botbanhang.tar.gz -C dist .

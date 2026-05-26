@@ -107,13 +107,21 @@ if [[ -d i18n ]]; then
   if [[ -d "${INSTALL_DIR}/i18n" ]]; then
     sudo cp -a "${INSTALL_DIR}/i18n" "${BACKUP_DIR}/i18n.${TIMESTAMP}"
   fi
-  sudo rm -rf "${INSTALL_DIR}/i18n"
-  sudo cp -r i18n "${INSTALL_DIR}/"
+  if [[ ! -f scripts/merge_i18n.sh ]]; then
+    echo "Missing scripts/merge_i18n.sh; cannot safely update i18n without overwriting runtime changes."
+    exit 1
+  fi
+  sudo env MERGE_I18N_BIN="${INSTALL_DIR}/${APP_NAME}" bash scripts/merge_i18n.sh i18n "${INSTALL_DIR}/i18n"
 fi
 
 echo "==> Installing management scripts..."
 sudo cp -f bot_clone.sh bot_update.sh bot_list.sh "${INSTALL_DIR}/" 2>/dev/null || true
 sudo chmod +x "${INSTALL_DIR}/bot_clone.sh" "${INSTALL_DIR}/bot_update.sh" "${INSTALL_DIR}/bot_list.sh" 2>/dev/null || true
+if [[ -f scripts/merge_i18n.sh ]]; then
+  sudo mkdir -p "${INSTALL_DIR}/scripts"
+  sudo cp -f scripts/merge_i18n.sh "${INSTALL_DIR}/scripts/"
+  sudo chmod +x "${INSTALL_DIR}/scripts/merge_i18n.sh"
+fi
 
 echo "==> Writing systemd service: ${SERVICE_FILE}"
 sudo tee "${SERVICE_FILE}" >/dev/null <<'EOF'

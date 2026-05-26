@@ -86,6 +86,41 @@ pub fn language_texts(i18n_dir: impl AsRef<Path>, code: &str) -> Result<HashMap<
     Ok(export.bot)
 }
 
+pub fn merge_i18n_dirs(source_dir: impl AsRef<Path>, target_dir: impl AsRef<Path>) -> Result<()> {
+    let source_dir = source_dir.as_ref();
+    let target_dir = target_dir.as_ref();
+    if !source_dir.exists() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(target_dir)
+        .with_context(|| format!("failed to create i18n dir {}", target_dir.display()))?;
+
+    for entry in fs::read_dir(source_dir)
+        .with_context(|| format!("failed to read {}", source_dir.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", source_dir.display()))?;
+        let source_path = entry.path();
+        let target_path = target_dir.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", source_path.display()))?;
+
+        if file_type.is_dir() {
+            if target_path.exists() {
+                merge_i18n_dirs(&source_path, &target_path)?;
+            } else {
+                copy_dir_all(&source_path, &target_path)?;
+            }
+        } else if file_type.is_file() {
+            merge_i18n_file(&source_path, &target_path)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn load_languages(i18n_dir: &Path) -> Result<Vec<LanguageInfo>> {
     let path = i18n_dir.join(LANGUAGE_REGISTRY_FILE);
     let raw =
@@ -121,6 +156,88 @@ fn save_language_file(
     let path = language_file_path(i18n_dir, code)?;
     fs::write(&path, pretty_json_map(texts_for_language)?)
         .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn merge_i18n_file(source_path: &Path, target_path: &Path) -> Result<()> {
+    if !target_path.exists() {
+        fs::copy(source_path, target_path).with_context(|| {
+            format!(
+                "failed to copy {} to {}",
+                source_path.display(),
+                target_path.display()
+            )
+        })?;
+        return Ok(());
+    }
+
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        return Ok(());
+    }
+
+    if source_path.file_name().and_then(|name| name.to_str()) == Some(LANGUAGE_REGISTRY_FILE) {
+        let source = serde_json::from_str::<Vec<LanguageInfo>>(
+            &fs::read_to_string(source_path)
+                .with_context(|| format!("failed to read {}", source_path.display()))?,
+        )
+        .with_context(|| format!("invalid JSON in {}", source_path.display()))?;
+        let target = load_languages(
+            target_path
+                .parent()
+                .ok_or_else(|| anyhow!("invalid target path: {}", target_path.display()))?,
+        )?;
+        let merged = merge_language_registry(source, target);
+        fs::write(target_path, pretty_json(merged)?)
+            .with_context(|| format!("failed to write {}", target_path.display()))?;
+        return Ok(());
+    }
+
+    let mut merged = read_translation_file(source_path)?;
+    let target = read_translation_file(target_path)?;
+    merged.extend(target);
+    fs::write(target_path, pretty_json_map(&merged)?)
+        .with_context(|| format!("failed to write {}", target_path.display()))?;
+    Ok(())
+}
+
+fn merge_language_registry(
+    source: Vec<LanguageInfo>,
+    target: Vec<LanguageInfo>,
+) -> Vec<LanguageInfo> {
+    let mut merged = target;
+    for language in source {
+        if !merged.iter().any(|existing| existing.code == language.code) {
+            merged.push(language);
+        }
+    }
+    merged
+}
+
+fn copy_dir_all(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target)
+        .with_context(|| format!("failed to create dir {}", target.display()))?;
+    for entry in
+        fs::read_dir(source).with_context(|| format!("failed to read {}", source.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", source.display()))?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", source_path.display()))?;
+        if file_type.is_dir() {
+            copy_dir_all(&source_path, &target_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &target_path).with_context(|| {
+                format!(
+                    "failed to copy {} to {}",
+                    source_path.display(),
+                    target_path.display()
+                )
+            })?;
+        }
+    }
     Ok(())
 }
 
@@ -339,5 +456,45 @@ mod tests {
                 .get_lang("topup_usdt_instructions", "vi", "")
                 .contains("đúng chính xác {amount_usdt} USDT")
         );
+    }
+
+    #[test]
+    fn merge_i18n_dirs_keeps_target_values_and_adds_source_keys() {
+        let source = temp_i18n_dir("merge-source");
+        let target = temp_i18n_dir("merge-target");
+        fs::write(
+            source.join(LANGUAGE_REGISTRY_FILE),
+            r#"[{"code":"vi","label":"Vietnamese default","fallback":"en","enabled":true},{"code":"en","label":"English","fallback":"en","enabled":true}]"#,
+        )
+        .unwrap();
+        fs::write(
+            target.join(LANGUAGE_REGISTRY_FILE),
+            r#"[{"code":"vi","label":"Tieng Viet custom","fallback":"en","enabled":true}]"#,
+        )
+        .unwrap();
+        fs::write(
+            source.join("vi.json"),
+            r#"{"start":"Default start","wallet":"Wallet"}"#,
+        )
+        .unwrap();
+        fs::write(target.join("vi.json"), r#"{"start":"Runtime start"}"#).unwrap();
+        fs::write(source.join("en.json"), r#"{"start":"Start"}"#).unwrap();
+
+        merge_i18n_dirs(&source, &target).unwrap();
+
+        let vi = read_translation_file(&target.join("vi.json")).unwrap();
+        assert_eq!(vi.get("start").map(String::as_str), Some("Runtime start"));
+        assert_eq!(vi.get("wallet").map(String::as_str), Some("Wallet"));
+        let en = read_translation_file(&target.join("en.json")).unwrap();
+        assert_eq!(en.get("start").map(String::as_str), Some("Start"));
+        let languages = load_languages(&target).unwrap();
+        assert_eq!(
+            languages
+                .iter()
+                .find(|lang| lang.code == "vi")
+                .map(|lang| lang.label.as_str()),
+            Some("Tieng Viet custom")
+        );
+        assert!(languages.iter().any(|lang| lang.code == "en"));
     }
 }
