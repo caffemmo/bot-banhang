@@ -43,6 +43,7 @@ pub struct ProductPayload {
     pub category: Option<String>,
     pub button_emoji: Option<String>,
     pub button_custom_emoji_id: Option<String>,
+    pub show_sold_count: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +82,7 @@ pub struct ProductListItem {
     pub button_custom_emoji_id: Option<String>,
     pub created_at: Option<String>,
     pub sort_order: Option<i64>,
+    pub show_sold_count: Option<i64>,
     pub stock_count: i64,
 }
 
@@ -107,6 +109,7 @@ impl From<Product> for ProductListItem {
             button_custom_emoji_id: value.button_custom_emoji_id,
             created_at: value.created_at,
             sort_order: value.sort_order,
+            show_sold_count: value.show_sold_count,
             stock_count: 0,
         }
     }
@@ -273,6 +276,7 @@ pub async fn create_product(
     let button_emoji = normalize_optional_text(payload.button_emoji.as_deref(), 16);
     let button_custom_emoji_id =
         normalize_custom_emoji_id(payload.button_custom_emoji_id.as_deref());
+    let show_sold_count = normalize_bool_value(payload.show_sold_count, 0)?;
     let price_val = normalize_price(payload.price, &delivery_type)?;
     let product = repo::insert_product(
         &ctx.pool,
@@ -294,6 +298,10 @@ pub async fn create_product(
     )
     .await
     .map_err(|e| ApiError::internal(format!("create product failed: {e}")))?;
+    let product = repo::update_product_show_sold_count(&ctx.pool, product.id, show_sold_count)
+        .await
+        .map_err(|e| ApiError::internal(format!("update product sold-count flag failed: {e}")))?
+        .ok_or_else(|| ApiError::internal("created product not found"))?;
 
     Ok(ok(product))
 }
@@ -326,6 +334,7 @@ pub async fn update_product_handler(
     let button_emoji = normalize_optional_text(payload.button_emoji.as_deref(), 16);
     let button_custom_emoji_id =
         normalize_custom_emoji_id(payload.button_custom_emoji_id.as_deref());
+    let show_sold_count = normalize_bool_value(payload.show_sold_count, 0)?;
     let price_val = normalize_price(payload.price, &delivery_type)?;
     let product = repo::update_product(
         &ctx.pool,
@@ -352,6 +361,10 @@ pub async fn update_product_handler(
     let Some(product) = product else {
         return Err(ApiError::not_found("product not found"));
     };
+    let product = repo::update_product_show_sold_count(&ctx.pool, product.id, show_sold_count)
+        .await
+        .map_err(|e| ApiError::internal(format!("update product sold-count flag failed: {e}")))?
+        .ok_or_else(|| ApiError::not_found("product not found"))?;
 
     Ok(ok(product))
 }

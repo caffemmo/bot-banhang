@@ -236,6 +236,7 @@
         $('#product-button-custom-emoji-id').val(product?.button_custom_emoji_id || '');
         $('#product-input-prompt').val(product?.input_prompt || '');
       $('#product-description').val(product?.description || '');
+      $('#product-show-sold-count').prop('checked', Number(product?.show_sold_count || 0) === 1);
       $('#product-image').val('');
       if (product?.image_url) {
         $('#product-image-preview').attr('src', product.image_url);
@@ -282,6 +283,7 @@
          button_custom_emoji_id: $('#product-button-custom-emoji-id').val().trim() || null,
          input_prompt: $('#product-input-prompt').val().trim() || null,
         description: $('#product-description').val().trim() || null,
+        show_sold_count: $('#product-show-sold-count').is(':checked') ? 1 : 0,
       };
       const method = id ? 'PUT' : 'POST';
       const url = id ? `/products/${id}` : '/products';

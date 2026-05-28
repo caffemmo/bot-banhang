@@ -91,7 +91,6 @@ pub async fn list_stock_notification_subscribers(pool: &SqlitePool) -> Result<Ve
     let subs = sqlx::query_as::<sqlx::Sqlite, Subscriber>(
         r#"SELECT user_id, chat_id, username, first_name, last_name, full_name, language_code, preferred_language, stock_notifications_enabled, is_bot, created_at, updated_at
         FROM subscribers
-        WHERE IFNULL(stock_notifications_enabled, 1) = 1
         ORDER BY created_at DESC"#,
     )
     .fetch_all(pool)
@@ -99,19 +98,39 @@ pub async fn list_stock_notification_subscribers(pool: &SqlitePool) -> Result<Ve
     Ok(subs)
 }
 
-pub async fn update_stock_notifications_enabled(
-    pool: &SqlitePool,
-    user_id: i64,
-    enabled: bool,
-) -> Result<()> {
-    sqlx::query(
-        r#"UPDATE subscribers
-        SET stock_notifications_enabled = ?, updated_at = datetime('now')
-        WHERE user_id = ?"#,
-    )
-    .bind(if enabled { 1 } else { 0 })
-    .bind(user_id)
-    .execute(pool)
-    .await?;
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn stock_notification_recipients_include_legacy_opted_out_subscribers() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        let user = Subscriber {
+            user_id: 101,
+            chat_id: 202,
+            username: Some("khqcs".to_string()),
+            first_name: None,
+            last_name: None,
+            full_name: None,
+            language_code: Some("vi".to_string()),
+            preferred_language: None,
+            stock_notifications_enabled: Some(0),
+            is_bot: Some(0),
+            created_at: None,
+            updated_at: None,
+        };
+        upsert_subscriber(&pool, &user).await.unwrap();
+
+        let recipients = list_stock_notification_subscribers(&pool).await.unwrap();
+
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].username.as_deref(), Some("khqcs"));
+    }
 }

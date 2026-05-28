@@ -116,7 +116,6 @@
       'start_btn_topup_history',
       'start_btn_wallet',
       'stock_notify_buy_now_btn',
-      'stock_notify_disable_btn',
       'stock_notify_view_more_btn',
     ]);
 

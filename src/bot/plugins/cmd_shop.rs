@@ -29,7 +29,6 @@ use crate::domains::orders::models::{Order, OrderReservationMode, OrderStatus, O
 use crate::domains::orders::{api as orders_api, repo as orders_repo};
 use crate::domains::products::models::Product;
 use crate::domains::products::repo;
-use crate::domains::users::repo as users_repo;
 use crate::domains::wallet::repo as wallet_repo;
 
 use crate::bot::i18n;
@@ -303,24 +302,7 @@ async fn shop_handle_callback(
 
     let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
 
-    if data == "stocknotify:off" {
-        users_repo::update_stock_notifications_enabled(&ctx.pool, q.from.id.0 as i64, false)
-            .await?;
-        if let Some(msg) = &q.message {
-            ctx.bot
-                .send_message(
-                    msg.chat().id,
-                    tl(
-                        &ctx,
-                        &lang,
-                        "stock_notify_disabled",
-                        "🔕 Đã tắt thông báo sản phẩm mới lên kho.",
-                    ),
-                )
-                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
-                .await?;
-        }
-    } else if data == "start:shop" {
+    if data == "start:shop" {
         if let Some(msg) = &q.message {
             dialogue.update(State::Idle).await?;
             send_products(
@@ -413,16 +395,14 @@ async fn shop_handle_callback(
                         .await?;
                     return Ok(());
                 }
-                let mut desc_text = String::new();
-                if let Some(desc) = &product.description {
-                    desc_text = trl(
-                        &ctx,
-                        &lang,
-                        "product_description_line",
-                        "📝 Description:\n{description}\n\n",
-                        &[("description", desc.clone())],
-                    );
-                }
+                let sold_count = if product.show_sold_count.unwrap_or(0) != 0 {
+                    repo::count_product_paid_quantity_sold(&ctx.pool, product.id)
+                        .await
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+                let desc_text = product_description_prompt_line(&ctx, &lang, &product, sold_count);
 
                 let delivery_type = orders_api::product_delivery_type(&product);
                 if delivery_type == "uploaded_file" {
@@ -2683,6 +2663,45 @@ fn description_for_quantity_prompt(description: &str) -> String {
     }
 }
 
+fn product_description_prompt_line(
+    ctx: &AppContext,
+    lang: &str,
+    product: &Product,
+    sold_count: i64,
+) -> String {
+    let mut lines = Vec::new();
+    if let Some(desc) = product
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(desc.to_string());
+    }
+
+    if product.show_sold_count.unwrap_or(0) != 0 {
+        lines.push(trl(
+            ctx,
+            lang,
+            "product_sold_count_line",
+            "Đã bán: {sold} sản phẩm",
+            &[("sold", sold_count.max(0).to_string())],
+        ));
+    }
+
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    trl(
+        ctx,
+        lang,
+        "product_description_line",
+        "📝 Mô tả:\n{description}\n\n",
+        &[("description", lines.join("\n\n"))],
+    )
+}
+
 fn render_button_custom_emoji_placeholders(value: &str) -> (String, Option<String>) {
     let mut rendered = String::with_capacity(value.len());
     let mut first_custom_id = None;
@@ -2953,6 +2972,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
 
         let ctx = test_ctx();
@@ -2987,6 +3007,7 @@ mod tests {
             button_custom_emoji_id: Some("5368324170671202286".to_string()),
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
 
         let button = product_button_json(&product);
@@ -3019,6 +3040,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
 
         let button = product_button_json(&product);
@@ -3053,6 +3075,7 @@ mod tests {
                     button_custom_emoji_id: None,
                     created_at: None,
                     sort_order: None,
+                    show_sold_count: Some(0),
                 },
                 2,
             ),
@@ -3078,6 +3101,7 @@ mod tests {
                     button_custom_emoji_id: None,
                     created_at: None,
                     sort_order: None,
+                    show_sold_count: Some(0),
                 },
                 1,
             ),
@@ -3117,6 +3141,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
         let ctx = test_ctx();
 
@@ -3378,6 +3403,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
         let ctx = test_ctx();
         let keyboard = build_shop_home_keyboard_json(&ctx, "vi", &[], &[(product, 0)]);
@@ -3560,6 +3586,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
         let ctx = test_ctx();
         let keyboard = build_category_product_keyboard_json(&ctx, "vi", &[(product, 4)]);
@@ -3638,6 +3665,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
 
         assert!(!uploaded_file_has_sellable_stock(&product, 0));
@@ -3667,6 +3695,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         };
         assert!(product_is_available_for_purchase(&product));
 
@@ -3697,6 +3726,54 @@ mod tests {
 
         assert!(text.contains("Test bot\n\n⌨️ Nhập số lượng muốn mua:"));
         assert!(!text.contains("Test bot\n\n\n⌨️"));
+    }
+
+    fn test_product_with_description(description: Option<&str>) -> Product {
+        Product {
+            id: 42,
+            name: "Tool".to_string(),
+            price: 50_000,
+            is_active: Some(1),
+            requires_input: Some(0),
+            input_prompt: None,
+            description: description.map(ToOwned::to_owned),
+            image_url: None,
+            delivery_type: Some("stock_item".to_string()),
+            file_path: None,
+            file_name: None,
+            file_mime: None,
+            category_id: None,
+            category: None,
+            category_emoji: None,
+            category_custom_emoji_id: None,
+            button_emoji: None,
+            button_custom_emoji_id: None,
+            created_at: None,
+            sort_order: None,
+            show_sold_count: Some(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn product_description_prompt_appends_sold_count_at_the_end_when_enabled() {
+        let ctx = test_ctx();
+        let product = test_product_with_description(Some("Mô tả"));
+
+        let text = product_description_prompt_line(&ctx, "vi", &product, 12);
+
+        assert!(text.contains("Mô tả"));
+        assert!(text.trim_end().ends_with("Đã bán: 12 sản phẩm"));
+    }
+
+    #[tokio::test]
+    async fn product_description_prompt_omits_sold_count_when_disabled() {
+        let ctx = test_ctx();
+        let mut product = test_product_with_description(Some("Mô tả"));
+        product.show_sold_count = Some(0);
+
+        let text = product_description_prompt_line(&ctx, "vi", &product, 12);
+
+        assert!(!text.contains("Đã bán:"));
     }
 
     #[tokio::test]
@@ -3823,8 +3900,8 @@ mod tests {
     }
 
     #[test]
-    fn stock_notification_disable_callback_is_routed_to_shop_plugin() {
-        assert!(is_shop_callback_data("stocknotify:off"));
+    fn stock_notification_disable_callback_is_not_routed_to_shop_plugin() {
+        assert!(!is_shop_callback_data("stocknotify:off"));
     }
 
     #[test]
@@ -4206,7 +4283,6 @@ fn is_shop_callback_data(text: &str) -> bool {
         || text == "shop_api_new"
         || text.starts_with("shop_cat:")
         || text.starts_with("buy:")
-        || text == "stocknotify:off"
         || text.starts_with("qty:")
         || text.starts_with("plan:")
         || text.starts_with("cancel:")

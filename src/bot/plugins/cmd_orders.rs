@@ -807,6 +807,7 @@ mod tests {
                 button_custom_emoji_id: None,
                 created_at: None,
                 sort_order: None,
+                show_sold_count: Some(0),
             },
         }
     }

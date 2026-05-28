@@ -362,7 +362,7 @@
               <label class="form-label small fw-bold text-muted">Nút gửi kèm (JSON)</label>
               <textarea class="form-control font-monospace" id="bc-buttons-json" rows="3"
                 placeholder='[[{"text":"{5375135722514685501} Xem sản phẩm","callback_data":"start:shop"}]]'></textarea>
-              <div class="form-text">Mỗi dòng nút là một mảng. Callback hỗ trợ: start:shop, start:wallet, start:orders, wallet:topup, buy:ID, shop_api.</div>
+              <div class="form-text">Mỗi dòng nút là một mảng. Callback hỗ trợ đầy đủ: start:menu, start:shop, start:wallet, start:orders, start:help, start:language; wallet:topup, wallet:topup_usdt, wallet:topup_binance, wallet:topup_history, wallet:show; buy:ID; shop_api, shop_api_new.</div>
             </div>
             <div class="mb-4">
               <label class="form-label small fw-bold text-muted">Ảnh đính kèm (Tùy chọn)</label>
@@ -638,6 +638,12 @@
               <label class="form-label">Mô tả sản phẩm</label>
               <textarea class="form-control" id="product-description" rows="3"
                 placeholder="Mô tả chi tiết sản phẩm"></textarea>
+            </div>
+            <div class="col-sm-12">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="product-show-sold-count">
+                <label class="form-check-label" for="product-show-sold-count">Hiển thị số đã bán ở cuối mô tả</label>
+              </div>
             </div>
             <div class="col-sm-12">
               <label class="form-label">Ảnh sản phẩm</label>

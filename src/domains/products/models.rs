@@ -23,6 +23,7 @@ pub struct Product {
     pub button_custom_emoji_id: Option<String>,
     pub created_at: Option<String>,
     pub sort_order: Option<i64>,
+    pub show_sold_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

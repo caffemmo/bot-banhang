@@ -47,6 +47,7 @@ struct OrderJoinRow {
     p_button_emoji: Option<String>,
     p_button_custom_emoji_id: Option<String>,
     p_created_at: Option<String>,
+    p_show_sold_count: Option<i64>,
 }
 
 const PRODUCT_SELECT: &str = r#"p.id,
@@ -68,7 +69,8 @@ const PRODUCT_SELECT: &str = r#"p.id,
         p.button_emoji,
         p.button_custom_emoji_id,
         p.created_at,
-        p.sort_order"#;
+        p.sort_order,
+        p.show_sold_count"#;
 
 const PRODUCT_FROM: &str =
     " FROM products p LEFT JOIN product_categories pc ON pc.id = p.category_id";
@@ -730,6 +732,37 @@ pub async fn update_product(
     Ok(product)
 }
 
+pub async fn update_product_show_sold_count(
+    pool: &SqlitePool,
+    id: i64,
+    show_sold_count: i64,
+) -> Result<Option<Product>> {
+    let result = sqlx::query(r#"UPDATE products SET show_sold_count = ? WHERE id = ?"#)
+        .bind(show_sold_count)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+
+    get_product(pool, id).await
+}
+
+pub async fn count_product_paid_quantity_sold(pool: &SqlitePool, product_id: i64) -> Result<i64> {
+    let sold = sqlx::query_scalar::<_, Option<i64>>(
+        r#"SELECT COALESCE(SUM(qty), 0)
+        FROM orders
+        WHERE product_id = ? AND status = 'paid'"#,
+    )
+    .bind(product_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(sold.unwrap_or(0))
+}
+
 pub async fn update_product_file_metadata(
     pool: &SqlitePool,
     id: i64,
@@ -943,6 +976,62 @@ mod tests {
         assert_eq!(available[0].content, "available");
         assert_eq!(available[0].is_buy, Some(0));
     }
+
+    #[tokio::test]
+    async fn count_product_paid_quantity_sold_sums_paid_orders_only() {
+        let pool = test_pool().await;
+        let product = insert_product(
+            &pool,
+            "Sold count",
+            5_000,
+            Some(1),
+            Some(0),
+            None,
+            None,
+            None,
+            Some("stock_item"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        for (idx, status, qty) in [
+            (1, OrderStatus::Paid, 2),
+            (2, OrderStatus::Paid, 3),
+            (3, OrderStatus::Pending, 9),
+            (4, OrderStatus::Refunded, 4),
+            (5, OrderStatus::Cancel, 7),
+        ] {
+            let mut order = Order::new(
+                1,
+                1,
+                product.id,
+                qty,
+                qty * product.price,
+                format!("MEMO{idx}"),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            order.status = status;
+            insert_order(&pool, &order).await.unwrap();
+        }
+
+        assert_eq!(
+            count_product_paid_quantity_sold(&pool, product.id)
+                .await
+                .unwrap(),
+            5
+        );
+    }
 }
 
 #[allow(dead_code)]
@@ -1064,7 +1153,8 @@ pub async fn get_order_with_product(
             NULL as p_category_custom_emoji_id,
             p.button_emoji as p_button_emoji,
             p.button_custom_emoji_id as p_button_custom_emoji_id,
-            p.created_at as p_created_at
+            p.created_at as p_created_at,
+            p.show_sold_count as p_show_sold_count
         FROM orders o
         JOIN products p ON p.id = o.product_id
         WHERE o.id = ?"#,
@@ -1124,7 +1214,8 @@ pub async fn list_orders_admin(
             NULL as p_category_custom_emoji_id,
             p.button_emoji as p_button_emoji,
             p.button_custom_emoji_id as p_button_custom_emoji_id,
-            p.created_at as p_created_at
+            p.created_at as p_created_at,
+            p.show_sold_count as p_show_sold_count
         FROM orders o
         JOIN products p ON p.id = o.product_id"#,
     );
@@ -1226,7 +1317,8 @@ pub async fn list_orders_for_user(
             NULL as p_category_custom_emoji_id,
             p.button_emoji as p_button_emoji,
             p.button_custom_emoji_id as p_button_custom_emoji_id,
-            p.created_at as p_created_at
+            p.created_at as p_created_at,
+            p.show_sold_count as p_show_sold_count
         FROM orders o
         JOIN products p ON p.id = o.product_id
         WHERE o.user_id = ?
@@ -1281,7 +1373,8 @@ pub async fn find_order_by_memo(pool: &SqlitePool, memo: &str) -> Result<Option<
             NULL as p_category_custom_emoji_id,
             p.button_emoji as p_button_emoji,
             p.button_custom_emoji_id as p_button_custom_emoji_id,
-            p.created_at as p_created_at
+            p.created_at as p_created_at,
+            p.show_sold_count as p_show_sold_count
         FROM orders o
         JOIN products p ON p.id = o.product_id
         WHERE o.bank_memo = ?"#,
@@ -1333,7 +1426,8 @@ pub async fn list_pending_before(pool: &SqlitePool, before: &str) -> Result<Vec<
             NULL as p_category_custom_emoji_id,
             p.button_emoji as p_button_emoji,
             p.button_custom_emoji_id as p_button_custom_emoji_id,
-            p.created_at as p_created_at
+            p.created_at as p_created_at,
+            p.show_sold_count as p_show_sold_count
         FROM orders o
         JOIN products p ON p.id = o.product_id
         WHERE o.status = 'pending' AND o.created_at <= ?
@@ -1473,6 +1567,7 @@ fn map_join_row(row: OrderJoinRow) -> OrderWithProduct {
             button_custom_emoji_id: row.p_button_custom_emoji_id,
             created_at: row.p_created_at,
             sort_order: None,
+            show_sold_count: row.p_show_sold_count,
         },
     }
 }

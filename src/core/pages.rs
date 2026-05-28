@@ -101,6 +101,13 @@ mod tests {
     }
 
     #[test]
+    fn admin_product_modal_exposes_sold_count_toggle() {
+        assert!(ADMIN_HTML.contains("id=\"product-show-sold-count\""));
+        assert!(ADMIN_HTML.contains("Hiển thị số đã bán"));
+        assert!(ADMIN_PRODUCTS_JS.contains("show_sold_count"));
+    }
+
+    #[test]
     fn admin_broadcast_templates_are_scoped_to_selected_mode() {
         assert!(ADMIN_CORE_JS.contains("filteredBroadcastTemplates()"));
         assert!(ADMIN_CORE_JS.contains("renderBroadcastTemplateOptions({ preferredId"));
@@ -109,5 +116,24 @@ mod tests {
         assert!(ADMIN_EVENTS_JS.contains("selectedBroadcastTemplate()"));
         assert!(ADMIN_EVENTS_JS.contains("applyBroadcastTemplate(template.id)"));
         assert!(ADMIN_EVENTS_JS.contains("toggleBroadcastProductPicker()"));
+    }
+
+    #[test]
+    fn admin_broadcast_documents_all_supported_callback_patterns() {
+        assert!(ADMIN_HTML.contains("Callback hỗ trợ đầy đủ"));
+        assert!(ADMIN_HTML.contains("start:menu"));
+        assert!(ADMIN_HTML.contains("start:shop"));
+        assert!(ADMIN_HTML.contains("start:wallet"));
+        assert!(ADMIN_HTML.contains("start:orders"));
+        assert!(ADMIN_HTML.contains("start:help"));
+        assert!(ADMIN_HTML.contains("start:language"));
+        assert!(ADMIN_HTML.contains("wallet:topup"));
+        assert!(ADMIN_HTML.contains("wallet:topup_usdt"));
+        assert!(ADMIN_HTML.contains("wallet:topup_binance"));
+        assert!(ADMIN_HTML.contains("wallet:topup_history"));
+        assert!(ADMIN_HTML.contains("wallet:show"));
+        assert!(ADMIN_HTML.contains("buy:ID"));
+        assert!(ADMIN_HTML.contains("shop_api"));
+        assert!(ADMIN_HTML.contains("shop_api_new"));
     }
 }

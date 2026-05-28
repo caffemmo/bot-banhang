@@ -26,7 +26,6 @@ use crate::domains::{
 
 const BROADCAST_PRODUCT_PAGE_SIZE: i64 = 10;
 const BROADCAST_BUTTON_NAME_MAX_CHARS: usize = 36;
-const STOCK_NOTIFY_CALLBACK_OFF: &str = "stocknotify:off";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BroadcastMode {
@@ -258,6 +257,46 @@ fn default_broadcast_templates() -> Vec<BroadcastTemplateSeed> {
             buttons_json: r#"[[{"text":"Xem đơn đã mua","callback_data":"start:orders"},{"text":"Xem sản phẩm","callback_data":"start:shop"}]]"#,
             product_id: None,
             sort_order: 5,
+        },
+        BroadcastTemplateSeed {
+            name: "Cập nhật kho mới",
+            text: "{5375135722514685501} KHO VỪA CẬP NHẬT\n━━━━━━━━━━━━\n\nShop vừa thêm hoặc bổ sung một số sản phẩm.\nBạn có thể xem danh sách hiện có và nạp ví trước khi đặt đơn.",
+            mode: "product_list",
+            buttons_json: r#"[[{"text":"Xem danh sách","callback_data":"start:shop"},{"text":"Nạp ví","callback_data":"wallet:topup"}]]"#,
+            product_id: None,
+            sort_order: 6,
+        },
+        BroadcastTemplateSeed {
+            name: "Nhắc nạp ví",
+            text: "{5420147074266044260} NHẮC NẠP VÍ\n━━━━━━━━━━━━\n\nBạn nên nạp ví sẵn để thanh toán nhanh khi sản phẩm cần mua còn hàng.",
+            mode: "message_only",
+            buttons_json: r#"[[{"text":"Nạp ví ngay","callback_data":"wallet:topup"},{"text":"Lịch sử nạp","callback_data":"wallet:topup_history"}]]"#,
+            product_id: None,
+            sort_order: 7,
+        },
+        BroadcastTemplateSeed {
+            name: "Hướng dẫn mua hàng",
+            text: "HƯỚNG DẪN MUA HÀNG\n━━━━━━━━━━━━\n\nNếu bạn cần xem cách đặt đơn hoặc quay lại danh sách sản phẩm, dùng các nút bên dưới.",
+            mode: "message_only",
+            buttons_json: r#"[[{"text":"Hướng dẫn","callback_data":"start:help"},{"text":"Xem shop","callback_data":"start:shop"}]]"#,
+            product_id: None,
+            sort_order: 8,
+        },
+        BroadcastTemplateSeed {
+            name: "Kiểm tra đơn hàng",
+            text: "KIỂM TRA ĐƠN HÀNG\n━━━━━━━━━━━━\n\nBạn có thể xem lại các đơn đã mua và số dư ví hiện tại.",
+            mode: "message_only",
+            buttons_json: r#"[[{"text":"Đơn đã mua","callback_data":"start:orders"},{"text":"Xem ví","callback_data":"start:wallet"}]]"#,
+            product_id: None,
+            sort_order: 9,
+        },
+        BroadcastTemplateSeed {
+            name: "Kết nối API",
+            text: "KẾT NỐI API SHOP\n━━━━━━━━━━━━\n\nDùng API để tích hợp mua hàng tự động hoặc tạo key API mới khi cần.",
+            mode: "message_only",
+            buttons_json: r#"[[{"text":"API của tôi","callback_data":"shop_api"},{"text":"Tạo API mới","callback_data":"shop_api_new"}]]"#,
+            product_id: None,
+            sort_order: 10,
         },
     ]
 }
@@ -569,10 +608,7 @@ fn stock_restock_keyboard_json(ctx: &AppContext, lang: &str, product_id: i64) ->
             [
                 i18n::inline_button_callback_json(ctx, lang, "stock_notify_buy_now_btn", "🛒 Mua ngay", format!("buy:{product_id}")),
                 i18n::inline_button_callback_json(ctx, lang, "stock_notify_view_more_btn", "📋 Xem SP khác", "start:shop"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "stock_notify_disable_btn", "🔕 Tắt thông báo SP mới", STOCK_NOTIFY_CALLBACK_OFF),
-            ],
+            ]
         ]
     })
 }
@@ -1369,10 +1405,10 @@ mod tests {
     }
 
     #[test]
-    fn default_broadcast_templates_are_five_reusable_slots() {
+    fn default_broadcast_templates_are_ten_reusable_slots() {
         let templates = default_broadcast_templates();
 
-        assert_eq!(templates.len(), 5);
+        assert_eq!(templates.len(), 10);
         assert!(
             templates
                 .iter()
@@ -1415,8 +1451,9 @@ mod tests {
 
         let templates = list_broadcast_templates(&pool).await.unwrap();
 
-        assert_eq!(templates.len(), 5);
+        assert_eq!(templates.len(), 10);
         assert_eq!(templates[0].id, 1);
+        assert_eq!(templates[9].id, 10);
         assert_eq!(templates[0].mode, "view_shop");
         assert!(templates[0].buttons_json.contains("start:shop"));
         assert!(
@@ -1471,17 +1508,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stock_restock_keyboard_points_to_buy_shop_and_disable_notifications() {
+    async fn stock_restock_keyboard_points_to_buy_and_shop_only() {
         let ctx = test_ctx();
 
         let json = stock_restock_keyboard_json(&ctx, "vi", 42);
 
         assert_eq!(json["inline_keyboard"][0][0]["callback_data"], "buy:42");
         assert_eq!(json["inline_keyboard"][0][1]["callback_data"], "start:shop");
-        assert_eq!(
-            json["inline_keyboard"][1][0]["callback_data"],
-            "stocknotify:off"
-        );
+        let callbacks = json["inline_keyboard"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+        assert!(!callbacks.contains(&"stocknotify:off"));
     }
 
     fn test_ctx() -> Arc<AppContext> {
@@ -1534,6 +1575,7 @@ mod tests {
             button_custom_emoji_id: None,
             created_at: None,
             sort_order: None,
+            show_sold_count: Some(0),
         }
     }
 

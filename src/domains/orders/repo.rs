@@ -89,6 +89,7 @@ pub fn map_join_row(row: OrderJoinRow) -> OrderWithProduct {
             button_custom_emoji_id: row.p_button_custom_emoji_id,
             created_at: row.p_created_at,
             sort_order: None,
+            show_sold_count: Some(0),
         },
     }
 }
