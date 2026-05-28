@@ -107,6 +107,8 @@ pub fn payment_source_label(source: &PaymentSource) -> &'static str {
         PaymentSource::BinancePay { .. } => "binance_pay",
         PaymentSource::Bep20 { .. } => "bep20",
         PaymentSource::AdminManual { .. } => "admin_manual",
+        PaymentSource::Wallet => "wallet",
+        PaymentSource::ClientApiWallet => "client_api_wallet",
     }
 }
 
@@ -197,6 +199,15 @@ mod tests {
         assert_eq!(
             json["inline_keyboard"][0][0]["callback_data"],
             "admin_refund:req:order-123"
+        );
+    }
+
+    #[test]
+    fn payment_source_labels_include_wallet_flows() {
+        assert_eq!(payment_source_label(&PaymentSource::Wallet), "wallet");
+        assert_eq!(
+            payment_source_label(&PaymentSource::ClientApiWallet),
+            "client_api_wallet"
         );
     }
 

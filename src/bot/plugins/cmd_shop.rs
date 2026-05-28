@@ -25,6 +25,8 @@ use crate::domains::crypto_pay::models::{
 use crate::domains::crypto_pay::{
     bep20 as bep20_pay, binance as binance_pay, binance_worker, repo as crypto_repo,
 };
+use crate::domains::orders::admin_notify::notify_admins_order_paid;
+use crate::domains::orders::fulfillment::PaymentSource;
 use crate::domains::orders::models::{Order, OrderReservationMode, OrderStatus, OrderWithProduct};
 use crate::domains::orders::{api as orders_api, repo as orders_repo};
 use crate::domains::products::models::Product;
@@ -1418,6 +1420,9 @@ async fn handle_pay_with_wallet(
     let updated_owp = OrderWithProduct {
         order: {
             let mut o = owp.order.clone();
+            o.status = OrderStatus::Paid;
+            o.payment_tx_id = Some("wallet".to_string());
+            o.paid_at = Some(paid_at.to_rfc3339());
             o.delivered_data = Some(delivered_data.clone());
             o
         },
@@ -1425,6 +1430,17 @@ async fn handle_pay_with_wallet(
     };
     if let Err(e) = orders_api::send_product_file(&ctx, &updated_owp, &delivered_data).await {
         tracing::error!("send_product_file after wallet payment failed: {e}");
+    }
+    if let Err(e) = notify_admins_order_paid(
+        &ctx,
+        &updated_owp,
+        "wallet",
+        paid_at,
+        &PaymentSource::Wallet,
+    )
+    .await
+    {
+        tracing::error!("send paid-order admin notification after wallet payment failed: {e}");
     }
 
     Ok(())

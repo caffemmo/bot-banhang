@@ -19,6 +19,8 @@ pub enum PaymentSource {
     BinancePay { prepay_id: String },
     Bep20 { tx_hash: String },
     AdminManual { admin_user_id: Option<i64> },
+    Wallet,
+    ClientApiWallet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +184,9 @@ fn paid_amount_vnd(source: &PaymentSource, order: &OrderWithProduct) -> i64 {
         PaymentSource::BankWebhook { amount_vnd } => *amount_vnd,
         PaymentSource::AdminManual { .. }
         | PaymentSource::BinancePay { .. }
-        | PaymentSource::Bep20 { .. } => order.order.amount,
+        | PaymentSource::Bep20 { .. }
+        | PaymentSource::Wallet
+        | PaymentSource::ClientApiWallet => order.order.amount,
     }
 }
 

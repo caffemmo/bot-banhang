@@ -14,8 +14,10 @@ use serde::{Deserialize, Serialize};
 use crate::app::AppContext;
 use crate::bot::plugins::cmd_wallet::format_vnd;
 use crate::core::responses::{ApiError, ApiResult, ok};
+use crate::domains::orders::admin_notify::notify_admins_order_paid;
 use crate::domains::orders::api as orders_api;
-use crate::domains::orders::models::Order;
+use crate::domains::orders::fulfillment::PaymentSource;
+use crate::domains::orders::models::{Order, OrderStatus, OrderWithProduct};
 use crate::domains::orders::repo as orders_repo;
 use crate::domains::products::models::{Product, ProductPlan};
 use crate::domains::products::repo as products_repo;
@@ -235,16 +237,38 @@ async fn buy_with_wallet(
         Some("client_api_wallet_purchase"),
     )
     .await?;
+    let paid_at = Utc::now();
     orders_repo::mark_order_paid(
         &mut tx,
         &order.id,
         "client_api_wallet",
-        Utc::now(),
+        paid_at,
         Some(&delivered_data),
         order.reserved_item_ids.as_deref(),
     )
     .await?;
     tx.commit().await?;
+
+    order.status = OrderStatus::Paid;
+    order.payment_tx_id = Some("client_api_wallet".to_string());
+    order.paid_at = Some(paid_at.to_rfc3339());
+    let paid_order = OrderWithProduct {
+        order: order.clone(),
+        product: product.clone(),
+    };
+    if let Err(err) = notify_admins_order_paid(
+        ctx,
+        &paid_order,
+        "client_api_wallet",
+        paid_at,
+        &PaymentSource::ClientApiWallet,
+    )
+    .await
+    {
+        tracing::error!(
+            "send paid-order admin notification after client API wallet payment failed: {err}"
+        );
+    }
 
     Ok(ClientOrderResponse {
         order_id: order.id,
