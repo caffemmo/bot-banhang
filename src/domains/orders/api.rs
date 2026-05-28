@@ -245,6 +245,7 @@ fn status_str(status: &OrderStatus) -> &'static str {
     match status {
         OrderStatus::Pending => "pending",
         OrderStatus::Paid => "paid",
+        OrderStatus::Refunded => "refunded",
         OrderStatus::Cancel => "cancel",
         OrderStatus::Expired => "expired",
     }
@@ -583,6 +584,7 @@ fn parse_status_filter(raw: Option<&str>) -> Option<OrderStatus> {
     match raw {
         Some("pending") => Some(OrderStatus::Pending),
         Some("paid") => Some(OrderStatus::Paid),
+        Some("refunded") => Some(OrderStatus::Refunded),
         Some("cancel") => Some(OrderStatus::Cancel),
         Some("expired") => Some(OrderStatus::Expired),
         _ => None,

@@ -1,15 +1,17 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use teloxide::types::ChatId;
+use teloxide::payloads::SendMessageSetters;
+use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 use tracing::warn;
 
 use crate::app::AppContext;
 use crate::bot::i18n;
 use crate::domains::orders::fulfillment::PaymentSource;
 use crate::domains::orders::models::OrderWithProduct;
+use crate::domains::users::repo as users_repo;
 
 const ADMIN_ORDER_PAID_NOTIFICATION_KEY: &str = "admin_order_paid_notification";
-const ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT: &str = "✅ New paid order\n\nOrder: {order_id}\nMemo: {memo}\nProduct: {product}\nPlan: {plan}\nQuantity: {qty}\nAmount: {amount} VND\nCustomer: {customer}\nUser ID: {user_id}\nChat ID: {chat_id}\nPayment ref: {payment_ref}\nSource: {source}\nPaid at: {paid_at}";
+const ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT: &str = "✅ New paid order\n\nOrder: {order_id}\nMemo: {memo}\nProduct: {product}\nPlan: {plan}\nQuantity: {qty}\nAmount: {amount} VND\nCustomer: {customer}\nUser ID: {user_id}\nUsername: {username}\nChat ID: {chat_id}\nPayment ref: {payment_ref}\nSource: {source}\nPaid at: {paid_at}";
 
 pub async fn notify_admins_order_paid(
     ctx: &AppContext,
@@ -27,6 +29,8 @@ pub async fn notify_admins_order_paid(
         return Ok(());
     }
 
+    let username = order_user_display(ctx, order.order.user_id).await;
+
     for admin_id in admin_ids {
         let lang = i18n::user_lang_by_id(ctx, admin_id).await;
         let text = render_admin_order_paid_notification(
@@ -36,6 +40,7 @@ pub async fn notify_admins_order_paid(
             payment_ref,
             paid_at,
             payment_source_label(source),
+            &username,
         );
         if let Err(err) = i18n::send_message_for_key(
             ctx,
@@ -43,6 +48,7 @@ pub async fn notify_admins_order_paid(
             ADMIN_ORDER_PAID_NOTIFICATION_KEY,
             text,
         )
+        .reply_markup(admin_refund_request_keyboard(&order.order.id))
         .await
         {
             warn!("send paid-order admin notification failed for {admin_id}: {err}");
@@ -59,6 +65,7 @@ pub fn render_admin_order_paid_notification(
     payment_ref: &str,
     paid_at: DateTime<Utc>,
     source_label: &str,
+    username: &str,
 ) -> String {
     let plan = order
         .order
@@ -85,6 +92,7 @@ pub fn render_admin_order_paid_notification(
             ("amount", order.order.amount.to_string()),
             ("customer", customer),
             ("user_id", order.order.user_id.to_string()),
+            ("username", username.to_string()),
             ("chat_id", order.order.chat_id.to_string()),
             ("payment_ref", payment_ref.to_string()),
             ("source", source_label.to_string()),
@@ -100,6 +108,35 @@ pub fn payment_source_label(source: &PaymentSource) -> &'static str {
         PaymentSource::Bep20 { .. } => "bep20",
         PaymentSource::AdminManual { .. } => "admin_manual",
     }
+}
+
+pub fn admin_refund_request_keyboard(order_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "💸 Hoàn tiền",
+        format!("admin_refund:req:{order_id}"),
+    )]])
+}
+
+pub fn admin_refund_confirm_keyboard(order_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback(
+            "✅ Xác nhận hoàn tiền",
+            format!("admin_refund:confirm:{order_id}"),
+        ),
+        InlineKeyboardButton::callback("❌ Huỷ lệnh", format!("admin_refund:cancel:{order_id}")),
+    ]])
+}
+
+pub async fn order_user_display(ctx: &AppContext, user_id: i64) -> String {
+    users_repo::get_subscriber_by_user_id(&ctx.pool, user_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|subscriber| subscriber.username)
+        .map(|username| username.trim().trim_start_matches('@').to_string())
+        .filter(|username| !username.is_empty())
+        .map(|username| format!("@{username}"))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 #[cfg(test)]
@@ -128,7 +165,7 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([(
                     "admin_order_paid_notification".to_string(),
-                    "Đơn {memo}: {product} x{qty} = {amount}; ref {payment_ref}; {source}; {paid_at}"
+                    "Đơn {memo}: {product} x{qty} = {amount}; user {username}; ref {payment_ref}; {source}; {paid_at}"
                         .to_string(),
                 )]),
             )]),
@@ -143,11 +180,23 @@ mod tests {
             "tx-123",
             paid_at,
             "bank_webhook",
+            "@alice",
         );
 
         assert_eq!(
             text,
-            "Đơn MEMO1: Test product x2 = 50000; ref tx-123; bank_webhook; 2026-05-26T01:02:03+00:00"
+            "Đơn MEMO1: Test product x2 = 50000; user @alice; ref tx-123; bank_webhook; 2026-05-26T01:02:03+00:00"
+        );
+    }
+
+    #[test]
+    fn refund_request_keyboard_targets_order() {
+        let keyboard = admin_refund_request_keyboard("order-123");
+        let json = serde_json::to_value(&keyboard).unwrap();
+
+        assert_eq!(
+            json["inline_keyboard"][0][0]["callback_data"],
+            "admin_refund:req:order-123"
         );
     }
 

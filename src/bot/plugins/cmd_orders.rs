@@ -1,6 +1,6 @@
 use chrono::{DateTime, FixedOffset};
 use std::sync::Arc;
-use teloxide::payloads::{EditMessageTextSetters, SendMessageSetters};
+use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, CallbackQuery, Message, User};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
@@ -9,7 +9,9 @@ use crate::app::AppContext;
 use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
+use crate::domains::orders::admin_notify::{admin_refund_confirm_keyboard, order_user_display};
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
+use crate::domains::orders::refund::refund_paid_order_to_wallet;
 use crate::domains::orders::repo;
 use crate::domains::users::repo as users_repo;
 
@@ -179,9 +181,130 @@ fn format_status(ctx: &AppContext, lang: &str, status: &OrderStatus) -> String {
     match status {
         OrderStatus::Pending => i18n::t(ctx, lang, "order_status_pending", "pending"),
         OrderStatus::Paid => i18n::t(ctx, lang, "order_status_paid", "paid"),
+        OrderStatus::Refunded => i18n::t(ctx, lang, "order_status_refunded", "refunded"),
         OrderStatus::Cancel => i18n::t(ctx, lang, "order_status_cancel", "cancel"),
         OrderStatus::Expired => i18n::t(ctx, lang, "order_status_expired", "expired"),
     }
+}
+
+async fn handle_admin_refund_callback(
+    ctx: &Arc<AppContext>,
+    q: CallbackQuery,
+) -> anyhow::Result<()> {
+    let data = q.data.clone().unwrap_or_default();
+    let admin_id = q.from.id.0 as i64;
+    if !ctx
+        .order_notification_admin_ids()
+        .into_iter()
+        .any(|allowed| allowed == admin_id)
+    {
+        let _ = ctx
+            .bot
+            .answer_callback_query(q.id.clone())
+            .text("Bạn không có quyền hoàn tiền.")
+            .show_alert(true)
+            .await;
+        return Ok(());
+    }
+
+    let Some(ref msg) = q.message else {
+        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+        return Ok(());
+    };
+    let chat_id = msg.chat().id;
+    let message_id = msg.id();
+
+    if let Some(order_id) = data.strip_prefix("admin_refund:req:") {
+        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+        let Some(order) = repo::get_order_with_product(&ctx.pool, order_id).await? else {
+            ctx.bot
+                .send_message(chat_id, "Không tìm thấy đơn để hoàn tiền.")
+                .await?;
+            return Ok(());
+        };
+        if !matches!(
+            order.order.status,
+            OrderStatus::Paid | OrderStatus::Refunded
+        ) {
+            ctx.bot
+                .send_message(
+                    chat_id,
+                    format!(
+                        "Không thể hoàn tiền đơn {} vì trạng thái hiện tại là {}.",
+                        order.order.id,
+                        order.order.status.to_string()
+                    ),
+                )
+                .await?;
+            return Ok(());
+        }
+        let username = order_user_display(ctx, order.order.user_id).await;
+        let text = format!(
+            "Xác nhận hoàn tiền\n\nOrder: {}\nUser ID: {}\nUsername: {}\nSố tiền: {}\n\nTiền sẽ được cộng vào ví user.",
+            order.order.id,
+            order.order.user_id,
+            username,
+            format_vnd(order.order.amount),
+        );
+        ctx.bot
+            .send_message(chat_id, text)
+            .reply_markup(admin_refund_confirm_keyboard(&order.order.id))
+            .await?;
+        return Ok(());
+    }
+
+    if let Some(order_id) = data.strip_prefix("admin_refund:cancel:") {
+        let _ = ctx
+            .bot
+            .answer_callback_query(q.id.clone())
+            .text("Đã huỷ lệnh hoàn tiền.")
+            .await;
+        ctx.bot
+            .edit_message_text(
+                chat_id,
+                message_id,
+                format!("Đã huỷ lệnh hoàn tiền đơn {order_id}."),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    if let Some(order_id) = data.strip_prefix("admin_refund:confirm:") {
+        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+        let Some(order) = repo::get_order_with_product(&ctx.pool, order_id).await? else {
+            ctx.bot
+                .edit_message_text(chat_id, message_id, "Không tìm thấy đơn để hoàn tiền.")
+                .await?;
+            return Ok(());
+        };
+        let username = order_user_display(ctx, order.order.user_id).await;
+        let outcome = refund_paid_order_to_wallet(ctx, order_id, admin_id, &username).await?;
+        let amount_line = match outcome.balance_after {
+            Some(balance) => format!(
+                "Đã cộng {} vào ví. Số dư sau hoàn: {}.",
+                format_vnd(outcome.order.order.amount),
+                format_vnd(balance)
+            ),
+            None => "Đơn này đã được hoàn tiền trước đó, không cộng thêm lần nữa.".to_string(),
+        };
+        ctx.bot
+            .edit_message_text(
+                chat_id,
+                message_id,
+                format!(
+                    "Hoàn tiền thành công\n\nOrder: {}\nUser ID: {}\nUsername: {}\n{}",
+                    outcome.order.order.id,
+                    outcome.order.order.user_id,
+                    outcome.username,
+                    amount_line
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+    Ok(())
 }
 
 fn format_paid_at_display(raw: Option<&str>) -> String {
@@ -582,6 +705,11 @@ impl AppPlugin for OrdersCommandPlugin {
         _dialogue: BotDialogue,
     ) -> Result<bool, anyhow::Error> {
         let data = q.data.clone().unwrap_or_default();
+        if data.starts_with("admin_refund:") {
+            handle_admin_refund_callback(&ctx, q).await?;
+            return Ok(true);
+        }
+
         if data == "orders:list" || data.starts_with("order:") || data.starts_with("order_support:")
         {
             handle_orders_callback(&ctx, q).await?;

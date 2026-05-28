@@ -13,6 +13,8 @@ pub enum OrderStatus {
     Pending,
     #[sqlx(rename = "paid")]
     Paid,
+    #[sqlx(rename = "refunded")]
+    Refunded,
     #[sqlx(rename = "cancel")]
     Cancel,
     #[sqlx(rename = "expired")]
@@ -44,6 +46,7 @@ impl ToString for OrderStatus {
         match self {
             OrderStatus::Pending => "pending",
             OrderStatus::Paid => "paid",
+            OrderStatus::Refunded => "refunded",
             OrderStatus::Cancel => "cancel",
             OrderStatus::Expired => "expired",
         }
@@ -55,6 +58,7 @@ impl OrderStatus {
     pub fn from_str(s: &str) -> Self {
         match s {
             "paid" => OrderStatus::Paid,
+            "refunded" => OrderStatus::Refunded,
             "cancel" => OrderStatus::Cancel,
             "expired" => OrderStatus::Expired,
             _ => OrderStatus::Pending,

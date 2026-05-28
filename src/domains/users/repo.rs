@@ -61,6 +61,21 @@ pub async fn preferred_language(pool: &SqlitePool, user_id: i64) -> Result<Optio
     Ok(lang.flatten())
 }
 
+pub async fn get_subscriber_by_user_id(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Option<Subscriber>> {
+    let sub = sqlx::query_as::<sqlx::Sqlite, Subscriber>(
+        r#"SELECT user_id, chat_id, username, first_name, last_name, full_name, language_code, preferred_language, stock_notifications_enabled, is_bot, created_at, updated_at
+        FROM subscribers
+        WHERE user_id = ?"#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(sub)
+}
+
 pub async fn list_subscribers(pool: &SqlitePool) -> Result<Vec<Subscriber>> {
     let subs = sqlx::query_as::<sqlx::Sqlite, Subscriber>(
         r#"SELECT user_id, chat_id, username, first_name, last_name, full_name, language_code, preferred_language, stock_notifications_enabled, is_bot, created_at, updated_at
