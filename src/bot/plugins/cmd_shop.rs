@@ -1260,7 +1260,6 @@ async fn handle_pay_with_wallet(
     user_id: i64,
     order_id: &str,
 ) -> Result<()> {
-    use chrono::Utc;
     let lang = i18n::user_lang_by_id(&ctx, user_id).await;
 
     let Some(owp) = orders_repo::get_order_with_product(&ctx.pool, order_id).await? else {
@@ -1328,52 +1327,8 @@ async fn handle_pay_with_wallet(
         return Ok(());
     }
 
-    // Xác định delivered_data
-    let delivered_data = if let Some(data) = &owp.order.delivered_data {
-        data.clone()
-    } else if orders_api::product_delivery_type(&owp.product) == "uploaded_file" {
-        return Err(anyhow!(
-            "uploaded-file order is missing reserved delivery data; please recreate the order."
-        ));
-    } else {
-        // Lấy từ kho hàng
-        let mut tx = ctx.pool.begin().await?;
-        let reserved = repo::take_product_items(&mut tx, owp.order.product_id, owp.order.qty)
-            .await
-            .map_err(|e| anyhow!("Không đủ hàng trong kho: {e}"))?;
-        let data = reserved
-            .iter()
-            .map(|i| i.content.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if data.is_empty() {
-            return Err(anyhow!("Kho hàng trống"));
-        }
-        tx.commit().await?;
-        data
-    };
-
-    // Atomic: trừ ví + đánh dấu paid
-    let paid_at = Utc::now();
-    let mut tx = ctx.pool.begin().await?;
-    let balance_after = wallet_repo::debit_wallet(
-        &mut tx,
-        user_id,
-        owp.order.amount,
-        order_id,
-        Some("wallet_purchase"),
-    )
-    .await?;
-    orders_repo::mark_order_paid(
-        &mut tx,
-        order_id,
-        "wallet",
-        paid_at,
-        Some(&delivered_data),
-        owp.order.reserved_item_ids.as_deref(),
-    )
-    .await?;
-    tx.commit().await?;
+    let (delivered_data, reserved_item_ids, balance_after, paid_at) =
+        complete_wallet_payment_transaction(&ctx.pool, &owp, user_id, order_id).await?;
 
     // Cập nhật message
     let done_text = format!(
@@ -1424,6 +1379,7 @@ async fn handle_pay_with_wallet(
             o.payment_tx_id = Some("wallet".to_string());
             o.paid_at = Some(paid_at.to_rfc3339());
             o.delivered_data = Some(delivered_data.clone());
+            o.reserved_item_ids = reserved_item_ids;
             o
         },
         product: owp.product.clone(),
@@ -1444,6 +1400,66 @@ async fn handle_pay_with_wallet(
     }
 
     Ok(())
+}
+
+async fn complete_wallet_payment_transaction(
+    pool: &crate::db::DbPool,
+    owp: &OrderWithProduct,
+    user_id: i64,
+    order_id: &str,
+) -> Result<(String, Option<String>, i64, chrono::DateTime<Utc>)> {
+    let paid_at = Utc::now();
+    let mut tx = pool.begin().await?;
+    let mut reserved_item_ids = owp.order.reserved_item_ids.clone();
+
+    let delivered_data = if let Some(data) = &owp.order.delivered_data {
+        data.clone()
+    } else if orders_api::product_delivery_type(&owp.product) == "uploaded_file" {
+        return Err(anyhow!(
+            "uploaded-file order is missing reserved delivery data; please recreate the order."
+        ));
+    } else {
+        let reserved = repo::take_product_items(&mut tx, owp.order.product_id, owp.order.qty)
+            .await
+            .map_err(|e| anyhow!("Không đủ hàng trong kho: {e}"))?;
+        let data = reserved
+            .iter()
+            .map(|i| i.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if data.is_empty() {
+            return Err(anyhow!("Kho hàng trống"));
+        }
+        reserved_item_ids = Some(
+            reserved
+                .iter()
+                .map(|item| item.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        data
+    };
+
+    let balance_after = wallet_repo::debit_wallet(
+        &mut tx,
+        user_id,
+        owp.order.amount,
+        order_id,
+        Some("wallet_purchase"),
+    )
+    .await?;
+    orders_repo::mark_order_paid(
+        &mut tx,
+        order_id,
+        "wallet",
+        paid_at,
+        Some(&delivered_data),
+        reserved_item_ids.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok((delivered_data, reserved_item_ids, balance_after, paid_at))
 }
 
 async fn handle_qty_message(
@@ -4171,6 +4187,81 @@ mod tests {
         assert_eq!(available_reason, None);
         assert_eq!(short_mode, OrderReservationMode::NoReserve);
         assert_eq!(short_reason, None);
+    }
+
+    #[tokio::test]
+    async fn wallet_payment_rolls_back_stock_when_debit_fails() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let product = repo::insert_product(
+            &pool,
+            "Key",
+            10_000,
+            Some(1),
+            Some(0),
+            None,
+            None,
+            None,
+            Some("stock_item"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let item_id =
+            sqlx::query("INSERT INTO product_items (product_id, content, is_buy) VALUES (?, ?, 0)")
+                .bind(product.id)
+                .bind("secret-key")
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+        let order = Order::new(
+            42,
+            420,
+            product.id,
+            1,
+            10_000,
+            "ORDER-WALLET-FAIL".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        orders_repo::insert_order(&pool, &order).await.unwrap();
+        let owp = orders_repo::get_order_with_product(&pool, &order.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let err = complete_wallet_payment_transaction(&pool, &owp, 42, &order.id)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("Số dư ví không đủ"));
+        let is_buy: i64 = sqlx::query_scalar("SELECT is_buy FROM product_items WHERE id = ?")
+            .bind(item_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(is_buy, 0);
+        let updated = orders_repo::get_order(&pool, &order.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, OrderStatus::Pending);
+        assert_eq!(updated.delivered_data, None);
+        assert_eq!(updated.reserved_item_ids, None);
     }
 }
 
