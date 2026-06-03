@@ -276,5 +276,8 @@
 
       $('#refresh-rev-7d').on('click', () => loadRevenue(7, '#rev-7d', '#rev-7d-range'));
       $('#refresh-rev-30d').on('click', () => loadRevenue(30, '#rev-30d', '#rev-30d-range'));
+      $('#refresh-rev-reset').on('click', loadRevenueReset);
+      $('#reset-rev-period').on('click', resetRevenuePeriod);
+      $('#refresh-rev-monthly').on('click', loadMonthlyRevenue);
     }
 

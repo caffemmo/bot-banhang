@@ -119,6 +119,47 @@
               </div>
             </div>
           </div>
+          <div class="col-12 col-lg-3">
+            <div class="card section-card h-100"
+              style="background: linear-gradient(135deg, rgba(25, 135, 84, 0.06), rgba(255, 255, 255, 0.7))">
+              <div class="card-body p-3">
+                <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                  <div class="text-muted small fw-bold">Doanh thu từ reset</div>
+                  <button class="btn btn-xs btn-outline-success py-0 px-2 touch-target" id="reset-rev-period"
+                    style="font-size: 11px;">Reset</button>
+                </div>
+                <div class="h4 fw-bold mb-1 text-success" id="rev-reset">--</div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                  <small class="text-muted x-small" id="rev-reset-range"></small>
+                  <button class="btn btn-xs btn-outline-success py-0 px-1 border-0 touch-target" id="refresh-rev-reset"
+                    style="font-size: 10px;" aria-label="Làm mới doanh thu từ reset">↻</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card section-card mb-4 border-0 shadow-sm">
+          <div class="card-body p-3 p-md-4">
+            <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+              <h5 class="fw-bold mb-0">Doanh thu theo tháng</h5>
+              <button class="btn btn-outline-success btn-sm" id="refresh-rev-monthly">Làm mới</button>
+            </div>
+            <div class="table-responsive">
+              <table class="table align-middle table-hover mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Tháng</th>
+                    <th class="text-end">Doanh thu</th>
+                  </tr>
+                </thead>
+                <tbody id="rev-monthly-body">
+                  <tr>
+                    <td colspan="2" class="text-muted text-center py-3">Đang tải...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
         <div class="card section-card mb-4 border-0 shadow-sm">
           <div class="card-body p-3 p-md-4 admin-action-card-body">
@@ -921,7 +962,7 @@
     </div>
   </div>
 
-  <script src="/assets/admin/core.js?v=20260525-broadcast-template-mode"></script>
+  <script src="/assets/admin/core.js?v=20260601-revenue-reset"></script>
   <script src="/assets/admin/products.js"></script>
   <script src="/assets/admin/orders.js"></script>
   <script src="/assets/admin/wallets.js"></script>
@@ -929,7 +970,7 @@
   <script src="/assets/admin/configs.js?v=20260522-i18n-emoji-global-toggle"></script>
   <script src="/assets/admin/i18n.js?v=20260525-keyboard-emoji-config"></script>
   <script src="/assets/admin/admins.js"></script>
-  <script src="/assets/admin/events.js?v=20260525-broadcast-template-mode"></script>
+  <script src="/assets/admin/events.js?v=20260601-revenue-reset"></script>
   <script src="/assets/admin/bootstrap.js"></script>
 </body>
 

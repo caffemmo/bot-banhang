@@ -50,6 +50,7 @@
         uploadImageFailed: 'Đã lưu thông tin sản phẩm nhưng upload ảnh thất bại. Bạn có thể thử lại ảnh sau.',
         walletTopupSuccess: 'Đã nạp tiền vào ví.',
         walletAdjustSuccess: 'Đã điều chỉnh ví.',
+        revenueResetSuccess: 'Đã reset mốc doanh thu tháng.',
       },
     };
     let productOffset = 0, orderOffset = 0, walletOffset = 0;
@@ -167,6 +168,8 @@
       await Promise.allSettled([
         loadRevenue(7, '#rev-7d', '#rev-7d-range'),
         loadRevenue(30, '#rev-30d', '#rev-30d-range'),
+        loadRevenueReset(),
+        loadMonthlyRevenue(),
         loadProducts(),
         loadOrders(),
         loadWallets(),
@@ -247,6 +250,61 @@
         $(valueEl).text('--');
         $(rangeEl).text('');
       }
+    }
+
+    async function loadRevenueReset() {
+      try {
+        const data = await apiFetch('/stats/revenue?scope=reset');
+        $('#rev-reset').text(data.amount.toLocaleString('vi-VN') + ' ₫');
+        const from = new Date(data.from).toLocaleString('vi-VN');
+        const label = data.reset_at ? 'Từ reset' : 'Từ đầu tháng';
+        $('#rev-reset-range').text(`${label}: ${from}`);
+      } catch (e) {
+        $('#rev-reset').text('--');
+        $('#rev-reset-range').text('');
+      }
+    }
+
+    function formatRevenueMonth(month) {
+      const parts = String(month || '').split('-');
+      if (parts.length !== 2) return month || '';
+      return `${parts[1]}/${parts[0]}`;
+    }
+
+    async function loadMonthlyRevenue() {
+      const $body = $('#rev-monthly-body');
+      try {
+        const data = await apiFetch('/stats/revenue/monthly?months=24');
+        const items = data.items || [];
+        if (!items.length) {
+          $body.html('<tr><td colspan="2" class="text-muted text-center py-3">Chưa có tháng nào phát sinh doanh thu</td></tr>');
+          return;
+        }
+        const html = items.map(item => `
+          <tr>
+            <td class="fw-semibold">${escapeHtml(formatRevenueMonth(item.month))}</td>
+            <td class="text-end fw-semibold text-success">${Number(item.amount || 0).toLocaleString('vi-VN')} ₫</td>
+          </tr>
+        `).join('');
+        $body.html(html);
+      } catch (e) {
+        $body.html('<tr><td colspan="2" class="text-danger text-center py-3">Tải doanh thu theo tháng thất bại</td></tr>');
+      }
+    }
+
+    function resetRevenuePeriod() {
+      showConfirmActionModal({
+        title: 'Reset doanh thu tháng',
+        description: 'Hệ thống chỉ đặt lại mốc tính doanh thu. Đơn hàng và lịch sử thanh toán cũ vẫn được giữ nguyên.',
+        confirmText: 'Reset',
+        confirmClass: 'btn-warning',
+        onConfirm: async () => {
+          await apiFetch('/stats/revenue/reset', { method: 'POST', body: '{}' });
+          await loadRevenueReset();
+          await loadMonthlyRevenue();
+          alertBox('success', I18N.alert.revenueResetSuccess);
+        },
+      });
     }
 
     async function loadBroadcastProducts() {
