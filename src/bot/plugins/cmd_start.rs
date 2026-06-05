@@ -22,6 +22,10 @@ use crate::domains::users::repo as users_repo;
 
 pub struct StartCommandPlugin;
 const JOIN_CHECK_CALLBACK: &str = "start:check_join";
+const FACEBOOK_UNLOCK_CALLBACK: &str = "start:facebook_unlock";
+const FACEBOOK_UNLOCK_TYPE_282_CALLBACK: &str = "facebook_unlock:type:282";
+const FACEBOOK_UNLOCK_TYPE_956_CALLBACK: &str = "facebook_unlock:type:956";
+const FACEBOOK_UNLOCK_APPEAL_PREFIX: &str = "facebook_unlock:appeal:";
 const DEFAULT_REQUIRED_CHANNEL_URL: &str = "https://t.me/zvwboo";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +42,7 @@ enum StartMenuAction {
     Orders,
     TopupHistory,
     ApiIntegration,
+    FacebookUnlock,
     Help,
     Language,
 }
@@ -265,10 +270,122 @@ async fn send_start_menu(
     Ok(())
 }
 
+async fn send_facebook_unlock_type_prompt(
+    ctx: &AppContext,
+    chat_id: teloxide::types::ChatId,
+    lang: &str,
+) -> Result<(), anyhow::Error> {
+    let text = t_lang(
+        ctx,
+        lang,
+        "facebook_unlock_type_prompt",
+        "Bạn muốn mở tài khoản facebook dạng nào?",
+    );
+    i18n::send_message_with_json_keyboard(
+        ctx,
+        chat_id,
+        "facebook_unlock_type_prompt",
+        text,
+        facebook_unlock_type_keyboard_json(ctx, lang),
+    )
+    .await?;
+    Ok(())
+}
+
+fn facebook_unlock_type_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
+    json!({
+        "inline_keyboard": [
+            [
+                i18n::inline_button_callback_json(
+                    ctx,
+                    lang,
+                    "facebook_unlock_type_282_btn",
+                    "dạng khóa 282",
+                    FACEBOOK_UNLOCK_TYPE_282_CALLBACK,
+                ),
+                i18n::inline_button_callback_json(
+                    ctx,
+                    lang,
+                    "facebook_unlock_type_956_btn",
+                    "dạng khóa 956",
+                    FACEBOOK_UNLOCK_TYPE_956_CALLBACK,
+                ),
+            ],
+            [i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "back_btn",
+                "⬅️ Quay lại",
+                "start:menu",
+            )],
+        ]
+    })
+}
+
+async fn send_facebook_unlock_appeal_prompt(
+    ctx: &AppContext,
+    chat_id: teloxide::types::ChatId,
+    lang: &str,
+    lock_type: &str,
+) -> Result<(), anyhow::Error> {
+    let text = t_lang(
+        ctx,
+        lang,
+        "facebook_unlock_appeal_prompt",
+        "Bạn đã kháng nghị chưa?",
+    );
+    i18n::send_message_with_json_keyboard(
+        ctx,
+        chat_id,
+        "facebook_unlock_appeal_prompt",
+        text,
+        facebook_unlock_appeal_keyboard_json(ctx, lang, lock_type),
+    )
+    .await?;
+    Ok(())
+}
+
+fn facebook_unlock_appeal_keyboard_json(ctx: &AppContext, lang: &str, lock_type: &str) -> Value {
+    json!({
+        "inline_keyboard": [
+            [
+                i18n::inline_button_callback_json(
+                    ctx,
+                    lang,
+                    "facebook_unlock_appeal_no_btn",
+                    "chưa",
+                    format!("{FACEBOOK_UNLOCK_APPEAL_PREFIX}no:{lock_type}"),
+                ),
+                i18n::inline_button_callback_json(
+                    ctx,
+                    lang,
+                    "facebook_unlock_appeal_yes_btn",
+                    "có",
+                    format!("{FACEBOOK_UNLOCK_APPEAL_PREFIX}yes:{lock_type}"),
+                ),
+            ],
+            [i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "back_btn",
+                "⬅️ Quay lại",
+                FACEBOOK_UNLOCK_CALLBACK,
+            )],
+        ]
+    })
+}
+
 fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
+            [i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_facebook_unlock",
+                "Mở khóa facebook",
+                FACEBOOK_UNLOCK_CALLBACK,
+            )],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
@@ -291,6 +408,10 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
         vec![(
             texts.get_lang("start_btn_shop", lang, "🛒 Shop"),
             "start:shop".to_string(),
+        )],
+        vec![(
+            texts.get_lang("start_btn_facebook_unlock", lang, "Mở khóa facebook"),
+            FACEBOOK_UNLOCK_CALLBACK.to_string(),
         )],
         vec![
             (
@@ -382,6 +503,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
         .unwrap_or_else(|_| {
             vec![
                 vec![json!({"text": "🛒 Shop"})],
+                vec![json!({"text": "Mở khóa facebook"})],
                 vec![json!({"text": "💰 Top up"}), json!({"text": "💳 Wallet"})],
                 vec![
                     json!({"text": "📦 Purchased"}),
@@ -404,6 +526,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "start:orders" => "start_btn_purchased",
         "wallet:topup_history" => "start_btn_topup_history",
         "shop_api" => "start_btn_api_integration",
+        FACEBOOK_UNLOCK_CALLBACK => "start_btn_facebook_unlock",
         "start:help" => "start_btn_help",
         "start:language" => "start_btn_language",
         _ => "start_btn",
@@ -576,6 +699,10 @@ fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuActio
             texts.get_lang("start_btn_api_integration", lang, "🔌 API integration"),
         ),
         (
+            StartMenuAction::FacebookUnlock,
+            texts.get_lang("start_btn_facebook_unlock", lang, "Mở khóa facebook"),
+        ),
+        (
             StartMenuAction::Help,
             texts.get_lang("start_btn_help", lang, "Help"),
         ),
@@ -704,6 +831,9 @@ impl AppPlugin for StartCommandPlugin {
                         )
                         .await?;
                     }
+                }
+                StartMenuAction::FacebookUnlock => {
+                    send_facebook_unlock_type_prompt(&ctx, msg.chat.id, &lang).await?;
                 }
                 StartMenuAction::Help => {
                     let msg_text = t_lang(
@@ -879,6 +1009,74 @@ impl AppPlugin for StartCommandPlugin {
             return Ok(true);
         }
 
+        if data == FACEBOOK_UNLOCK_CALLBACK {
+            let lang = preferred_or_telegram_lang(
+                &ctx,
+                q.from.id.0 as i64,
+                q.from.language_code.as_deref(),
+            )
+            .await;
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                send_facebook_unlock_type_prompt(&ctx, msg.chat().id, &lang).await?;
+            }
+            return Ok(true);
+        }
+
+        if data == FACEBOOK_UNLOCK_TYPE_282_CALLBACK {
+            let lang = preferred_or_telegram_lang(
+                &ctx,
+                q.from.id.0 as i64,
+                q.from.language_code.as_deref(),
+            )
+            .await;
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                send_facebook_unlock_appeal_prompt(&ctx, msg.chat().id, &lang, "282").await?;
+            }
+            return Ok(true);
+        }
+
+        if data == FACEBOOK_UNLOCK_TYPE_956_CALLBACK {
+            let lang = preferred_or_telegram_lang(
+                &ctx,
+                q.from.id.0 as i64,
+                q.from.language_code.as_deref(),
+            )
+            .await;
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                let text = t_lang(
+                    &ctx,
+                    &lang,
+                    "facebook_unlock_next_step_pending",
+                    "Mình đã ghi nhận lựa chọn. Vui lòng chờ hướng dẫn tiếp theo.",
+                );
+                ctx.bot.send_message(msg.chat().id, text).await?;
+            }
+            return Ok(true);
+        }
+
+        if data.starts_with(FACEBOOK_UNLOCK_APPEAL_PREFIX) {
+            let lang = preferred_or_telegram_lang(
+                &ctx,
+                q.from.id.0 as i64,
+                q.from.language_code.as_deref(),
+            )
+            .await;
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                let text = t_lang(
+                    &ctx,
+                    &lang,
+                    "facebook_unlock_next_step_pending",
+                    "Mình đã ghi nhận lựa chọn. Vui lòng chờ hướng dẫn tiếp theo.",
+                );
+                ctx.bot.send_message(msg.chat().id, text).await?;
+            }
+            return Ok(true);
+        }
+
         if data == JOIN_CHECK_CALLBACK {
             let lang = preferred_or_telegram_lang(
                 &ctx,
@@ -968,6 +1166,14 @@ mod tests {
     #[test]
     fn join_check_callback_key_is_stable() {
         assert_eq!(JOIN_CHECK_CALLBACK, "start:check_join");
+    }
+
+    #[test]
+    fn facebook_unlock_callback_keys_are_stable() {
+        assert_eq!(FACEBOOK_UNLOCK_CALLBACK, "start:facebook_unlock");
+        assert_eq!(FACEBOOK_UNLOCK_TYPE_282_CALLBACK, "facebook_unlock:type:282");
+        assert_eq!(FACEBOOK_UNLOCK_TYPE_956_CALLBACK, "facebook_unlock:type:956");
+        assert_eq!(FACEBOOK_UNLOCK_APPEAL_PREFIX, "facebook_unlock:appeal:");
     }
 
     #[tokio::test]
@@ -1090,6 +1296,10 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([
                     ("start_btn_shop".to_string(), "🛒 Xem sản phẩm".to_string()),
+                    (
+                        "start_btn_facebook_unlock".to_string(),
+                        "Mở khóa facebook".to_string(),
+                    ),
                     ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
                     ("start_btn_wallet".to_string(), "💳 Ví tiền".to_string()),
                     ("start_btn_purchased".to_string(), "📦 Đã mua".to_string()),
@@ -1113,6 +1323,10 @@ mod tests {
             rows,
             vec![
                 vec![("🛒 Xem sản phẩm".to_string(), "start:shop".to_string())],
+                vec![(
+                    "Mở khóa facebook".to_string(),
+                    FACEBOOK_UNLOCK_CALLBACK.to_string(),
+                )],
                 vec![
                     ("💰 Nạp tiền".to_string(), "wallet:topup".to_string()),
                     ("💳 Ví tiền".to_string(), "start:wallet".to_string()),
@@ -1146,6 +1360,10 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([
                     ("start_btn_shop".to_string(), "🛒 Xem sản phẩm".to_string()),
+                    (
+                        "start_btn_facebook_unlock".to_string(),
+                        "Mở khóa facebook".to_string(),
+                    ),
                     ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
                     ("start_btn_wallet".to_string(), "💳 Ví tiền".to_string()),
                     ("start_btn_purchased".to_string(), "📦 Đã mua".to_string()),
@@ -1169,6 +1387,7 @@ mod tests {
             rows,
             vec![
                 vec!["🛒 Xem sản phẩm".to_string()],
+                vec!["Mở khóa facebook".to_string()],
                 vec!["💰 Nạp tiền".to_string(), "💳 Ví tiền".to_string()],
                 vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
                 vec!["🔌 Tích hợp API".to_string(), "Hướng dẫn".to_string()],
@@ -1226,6 +1445,10 @@ mod tests {
                 HashMap::from([
                     ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
                     (
+                        "start_btn_facebook_unlock".to_string(),
+                        "Mở khóa facebook".to_string(),
+                    ),
+                    (
                         "start_btn_topup_history".to_string(),
                         "📜 Lịch sử nạp".to_string(),
                     ),
@@ -1245,6 +1468,10 @@ mod tests {
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "💰 Nạp tiền"),
             Some(StartMenuAction::Topup)
+        );
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "Mở khóa facebook"),
+            Some(StartMenuAction::FacebookUnlock)
         );
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "📜 Lịch sử nạp"),
