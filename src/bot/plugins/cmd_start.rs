@@ -25,7 +25,7 @@ const JOIN_CHECK_CALLBACK: &str = "start:check_join";
 const FACEBOOK_UNLOCK_CALLBACK: &str = "start:facebook_unlock";
 const FACEBOOK_UNLOCK_TYPE_282_CALLBACK: &str = "facebook_unlock:type:282";
 const FACEBOOK_UNLOCK_TYPE_956_CALLBACK: &str = "facebook_unlock:type:956";
-const FACEBOOK_UNLOCK_APPEAL_PREFIX: &str = "facebook_unlock:appeal:";
+const FACEBOOK_UNLOCK_NO_UID_CALLBACK: &str = "facebook_unlock:no_uid:282";
 const DEFAULT_REQUIRED_CHANNEL_URL: &str = "https://t.me/zvwboo";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,48 +322,38 @@ fn facebook_unlock_type_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     })
 }
 
-async fn send_facebook_unlock_appeal_prompt(
+async fn send_facebook_unlock_uid_prompt(
     ctx: &AppContext,
     chat_id: teloxide::types::ChatId,
     lang: &str,
-    lock_type: &str,
 ) -> Result<(), anyhow::Error> {
     let text = t_lang(
         ctx,
         lang,
-        "facebook_unlock_appeal_prompt",
-        "Bạn đã kháng nghị chưa?",
+        "facebook_unlock_uid_prompt",
+        "Vui lòng nhập UID facebook (Bắt buộc):",
     );
     i18n::send_message_with_json_keyboard(
         ctx,
         chat_id,
-        "facebook_unlock_appeal_prompt",
+        "facebook_unlock_uid_prompt",
         text,
-        facebook_unlock_appeal_keyboard_json(ctx, lang, lock_type),
+        facebook_unlock_uid_keyboard_json(ctx, lang),
     )
     .await?;
     Ok(())
 }
 
-fn facebook_unlock_appeal_keyboard_json(ctx: &AppContext, lang: &str, lock_type: &str) -> Value {
+fn facebook_unlock_uid_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
-            [
-                i18n::inline_button_callback_json(
-                    ctx,
-                    lang,
-                    "facebook_unlock_appeal_no_btn",
-                    "chưa",
-                    format!("{FACEBOOK_UNLOCK_APPEAL_PREFIX}no:{lock_type}"),
-                ),
-                i18n::inline_button_callback_json(
-                    ctx,
-                    lang,
-                    "facebook_unlock_appeal_yes_btn",
-                    "có",
-                    format!("{FACEBOOK_UNLOCK_APPEAL_PREFIX}yes:{lock_type}"),
-                ),
-            ],
+            [i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "facebook_unlock_no_uid_btn",
+                "Tôi không có UID",
+                FACEBOOK_UNLOCK_NO_UID_CALLBACK,
+            )],
             [i18n::inline_button_callback_json(
                 ctx,
                 lang,
@@ -373,6 +363,58 @@ fn facebook_unlock_appeal_keyboard_json(ctx: &AppContext, lang: &str, lock_type:
             )],
         ]
     })
+}
+
+async fn send_facebook_unlock_uid_help(
+    ctx: &AppContext,
+    chat_id: teloxide::types::ChatId,
+    lang: &str,
+) -> Result<(), anyhow::Error> {
+    let text = t_lang(
+        ctx,
+        lang,
+        "facebook_unlock_uid_help",
+        "Video lấy UID Bị khóa 282 trên máy tính:\nhttps://drive.google.com/file/d/1JGWYTf7Feff4HPD2bCvFGjyyIZMNBnl2/view?usp=sharing\n\nNếu không có máy tính vui lòng liên hệ admin",
+    );
+    ctx.bot.send_message(chat_id, text).await?;
+    Ok(())
+}
+
+async fn handle_facebook_unlock_uid_message(
+    ctx: &AppContext,
+    msg: Message,
+    dialogue: BotDialogue,
+    lang: &str,
+    lock_type: String,
+) -> Result<(), anyhow::Error> {
+    let uid = msg.text().unwrap_or("").trim();
+    if uid.is_empty() {
+        let text = t_lang(
+            ctx,
+            lang,
+            "facebook_unlock_uid_empty",
+            "UID không được để trống. Vui lòng nhập UID facebook:",
+        );
+        i18n::send_message_with_json_keyboard(
+            ctx,
+            msg.chat.id,
+            "facebook_unlock_uid_empty",
+            text,
+            facebook_unlock_uid_keyboard_json(ctx, lang),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let text = ctx.render_text_lang(
+        "facebook_unlock_uid_received",
+        lang,
+        "Mình đã nhận UID facebook: {uid}\nDạng khóa: {lock_type}\n\nVui lòng chờ hướng dẫn tiếp theo.",
+        &[("uid", uid.to_string()), ("lock_type", lock_type)],
+    );
+    ctx.bot.send_message(msg.chat.id, text).await?;
+    dialogue.update(State::Idle).await?;
+    Ok(())
 }
 
 fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
@@ -861,6 +903,14 @@ impl AppPlugin for StartCommandPlugin {
             return Ok(true);
         }
 
+        if !text.starts_with('/')
+            && let State::FacebookUnlockEnterUid { lock_type } =
+                dialogue.get().await?.unwrap_or_default()
+        {
+            handle_facebook_unlock_uid_message(&ctx, msg, dialogue, &lang, lock_type).await?;
+            return Ok(true);
+        }
+
         let start_payload = if text.starts_with("/start ") {
             text.split_whitespace().nth(1).unwrap_or("")
         } else {
@@ -921,7 +971,7 @@ impl AppPlugin for StartCommandPlugin {
         &self,
         ctx: Arc<AppContext>,
         q: CallbackQuery,
-        _dialogue: BotDialogue,
+        dialogue: BotDialogue,
     ) -> Result<bool, anyhow::Error> {
         let Some(data) = q.data.clone() else {
             return Ok(false);
@@ -1032,7 +1082,12 @@ impl AppPlugin for StartCommandPlugin {
             .await;
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
-                send_facebook_unlock_appeal_prompt(&ctx, msg.chat().id, &lang, "282").await?;
+                dialogue
+                    .update(State::FacebookUnlockEnterUid {
+                        lock_type: "282".to_string(),
+                    })
+                    .await?;
+                send_facebook_unlock_uid_prompt(&ctx, msg.chat().id, &lang).await?;
             }
             return Ok(true);
         }
@@ -1057,7 +1112,7 @@ impl AppPlugin for StartCommandPlugin {
             return Ok(true);
         }
 
-        if data.starts_with(FACEBOOK_UNLOCK_APPEAL_PREFIX) {
+        if data == FACEBOOK_UNLOCK_NO_UID_CALLBACK {
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
@@ -1066,13 +1121,12 @@ impl AppPlugin for StartCommandPlugin {
             .await;
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
-                let text = t_lang(
-                    &ctx,
-                    &lang,
-                    "facebook_unlock_next_step_pending",
-                    "Mình đã ghi nhận lựa chọn. Vui lòng chờ hướng dẫn tiếp theo.",
-                );
-                ctx.bot.send_message(msg.chat().id, text).await?;
+                dialogue
+                    .update(State::FacebookUnlockEnterUid {
+                        lock_type: "282".to_string(),
+                    })
+                    .await?;
+                send_facebook_unlock_uid_help(&ctx, msg.chat().id, &lang).await?;
             }
             return Ok(true);
         }
@@ -1173,7 +1227,7 @@ mod tests {
         assert_eq!(FACEBOOK_UNLOCK_CALLBACK, "start:facebook_unlock");
         assert_eq!(FACEBOOK_UNLOCK_TYPE_282_CALLBACK, "facebook_unlock:type:282");
         assert_eq!(FACEBOOK_UNLOCK_TYPE_956_CALLBACK, "facebook_unlock:type:956");
-        assert_eq!(FACEBOOK_UNLOCK_APPEAL_PREFIX, "facebook_unlock:appeal:");
+        assert_eq!(FACEBOOK_UNLOCK_NO_UID_CALLBACK, "facebook_unlock:no_uid:282");
     }
 
     #[tokio::test]

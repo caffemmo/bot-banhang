@@ -39,6 +39,9 @@ pub enum State {
     TopupEnterAmount,
     TopupUsdtEnterAmount,
     TopupBinanceEnterAmount,
+    FacebookUnlockEnterUid {
+        lock_type: String,
+    },
 }
 
 pub type BotDialogue = Dialogue<State, SqliteDialogueStorage>;
