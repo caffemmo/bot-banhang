@@ -25,6 +25,7 @@ const JOIN_CHECK_CALLBACK: &str = "start:check_join";
 const FACEBOOK_UNLOCK_CALLBACK: &str = "start:facebook_unlock";
 const FACEBOOK_UNLOCK_TYPE_282_CALLBACK: &str = "facebook_unlock:type:282";
 const FACEBOOK_UNLOCK_TYPE_956_CALLBACK: &str = "facebook_unlock:type:956";
+const FACEBOOK_UNLOCK_ENTER_UID_CALLBACK: &str = "facebook_unlock:enter_uid:282";
 const FACEBOOK_UNLOCK_NO_UID_CALLBACK: &str = "facebook_unlock:no_uid:282";
 const DEFAULT_REQUIRED_CHANNEL_URL: &str = "https://t.me/zvwboo";
 
@@ -347,13 +348,22 @@ async fn send_facebook_unlock_uid_prompt(
 fn facebook_unlock_uid_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
-            [i18n::inline_button_callback_json(
-                ctx,
-                lang,
-                "facebook_unlock_no_uid_btn",
-                "Tôi không có UID",
-                FACEBOOK_UNLOCK_NO_UID_CALLBACK,
-            )],
+            [
+                i18n::inline_button_callback_json(
+                    ctx,
+                    lang,
+                    "facebook_unlock_enter_uid_btn",
+                    "Nhập UID",
+                    FACEBOOK_UNLOCK_ENTER_UID_CALLBACK,
+                ),
+                i18n::inline_button_callback_json(
+                    ctx,
+                    lang,
+                    "facebook_unlock_no_uid_btn",
+                    "Tôi không có UID",
+                    FACEBOOK_UNLOCK_NO_UID_CALLBACK,
+                ),
+            ],
             [i18n::inline_button_callback_json(
                 ctx,
                 lang,
@@ -1112,6 +1122,25 @@ impl AppPlugin for StartCommandPlugin {
             return Ok(true);
         }
 
+        if data == FACEBOOK_UNLOCK_ENTER_UID_CALLBACK {
+            let lang = preferred_or_telegram_lang(
+                &ctx,
+                q.from.id.0 as i64,
+                q.from.language_code.as_deref(),
+            )
+            .await;
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                dialogue
+                    .update(State::FacebookUnlockEnterUid {
+                        lock_type: "282".to_string(),
+                    })
+                    .await?;
+                send_facebook_unlock_uid_prompt(&ctx, msg.chat().id, &lang).await?;
+            }
+            return Ok(true);
+        }
+
         if data == FACEBOOK_UNLOCK_NO_UID_CALLBACK {
             let lang = preferred_or_telegram_lang(
                 &ctx,
@@ -1227,6 +1256,10 @@ mod tests {
         assert_eq!(FACEBOOK_UNLOCK_CALLBACK, "start:facebook_unlock");
         assert_eq!(FACEBOOK_UNLOCK_TYPE_282_CALLBACK, "facebook_unlock:type:282");
         assert_eq!(FACEBOOK_UNLOCK_TYPE_956_CALLBACK, "facebook_unlock:type:956");
+        assert_eq!(
+            FACEBOOK_UNLOCK_ENTER_UID_CALLBACK,
+            "facebook_unlock:enter_uid:282"
+        );
         assert_eq!(FACEBOOK_UNLOCK_NO_UID_CALLBACK, "facebook_unlock:no_uid:282");
     }
 
