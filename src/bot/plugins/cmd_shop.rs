@@ -4362,6 +4362,7 @@ impl AppPlugin for ShopCommandPlugin {
             State::TopupEnterAmount => {}
             State::TopupUsdtEnterAmount => {}
             State::TopupBinanceEnterAmount => {}
+            State::FacebookUnlockEnterUid { .. } => {}
         }
 
         Ok(false)
