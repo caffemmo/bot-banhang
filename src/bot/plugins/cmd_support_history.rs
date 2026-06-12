@@ -23,7 +23,6 @@ pub struct SupportHistoryCommandPlugin;
 #[derive(Debug, FromRow)]
 struct SupportCallbackLog {
     id: i64,
-    chat_id: Option<i64>,
     user_id: Option<i64>,
     raw_json: String,
     created_at: Option<String>,
@@ -210,7 +209,7 @@ async fn list_support_callback_logs(
 ) -> Result<Vec<SupportCallbackLog>> {
     let rows = sqlx::query_as::<_, SupportCallbackLog>(
         r#"
-        SELECT id, chat_id, user_id, raw_json, created_at
+        SELECT id, user_id, raw_json, created_at
         FROM telegram_update_logs
         WHERE update_type = 'callback_query'
           AND raw_json LIKE ?1
@@ -246,7 +245,7 @@ fn is_support_history_admin(ctx: &AppContext, user_id: i64) -> bool {
 
 fn is_plain_start_command(text: &str) -> bool {
     let trimmed = text.trim();
-    if trimmed.contains(char::is_whitespace) {
+    if trimmed.chars().any(char::is_whitespace) {
         return false;
     }
     trimmed == "/start" || trimmed.starts_with("/start@")
