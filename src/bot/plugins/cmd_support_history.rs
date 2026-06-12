@@ -67,19 +67,25 @@ impl AppPlugin for SupportHistoryCommandPlugin {
         q: CallbackQuery,
         _dialogue: BotDialogue,
     ) -> Result<bool, anyhow::Error> {
-        if q.data.as_deref() != Some(HISTORY_CALLBACK) {
+        let Some(data) = q.data.as_deref() else {
+            return Ok(false);
+        };
+        if data != HISTORY_CALLBACK && data != "start:menu" {
             return Ok(false);
         }
 
         let admin_id = q.from.id.0 as i64;
         if !is_support_history_admin(&ctx, admin_id) {
-            let _ = ctx
-                .bot
-                .answer_callback_query(q.id.clone())
-                .text("Bạn không có quyền xem lịch sử yêu cầu hỗ trợ.")
-                .show_alert(true)
-                .await;
-            return Ok(true);
+            if data == HISTORY_CALLBACK {
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text("Bạn không có quyền xem lịch sử yêu cầu hỗ trợ.")
+                    .show_alert(true)
+                    .await;
+                return Ok(true);
+            }
+            return Ok(false);
         }
 
         let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
@@ -87,7 +93,11 @@ impl AppPlugin for SupportHistoryCommandPlugin {
             return Ok(true);
         };
         let lang = i18n::user_lang(&ctx, admin_id, q.from.language_code.as_deref()).await;
-        show_support_history(&ctx, msg.chat().id, &lang).await?;
+        if data == "start:menu" {
+            send_admin_start_menu(&ctx, msg.chat().id, &lang).await?;
+        } else {
+            show_support_history(&ctx, msg.chat().id, &lang).await?;
+        }
         Ok(true)
     }
 }
