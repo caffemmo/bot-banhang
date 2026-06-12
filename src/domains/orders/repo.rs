@@ -4,6 +4,8 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use sqlx::{Executor, FromRow, QueryBuilder, Sqlite, SqlitePool, Transaction};
 
+use super::models::OrderSupportRequest;
+
 #[derive(Debug, FromRow)]
 #[allow(dead_code)]
 pub struct OrderJoinRow {
@@ -584,6 +586,62 @@ pub async fn get_paid_order_for_user(
     .await?;
 
     Ok(row.map(map_join_row))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_order_support_request(
+    pool: &SqlitePool,
+    order_id: &str,
+    user_id: i64,
+    chat_id: i64,
+    username: Option<&str>,
+    product_name: &str,
+    bank_memo: &str,
+    amount: i64,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"INSERT INTO order_support_requests
+            (order_id, user_id, chat_id, username, product_name, bank_memo, amount, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+    )
+    .bind(order_id)
+    .bind(user_id)
+    .bind(chat_id)
+    .bind(username)
+    .bind(product_name)
+    .bind(bank_memo)
+    .bind(amount)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn list_recent_order_support_requests(
+    pool: &SqlitePool,
+    limit: i64,
+) -> Result<Vec<OrderSupportRequest>> {
+    let rows = sqlx::query_as::<sqlx::Sqlite, OrderSupportRequest>(
+        r#"SELECT
+            id,
+            order_id,
+            user_id,
+            chat_id,
+            username,
+            product_name,
+            bank_memo,
+            amount,
+            created_at
+        FROM order_support_requests
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?"#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }
 
 pub async fn find_order_by_memo(pool: &SqlitePool, memo: &str) -> Result<Option<OrderWithProduct>> {

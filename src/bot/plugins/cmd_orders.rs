@@ -10,7 +10,7 @@ use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
 use crate::domains::orders::admin_notify::{admin_refund_confirm_keyboard, order_user_display};
-use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
+use crate::domains::orders::models::{OrderStatus, OrderSupportRequest, OrderWithProduct};
 use crate::domains::orders::refund::refund_paid_order_to_wallet;
 use crate::domains::orders::repo;
 use crate::domains::users::repo as users_repo;
@@ -54,6 +54,71 @@ pub async fn send_orders(
         .reply_markup(keyboard)
         .await?;
     Ok(())
+}
+
+pub async fn send_support_request_history(
+    ctx: Arc<AppContext>,
+    chat_id: teloxide::types::ChatId,
+    user: Option<&User>,
+) -> anyhow::Result<()> {
+    let Some(user) = user else {
+        let text = ctx.get_text_lang("user_unknown", "vi", "Không xác định được người dùng.");
+        i18n::send_message_for_key(&ctx, chat_id, "user_unknown", text).await?;
+        return Ok(());
+    };
+
+    let admin_id = user.id.0 as i64;
+    if !can_view_support_request_history(&ctx, admin_id) {
+        ctx.bot
+            .send_message(chat_id, "⚠️ Bạn không có quyền xem lịch sử yêu cầu hỗ trợ.")
+            .await?;
+        return Ok(());
+    }
+
+    let requests = repo::list_recent_order_support_requests(&ctx.pool, 10).await?;
+    let text = support_request_history_text(&requests);
+    ctx.bot.send_message(chat_id, text).await?;
+    Ok(())
+}
+
+fn support_request_user_label(request: &OrderSupportRequest) -> String {
+    request
+        .username
+        .as_deref()
+        .filter(|username| !username.trim().is_empty())
+        .map(|username| format!("@{username}"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn can_view_support_request_history(ctx: &AppContext, user_id: i64) -> bool {
+    ctx.is_telegram_icon_admin(user_id)
+        || ctx
+            .order_notification_admin_ids()
+            .into_iter()
+            .any(|admin_id| admin_id == user_id)
+}
+
+fn support_request_history_text(requests: &[OrderSupportRequest]) -> String {
+    if requests.is_empty() {
+        return "🧾 LỊCH SỬ YÊU CẦU HỖ TRỢ\n\nChưa có yêu cầu hỗ trợ nào.".to_string();
+    }
+
+    let mut lines = vec!["🧾 LỊCH SỬ YÊU CẦU HỖ TRỢ".to_string(), String::new()];
+    for (index, request) in requests.iter().enumerate() {
+        lines.push(format!(
+            "{}. {}\nOrder: {}\nUser: {} · ID {}\nChat ID: {}\nSản phẩm: {}\nMemo: {}\nSố tiền: {}\n",
+            index + 1,
+            request.created_at,
+            request.order_id,
+            support_request_user_label(request),
+            request.user_id,
+            request.chat_id,
+            request.product_name,
+            request.bank_memo,
+            format_vnd(request.amount),
+        ));
+    }
+    lines.join("\n")
 }
 
 fn order_history_text(ctx: &AppContext, lang: &str) -> String {
@@ -580,6 +645,17 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
                 .await?;
             return Ok(());
         };
+        repo::create_order_support_request(
+            &ctx.pool,
+            &order.order.id,
+            user_id,
+            chat_id.0,
+            q.from.username.as_deref(),
+            &order.product.name,
+            &order.order.bank_memo,
+            order.order.amount,
+        )
+        .await?;
         let sent = notify_admins_for_order_support(ctx, &order, &q.from).await?;
         let text = if sent > 0 {
             "✅ Đã gửi yêu cầu hỗ trợ cho admin. Vui lòng chờ phản hồi."

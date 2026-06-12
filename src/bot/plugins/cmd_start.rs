@@ -27,6 +27,7 @@ const FACEBOOK_UNLOCK_TYPE_282_CALLBACK: &str = "facebook_unlock:type:282";
 const FACEBOOK_UNLOCK_TYPE_956_CALLBACK: &str = "facebook_unlock:type:956";
 const FACEBOOK_UNLOCK_ENTER_UID_CALLBACK: &str = "facebook_unlock:enter_uid:282";
 const FACEBOOK_UNLOCK_NO_UID_CALLBACK: &str = "facebook_unlock:no_uid:282";
+const SUPPORT_HISTORY_CALLBACK: &str = "start:support_history";
 const DEFAULT_REQUIRED_CHANNEL_URL: &str = "https://t.me/zvwboo";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +45,7 @@ enum StartMenuAction {
     TopupHistory,
     ApiIntegration,
     FacebookUnlock,
+    SupportHistory,
     Help,
     Language,
 }
@@ -108,6 +110,14 @@ fn required_channel_id(ctx: &AppContext) -> Option<String> {
 
 fn required_channel_url(ctx: &AppContext) -> String {
     ctx.get_text("required_channel_url", DEFAULT_REQUIRED_CHANNEL_URL)
+}
+
+fn start_user_is_admin(ctx: &AppContext, user_id: i64) -> bool {
+    ctx.is_telegram_icon_admin(user_id)
+        || ctx
+            .order_notification_admin_ids()
+            .into_iter()
+            .any(|admin_id| admin_id == user_id)
 }
 
 async fn preferred_or_telegram_lang(
@@ -253,6 +263,7 @@ async fn send_start_menu(
     ctx: &AppContext,
     chat_id: teloxide::types::ChatId,
     lang: &str,
+    is_admin: bool,
 ) -> Result<(), anyhow::Error> {
     let msg_text = t_lang(
         ctx,
@@ -265,7 +276,7 @@ async fn send_start_menu(
         chat_id,
         "start",
         msg_text,
-        start_menu_keyboard_json(ctx, lang),
+        start_menu_keyboard_json(ctx, lang, is_admin),
     )
     .await?;
     Ok(())
@@ -427,31 +438,47 @@ async fn handle_facebook_unlock_uid_message(
     Ok(())
 }
 
-fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
-    json!({
-        "inline_keyboard": [
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
-            [i18n::inline_button_callback_json(
+fn start_menu_keyboard_json(ctx: &AppContext, lang: &str, is_admin: bool) -> Value {
+    let mut rows = vec![
+            vec![i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
+            vec![i18n::inline_button_callback_json(
                 ctx,
                 lang,
                 "start_btn_facebook_unlock",
                 "Mở khóa facebook",
                 FACEBOOK_UNLOCK_CALLBACK,
             )],
-            [
+            vec![
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
             ],
-            [
+            vec![
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
             ],
-            [
+            vec![
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_api_integration", "🔌 API integration", "shop_api"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
             ],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
-        ]
+    ];
+    if is_admin {
+        rows.push(vec![i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_support_history",
+            "🧾 Lịch sử yêu cầu",
+            SUPPORT_HISTORY_CALLBACK,
+        )]);
+    }
+    rows.push(vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_language",
+        "🌐 Language",
+        "start:language",
+    )]);
+    json!({
+        "inline_keyboard": rows
     })
 }
 
@@ -755,6 +782,10 @@ fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuActio
             texts.get_lang("start_btn_facebook_unlock", lang, "Mở khóa facebook"),
         ),
         (
+            StartMenuAction::SupportHistory,
+            texts.get_lang("start_btn_support_history", lang, "🧾 Lịch sử yêu cầu"),
+        ),
+        (
             StartMenuAction::Help,
             texts.get_lang("start_btn_help", lang, "Help"),
         ),
@@ -887,6 +918,14 @@ impl AppPlugin for StartCommandPlugin {
                 StartMenuAction::FacebookUnlock => {
                     send_facebook_unlock_type_prompt(&ctx, msg.chat.id, &lang).await?;
                 }
+                StartMenuAction::SupportHistory => {
+                    cmd_orders::send_support_request_history(
+                        ctx.clone(),
+                        msg.chat.id,
+                        msg.from(),
+                    )
+                    .await?;
+                }
                 StartMenuAction::Help => {
                     let msg_text = t_lang(
                         &ctx,
@@ -958,12 +997,18 @@ impl AppPlugin for StartCommandPlugin {
                 StartEntry::Menu(lang) => {
                     if let Some(user) = msg.from() {
                         if user_has_joined_required_channel(&ctx, user.id).await {
-                            send_start_menu(&ctx, msg.chat.id, &lang).await?;
+                            send_start_menu(
+                                &ctx,
+                                msg.chat.id,
+                                &lang,
+                                start_user_is_admin(&ctx, user.id.0 as i64),
+                            )
+                            .await?;
                         } else {
                             send_required_channel_prompt(&ctx, msg.chat.id, &lang).await?;
                         }
                     } else {
-                        send_start_menu(&ctx, msg.chat.id, &lang).await?;
+                        send_start_menu(&ctx, msg.chat.id, &lang, false).await?;
                     }
                 }
                 StartEntry::LanguagePrompt(lang) => {
@@ -997,7 +1042,13 @@ impl AppPlugin for StartCommandPlugin {
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 if user_has_joined_required_channel(&ctx, q.from.id).await {
-                    send_start_menu(&ctx, msg.chat().id, &lang).await?;
+                    send_start_menu(
+                        &ctx,
+                        msg.chat().id,
+                        &lang,
+                        start_user_is_admin(&ctx, q.from.id.0 as i64),
+                    )
+                    .await?;
                 } else {
                     send_required_channel_prompt(&ctx, msg.chat().id, &lang).await?;
                 }
@@ -1027,7 +1078,13 @@ impl AppPlugin for StartCommandPlugin {
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 if user_has_joined_required_channel(&ctx, q.from.id).await {
-                    send_start_menu(&ctx, msg.chat().id, &lang).await?;
+                    send_start_menu(
+                        &ctx,
+                        msg.chat().id,
+                        &lang,
+                        start_user_is_admin(&ctx, q.from.id.0 as i64),
+                    )
+                    .await?;
                 } else {
                     send_required_channel_prompt(&ctx, msg.chat().id, &lang).await?;
                 }
@@ -1051,6 +1108,19 @@ impl AppPlugin for StartCommandPlugin {
                     "❓ Quick help:\n/shop - products\n/orders - your orders\n/help - help.",
                 );
                 ctx.bot.send_message(msg.chat().id, msg_text).await?;
+            }
+            return Ok(true);
+        }
+
+        if data == SUPPORT_HISTORY_CALLBACK {
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                cmd_orders::send_support_request_history(
+                    ctx.clone(),
+                    msg.chat().id,
+                    Some(&q.from),
+                )
+                .await?;
             }
             return Ok(true);
         }
@@ -1170,7 +1240,13 @@ impl AppPlugin for StartCommandPlugin {
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 if user_has_joined_required_channel(&ctx, q.from.id).await {
-                    send_start_menu(&ctx, msg.chat().id, &lang).await?;
+                    send_start_menu(
+                        &ctx,
+                        msg.chat().id,
+                        &lang,
+                        start_user_is_admin(&ctx, q.from.id.0 as i64),
+                    )
+                    .await?;
                 } else {
                     let text = t_lang(
                         &ctx,

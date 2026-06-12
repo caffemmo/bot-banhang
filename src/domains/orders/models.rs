@@ -135,6 +135,19 @@ pub struct OrderWithProduct {
     pub product: Product,
 }
 
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct OrderSupportRequest {
+    pub id: i64,
+    pub order_id: String,
+    pub user_id: i64,
+    pub chat_id: i64,
+    pub username: Option<String>,
+    pub product_name: String,
+    pub bank_memo: String,
+    pub amount: i64,
+    pub created_at: String,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct WebhookEvent {
