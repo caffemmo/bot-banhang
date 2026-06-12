@@ -4,6 +4,7 @@ pub mod cmd_help;
 pub mod cmd_orders;
 pub mod cmd_shop;
 pub mod cmd_start;
+pub mod cmd_support_history;
 pub mod cmd_wallet;
 pub mod example;
 
@@ -54,6 +55,7 @@ pub trait AppPlugin: Send + Sync {
 
 pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
     vec![
+        Box::new(cmd_support_history::SupportHistoryCommandPlugin),
         Box::new(cmd_start::StartCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),
         Box::new(cmd_api::ApiCommandPlugin),
