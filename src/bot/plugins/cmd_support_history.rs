@@ -107,7 +107,7 @@ async fn send_admin_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) ->
         ctx,
         lang,
         "start",
-        "Welcome! Use the buttons below to browse products, view orders, or get help.",
+        "👋 Welcome! Use the buttons below, or type /shop to buy and /orders to view orders.",
     );
     ctx.bot
         .send_message(chat_id, text)
@@ -122,30 +122,51 @@ fn admin_start_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
             ctx,
             lang,
             "start_btn_shop",
-            "🛒 Xem sản phẩm",
+            "🛒 Shop",
             "start:shop",
         )],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "start_btn_orders",
-            "🧾 Lịch sử mua hàng",
-            "orders:list",
-        )],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "start_btn_wallet",
-            "💰 Ví của tôi",
-            "wallet:menu",
-        )],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "start_btn_help",
-            "❓ Hỗ trợ",
-            "start:help",
-        )],
+        vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "start_btn_topup",
+                "💰 Top up",
+                "wallet:topup",
+            ),
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "start_btn_wallet",
+                "💳 Wallet",
+                "start:wallet",
+            ),
+        ],
+        vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "start_btn_purchased",
+                "📦 Purchased",
+                "start:orders",
+            ),
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "start_btn_topup_history",
+                "📜 Top-up history",
+                "wallet:topup_history",
+            ),
+        ],
+        vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "start_btn_api_integration",
+                "🔌 API integration",
+                "shop_api",
+            ),
+            i18n::inline_button_callback(ctx, lang, "start_btn_help", "Help", "start:help"),
+        ],
         vec![i18n::inline_button_callback(
             ctx,
             lang,
@@ -157,7 +178,7 @@ fn admin_start_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
             ctx,
             lang,
             "start_btn_language",
-            "🌐 Language / Ngôn ngữ",
+            "🌐 Language",
             "start:language",
         )],
     ])
