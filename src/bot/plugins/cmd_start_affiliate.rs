@@ -16,7 +16,9 @@ use crate::bot::{BotDialogue, i18n};
 pub struct StartAffiliatePlugin;
 
 const AFFILIATE_REGISTER_CALLBACK: &str = "affiliate:register";
+const CHILD_BOT_GUIDE_CALLBACK: &str = "childbot:guide";
 const DEFAULT_COMMISSION_BPS: i64 = 500;
+const ADMIN_CONTACT_URL: &str = "https://t.me/thang_hub";
 
 #[derive(Debug, Clone, FromRow)]
 struct StartAffiliatePartner {
@@ -74,22 +76,34 @@ impl AppPlugin for StartAffiliatePlugin {
         q: CallbackQuery,
         _dialogue: BotDialogue,
     ) -> Result<bool, anyhow::Error> {
-        if q.data.as_deref() != Some(AFFILIATE_REGISTER_CALLBACK) {
+        let Some(data) = q.data.as_deref() else {
             return Ok(false);
-        }
-
-        let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
-        let _ = ctx
-            .bot
-            .answer_callback_query(q.id.clone())
-            .text(i18n::t(&ctx, &lang, "affiliate_register_ack", "Đang tạo link CTV..."))
-            .await;
-
-        let Some(msg) = &q.message else {
-            return Ok(true);
         };
-        register_affiliate_and_send_link(&ctx, msg.chat().id, q.from.id.0 as i64).await?;
-        Ok(true)
+
+        match data {
+            AFFILIATE_REGISTER_CALLBACK => {
+                let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text(i18n::t(&ctx, &lang, "affiliate_register_ack", "Đang tạo link CTV..."))
+                    .await;
+
+                let Some(msg) = &q.message else {
+                    return Ok(true);
+                };
+                register_affiliate_and_send_link(&ctx, msg.chat().id, q.from.id.0 as i64).await?;
+                Ok(true)
+            }
+            CHILD_BOT_GUIDE_CALLBACK => {
+                let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+                if let Some(msg) = &q.message {
+                    send_child_bot_setup_guide(&ctx, msg.chat().id).await?;
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 }
 
@@ -116,6 +130,7 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
             ],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", AFFILIATE_REGISTER_CALLBACK)],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", CHILD_BOT_GUIDE_CALLBACK)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
     })
@@ -140,6 +155,19 @@ async fn register_affiliate_and_send_link(
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
             "🔗 Mở link CTV",
             Url::parse(&url)?,
+        )]]))
+        .await?;
+    Ok(())
+}
+
+async fn send_child_bot_setup_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let text = "🤖 TẠO BOT BÁN HÀNG RIÊNG\n\nBạn có thể có bot bán hàng riêng giống shop chính, chạy trên VPS của bạn.\n\nBạn cần chuẩn bị:\n1. VPS Ubuntu riêng, tối thiểu 1GB RAM để test, khuyên dùng 2GB RAM trở lên.\n2. Token bot Telegram tạo từ @BotFather.\n3. Tên shop hoặc tên bot muốn hiển thị.\n\nQuy trình:\n1. Bạn chuẩn bị VPS và token bot.\n2. Liên hệ admin để được cài bot con.\n3. Bot con sẽ bán hàng bằng dữ liệu từ hệ thống chính.\n4. Đơn hàng và hoa hồng CTV vẫn được ghi nhận tự động.\n\nLưu ý: không gửi token hoặc mật khẩu VPS ở nhóm công khai. Hãy liên hệ trực tiếp admin để được hỗ trợ cài đặt.";
+
+    ctx.bot
+        .send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
+            "👨‍💻 Liên hệ admin cài đặt",
+            Url::parse(ADMIN_CONTACT_URL)?,
         )]]))
         .await?;
     Ok(())
