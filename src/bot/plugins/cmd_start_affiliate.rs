@@ -130,7 +130,7 @@ async fn register_affiliate_and_send_link(
     let partner = upsert_start_affiliate_partner(&ctx.pool, user_id).await?;
     let url = affiliate_url(ctx, &partner.code).await?;
     let text = format!(
-        "✅ Đã đăng kí CTV thành công\n\nLink giới thiệu của bạn:\n{}\n\nHoa hồng: {}\nKhi khách mua hàng qua link này, hoa hồng sẽ được ghi nhận tự động.",
+        "✅ Bạn đã đăng kí CTV thành công\n\nLink giới thiệu của bạn:\n{}\n\nCách nhận hoa hồng:\n1. Gửi link này cho bạn bè hoặc khách hàng.\n2. Khi họ bấm link và mua hàng trong bot, bạn nhận {} giá trị đơn.\n3. Hoa hồng được bot ghi nhận tự động.\n\nGõ /ctv để xem thống kê hoa hồng của bạn.",
         url,
         format_percent_bps(partner.commission_bps),
     );
