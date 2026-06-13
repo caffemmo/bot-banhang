@@ -7,6 +7,7 @@ use crate::app::AppContext;
 
 pub mod auth;
 pub mod chat;
+pub mod childbot;
 pub mod client;
 pub mod configs;
 pub mod crypto_pay;
@@ -39,6 +40,7 @@ pub fn router(ctx: Arc<AppContext>) -> Router<Arc<AppContext>> {
     Router::new()
         .merge(auth::api::router())
         .merge(client::api::router())
+        .merge(childbot::api::router())
         .merge(orders::webhook::router())
         .merge(admin_routes)
 }
