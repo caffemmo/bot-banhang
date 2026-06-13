@@ -1,5 +1,6 @@
 pub mod cmd_api;
 pub mod cmd_broadcast;
+pub mod cmd_group_sales;
 pub mod cmd_help;
 pub mod cmd_orders;
 pub mod cmd_shop;
@@ -59,6 +60,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_api::ApiCommandPlugin),
         Box::new(cmd_broadcast::BroadcastCommandPlugin),
         Box::new(cmd_shop::ShopCommandPlugin),
+        Box::new(cmd_group_sales::GroupSalesCommandPlugin),
         Box::new(cmd_orders::OrdersCommandPlugin),
         Box::new(cmd_wallet::WalletCommandPlugin),
         Box::new(example::ExamplePlugin),
