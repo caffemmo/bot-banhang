@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::FromRow;
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::requests::Requester;
@@ -109,79 +109,37 @@ async fn send_admin_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) ->
         "start",
         "👋 Welcome! Use the buttons below, or type /shop to buy and /orders to view orders.",
     );
-    ctx.bot
-        .send_message(chat_id, text)
-        .reply_markup(admin_start_keyboard(ctx, lang))
-        .await?;
+    i18n::send_message_with_json_keyboard(
+        ctx,
+        chat_id,
+        "start",
+        text,
+        admin_start_keyboard_json(ctx, lang),
+    )
+    .await?;
     Ok(())
 }
 
-fn admin_start_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "start_btn_shop",
-            "🛒 Shop",
-            "start:shop",
-        )],
-        vec![
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "start_btn_topup",
-                "💰 Top up",
-                "wallet:topup",
-            ),
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "start_btn_wallet",
-                "💳 Wallet",
-                "start:wallet",
-            ),
-        ],
-        vec![
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "start_btn_purchased",
-                "📦 Purchased",
-                "start:orders",
-            ),
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "start_btn_topup_history",
-                "📜 Top-up history",
-                "wallet:topup_history",
-            ),
-        ],
-        vec![
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "start_btn_api_integration",
-                "🔌 API integration",
-                "shop_api",
-            ),
-            i18n::inline_button_callback(ctx, lang, "start_btn_help", "Help", "start:help"),
-        ],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "start_btn_support_history",
-            "📋 Lịch sử yêu cầu",
-            HISTORY_CALLBACK,
-        )],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "start_btn_language",
-            "🌐 Language",
-            "start:language",
-        )],
-    ])
+fn admin_start_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
+    json!({
+        "inline_keyboard": [
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
+            [
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
+            ],
+            [
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
+            ],
+            [
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_api_integration", "🔌 API integration", "shop_api"),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
+            ],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_support_history", "📋 Lịch sử yêu cầu", HISTORY_CALLBACK)],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
+        ]
+    })
 }
 
 async fn show_support_history(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
