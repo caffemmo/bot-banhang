@@ -1,3 +1,4 @@
+pub mod cmd_affiliate;
 pub mod cmd_api;
 pub mod cmd_broadcast;
 pub mod cmd_group_sales;
@@ -56,6 +57,7 @@ pub trait AppPlugin: Send + Sync {
 pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
     vec![
         Box::new(cmd_start::StartCommandPlugin),
+        Box::new(cmd_affiliate::AffiliateCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),
         Box::new(cmd_api::ApiCommandPlugin),
         Box::new(cmd_broadcast::BroadcastCommandPlugin),
