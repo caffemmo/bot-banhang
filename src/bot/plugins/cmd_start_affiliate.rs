@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use sqlx::{FromRow, SqlitePool};
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::prelude::Requester;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message};
+use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message, User};
 use url::Url;
 
 use crate::app::AppContext;
@@ -17,6 +17,7 @@ pub struct StartAffiliatePlugin;
 
 const AFFILIATE_REGISTER_CALLBACK: &str = "affiliate:register";
 const CHILD_BOT_GUIDE_CALLBACK: &str = "childbot:guide";
+const CHILD_BOT_READY_CALLBACK: &str = "childbot:ready";
 const DEFAULT_COMMISSION_BPS: i64 = 500;
 const ADMIN_CONTACT_URL: &str = "https://t.me/thang_hub";
 
@@ -102,6 +103,18 @@ impl AppPlugin for StartAffiliatePlugin {
                 }
                 Ok(true)
             }
+            CHILD_BOT_READY_CALLBACK => {
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text("Đã ghi nhận yêu cầu tạo bot con")
+                    .await;
+                if let Some(msg) = &q.message {
+                    send_child_bot_ready_instructions(&ctx, msg.chat().id, &q.from).await?;
+                    notify_admins_child_bot_ready(&ctx, &q.from).await;
+                }
+                Ok(true)
+            }
             _ => Ok(false),
         }
     }
@@ -165,12 +178,62 @@ async fn send_child_bot_setup_guide(ctx: &AppContext, chat_id: ChatId) -> Result
 
     ctx.bot
         .send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback(
+                "✅ Tôi đã chuẩn bị xong",
+                CHILD_BOT_READY_CALLBACK,
+            )],
+            vec![InlineKeyboardButton::url(
+                "👨‍💻 Liên hệ admin cài đặt",
+                Url::parse(ADMIN_CONTACT_URL)?,
+            )],
+        ]))
+        .await?;
+    Ok(())
+}
+
+async fn send_child_bot_ready_instructions(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    user: &User,
+) -> Result<()> {
+    let username = user
+        .username
+        .as_ref()
+        .map(|value| format!("@{value}"))
+        .unwrap_or_else(|| "chưa có username".to_string());
+    let text = format!(
+        "✅ Admin đã được báo về yêu cầu tạo bot con của bạn.\n\nBạn copy mẫu dưới đây và gửi riêng cho admin:\n\nTelegram ID: {}\nUsername: {}\nTên shop muốn hiển thị: ...\nToken bot con từ @BotFather: ...\nIP VPS: ...\nUser VPS: ...\nHệ điều hành VPS: Ubuntu ...\nGhi chú thêm: ...\n\nLưu ý: chỉ gửi token/VPS trong chat riêng với admin, không gửi ở nhóm công khai.",
+        user.id.0,
+        username,
+    );
+
+    ctx.bot
+        .send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
-            "👨‍💻 Liên hệ admin cài đặt",
+            "👨‍💻 Mở chat admin",
             Url::parse(ADMIN_CONTACT_URL)?,
         )]]))
         .await?;
     Ok(())
+}
+
+async fn notify_admins_child_bot_ready(ctx: &AppContext, user: &User) {
+    let username = user
+        .username
+        .as_ref()
+        .map(|value| format!("@{value}"))
+        .unwrap_or_else(|| "không có username".to_string());
+    let text = format!(
+        "🤖 Có CTV muốn tạo bot con\n\nTelegram ID: {}\nUsername: {}\nTên: {}\n\nHãy liên hệ khách để nhận token bot con và thông tin VPS.",
+        user.id.0,
+        username,
+        user.first_name,
+    );
+
+    for admin_id in ctx.order_notification_admin_ids() {
+        let _ = ctx.bot.send_message(ChatId(admin_id), text.clone()).await;
+    }
 }
 
 async fn ensure_affiliate_partner_schema(pool: &SqlitePool) -> Result<()> {
