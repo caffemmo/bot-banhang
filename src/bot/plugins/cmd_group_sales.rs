@@ -48,7 +48,7 @@ impl AppPlugin for GroupSalesCommandPlugin {
             return Ok(true);
         }
 
-        if command_name_matches(text, POST_PRODUCT_COMMAND) {
+        if is_command(text, POST_PRODUCT_COMMAND) {
             handle_post_product_command(&ctx, &msg, text).await?;
             return Ok(true);
         }
