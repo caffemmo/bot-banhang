@@ -247,15 +247,26 @@ pub async fn mark_purchase_request_status(
     status: &str,
     order_id: Option<&str>,
 ) -> Result<bool> {
+    mark_purchase_request_status_from(pool, request_id, "pending", status, order_id).await
+}
+
+pub async fn mark_purchase_request_status_from(
+    pool: &SqlitePool,
+    request_id: i64,
+    current_status: &str,
+    next_status: &str,
+    order_id: Option<&str>,
+) -> Result<bool> {
     ensure_schema(pool).await?;
     let result = sqlx::query(
         r#"UPDATE child_bot_purchase_requests
         SET status = ?, order_id = COALESCE(?, order_id), updated_at = datetime('now')
-        WHERE id = ? AND status = 'pending'"#,
+        WHERE id = ? AND status = ?"#,
     )
-    .bind(status)
+    .bind(next_status)
     .bind(order_id)
     .bind(request_id)
+    .bind(current_status)
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
