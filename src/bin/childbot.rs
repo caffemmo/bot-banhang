@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message};
+use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
