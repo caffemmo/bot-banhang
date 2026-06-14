@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendAnimationSetters, SendMessageSetters};
 use teloxide::prelude::*;
 use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message};
@@ -16,6 +17,7 @@ const CATEGORY_PRODUCT_LIMIT: usize = 16;
 
 #[derive(Clone)]
 struct ChildBotConfig {
+    telegram_token: String,
     api_base_url: String,
     api_key: String,
     shop_name: String,
@@ -50,7 +52,12 @@ struct ProductItem {
     name: String,
     price: i64,
     category: Option<String>,
+    category_emoji: Option<String>,
+    category_custom_emoji_id: Option<String>,
+    button_emoji: Option<String>,
+    button_custom_emoji_id: Option<String>,
     description: Option<String>,
+    image_url: Option<String>,
     delivery_type: String,
     stock_count: i64,
     plans: Vec<ProductPlan>,
@@ -84,6 +91,21 @@ struct PurchaseRequestResponse {
     delivered_data: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CategorySummary {
+    name: String,
+    count: usize,
+    emoji: Option<String>,
+    custom_emoji_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ButtonSpec {
+    text: String,
+    callback_data: String,
+    icon_custom_emoji_id: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
@@ -93,6 +115,7 @@ async fn main() -> Result<()> {
         .or_else(|_| env::var("TELOXIDE_TOKEN"))
         .map_err(|_| anyhow!("CHILDBOT_TELOXIDE_TOKEN is required"))?;
     let config = ChildBotConfig {
+        telegram_token: token.clone(),
         api_base_url: env::var("CHILDBOT_API_BASE_URL")
             .or_else(|_| env::var("API_BASE_URL"))
             .unwrap_or_else(|_| "https://caffemmo.com".to_string())
@@ -240,17 +263,15 @@ async fn send_categories(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> R
 
     let categories = category_counts(&products);
     let mut rows = Vec::new();
-    rows.push(vec![InlineKeyboardButton::callback(
+    rows.push(vec![button_spec(
         format!("📦 Tất cả sản phẩm ({})", products.len()),
         "cat:all",
+        None,
     )]);
 
     let mut row = Vec::new();
-    for (index, (category, count)) in categories.iter().enumerate() {
-        row.push(InlineKeyboardButton::callback(
-            format!("{} {} ({})", category_icon(category), truncate_label(category, 20), count),
-            format!("cat:{index}"),
-        ));
+    for (index, category) in categories.iter().enumerate() {
+        row.push(category_button(category, format!("cat:{index}")));
         if row.len() == 2 {
             rows.push(row);
             row = Vec::new();
@@ -259,11 +280,15 @@ async fn send_categories(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> R
     if !row.is_empty() {
         rows.push(row);
     }
-    rows.push(vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")]);
+    rows.push(vec![button_spec("🏠 Menu chính", "home", None)]);
 
-    bot.send_message(chat_id, "🛒 Danh mục sản phẩm\n\nChọn danh mục bạn muốn xem:")
-        .reply_markup(InlineKeyboardMarkup::new(rows))
-        .await?;
+    send_message_json_keyboard(
+        ctx,
+        chat_id,
+        "🛒 Danh mục sản phẩm\n\nChọn danh mục bạn muốn xem:",
+        rows,
+    )
+    .await?;
     Ok(())
 }
 
@@ -279,7 +304,7 @@ async fn send_category_products(
         None
     } else {
         let index = category_index.parse::<usize>().ok();
-        index.and_then(|i| categories.get(i).map(|(name, _)| name.clone()))
+        index.and_then(|i| categories.get(i).map(|category| category.name.clone()))
     };
 
     let filtered = products
@@ -293,12 +318,13 @@ async fn send_category_products(
         .collect::<Vec<_>>();
 
     if filtered.is_empty() {
-        bot.send_message(chat_id, "Danh mục này chưa có sản phẩm.")
-            .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-                "⬅️ Quay lại danh mục",
-                "products",
-            )]]))
-            .await?;
+        send_message_json_keyboard(
+            ctx,
+            chat_id,
+            "Danh mục này chưa có sản phẩm.",
+            vec![vec![button_spec("⬅️ Quay lại danh mục", "products", None)]],
+        )
+        .await?;
         return Ok(());
     }
 
@@ -318,10 +344,7 @@ async fn send_category_products(
             format_vnd(product.price),
             stock_note,
         ));
-        rows.push(vec![InlineKeyboardButton::callback(
-            format!("{} {}", category_icon(&product_category(product)), truncate_label(&product.name, PRODUCT_BUTTON_NAME_MAX_CHARS)),
-            format!("prod:{}", product.id),
-        )]);
+        rows.push(vec![product_button(product, format!("prod:{}", product.id))]);
     }
     if filtered.len() > CATEGORY_PRODUCT_LIMIT {
         lines.push(format!(
@@ -330,13 +353,11 @@ async fn send_category_products(
         ));
     }
     rows.push(vec![
-        InlineKeyboardButton::callback("⬅️ Danh mục", "products"),
-        InlineKeyboardButton::callback("🏠 Menu", "home"),
+        button_spec("⬅️ Danh mục", "products", None),
+        button_spec("🏠 Menu", "home", None),
     ]);
 
-    bot.send_message(chat_id, lines.join("\n"))
-        .reply_markup(InlineKeyboardMarkup::new(rows))
-        .await?;
+    send_message_json_keyboard(ctx, chat_id, lines.join("\n"), rows).await?;
     Ok(())
 }
 
@@ -366,7 +387,7 @@ async fn send_product_detail(
         .unwrap_or_else(|| "Không có mô tả.".to_string());
     let text = format!(
         "{} {}\n\n💵 Giá: {}\n{}\n🏷️ Danh mục: {}\n\n{}",
-        category_icon(&category),
+        product_static_icon(&product),
         product.name,
         format_vnd(product.price),
         stock_note,
@@ -377,27 +398,27 @@ async fn send_product_detail(
     let mut rows = Vec::new();
     if product.delivery_type == "manual_input" && !product.plans.is_empty() {
         for plan in product.plans.iter().take(8) {
-            rows.push(vec![InlineKeyboardButton::callback(
+            rows.push(vec![button_spec(
                 format!("✅ {} - {}", truncate_label(&plan.label, 24), format_vnd(plan.price)),
                 format!("buyplan:{}:{}", product.id, plan.id),
+                None,
             )]);
         }
     } else if product.stock_count > 0 {
-        rows.push(vec![InlineKeyboardButton::callback(
-            "✅ Mua ngay",
+        rows.push(vec![button_spec(
+            "Mua ngay",
             format!("buy:{}", product.id),
+            product_icon_custom_id(&product),
         )]);
     } else {
-        rows.push(vec![InlineKeyboardButton::callback("⛔ Hết hàng", "products")]);
+        rows.push(vec![button_spec("⛔ Hết hàng", "products", None)]);
     }
     rows.push(vec![
-        InlineKeyboardButton::callback("⬅️ Danh mục", "products"),
-        InlineKeyboardButton::callback("🏠 Menu", "home"),
+        button_spec("⬅️ Danh mục", "products", None),
+        button_spec("🏠 Menu", "home", None),
     ]);
 
-    bot.send_message(chat_id, text)
-        .reply_markup(InlineKeyboardMarkup::new(rows))
-        .await?;
+    send_message_json_keyboard(ctx, chat_id, text, rows).await?;
     Ok(())
 }
 
@@ -465,12 +486,25 @@ async fn create_purchase_request(
     Ok(())
 }
 
-fn category_counts(products: &[ProductItem]) -> Vec<(String, usize)> {
-    let mut counts = BTreeMap::<String, usize>::new();
+fn category_counts(products: &[ProductItem]) -> Vec<CategorySummary> {
+    let mut counts = BTreeMap::<String, CategorySummary>::new();
     for product in products {
-        *counts.entry(product_category(product)).or_insert(0) += 1;
+        let name = product_category(product);
+        let entry = counts.entry(name.clone()).or_insert_with(|| CategorySummary {
+            name,
+            count: 0,
+            emoji: product.category_emoji.clone(),
+            custom_emoji_id: product.category_custom_emoji_id.clone(),
+        });
+        entry.count += 1;
+        if entry.emoji.is_none() {
+            entry.emoji = product.category_emoji.clone();
+        }
+        if entry.custom_emoji_id.is_none() {
+            entry.custom_emoji_id = product.category_custom_emoji_id.clone();
+        }
     }
-    counts.into_iter().collect()
+    counts.into_values().collect()
 }
 
 fn product_category(product: &ProductItem) -> String {
@@ -509,6 +543,114 @@ fn category_icon(category: &str) -> &'static str {
         "🧰"
     } else {
         "✨"
+    }
+}
+
+fn category_button(category: &CategorySummary, callback_data: String) -> ButtonSpec {
+    let label = format!("{} ({})", truncate_label(&category.name, 20), category.count);
+    if let Some(icon_id) = clean_optional(&category.custom_emoji_id) {
+        return button_spec(label, callback_data, Some(icon_id));
+    }
+    let icon = clean_optional(&category.emoji).unwrap_or_else(|| category_icon(&category.name).to_string());
+    button_spec(format!("{icon} {label}"), callback_data, None)
+}
+
+fn product_button(product: &ProductItem, callback_data: String) -> ButtonSpec {
+    let label = truncate_label(&product.name, PRODUCT_BUTTON_NAME_MAX_CHARS);
+    if let Some(icon_id) = product_icon_custom_id(product) {
+        return button_spec(label, callback_data, Some(icon_id));
+    }
+    button_spec(format!("{} {label}", product_static_icon(product)), callback_data, None)
+}
+
+fn product_static_icon(product: &ProductItem) -> String {
+    clean_optional(&product.button_emoji)
+        .or_else(|| clean_optional(&product.category_emoji))
+        .unwrap_or_else(|| category_icon(&product_category(product)).to_string())
+}
+
+fn product_icon_custom_id(product: &ProductItem) -> Option<String> {
+    clean_optional(&product.button_custom_emoji_id)
+        .or_else(|| clean_optional(&product.category_custom_emoji_id))
+}
+
+fn clean_optional(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn button_spec(
+    text: impl Into<String>,
+    callback_data: impl Into<String>,
+    icon_custom_emoji_id: Option<String>,
+) -> ButtonSpec {
+    ButtonSpec {
+        text: text.into(),
+        callback_data: callback_data.into(),
+        icon_custom_emoji_id,
+    }
+}
+
+fn json_keyboard(rows: Vec<Vec<ButtonSpec>>) -> Value {
+    let inline_keyboard = rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|button| {
+                    let mut value = json!({
+                        "text": button.text,
+                        "callback_data": button.callback_data,
+                    });
+                    if let Some(icon_id) = button.icon_custom_emoji_id {
+                        if let Some(obj) = value.as_object_mut() {
+                            obj.insert("icon_custom_emoji_id".to_string(), Value::String(icon_id));
+                        }
+                    }
+                    value
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    json!({ "inline_keyboard": inline_keyboard })
+}
+
+async fn send_message_json_keyboard(
+    ctx: &ChildBotContext,
+    chat_id: ChatId,
+    text: impl Into<String>,
+    rows: Vec<Vec<ButtonSpec>>,
+) -> Result<()> {
+    let payload = json!({
+        "chat_id": chat_id.0,
+        "text": text.into(),
+        "reply_markup": json_keyboard(rows),
+    });
+    send_raw_telegram_method(ctx, "sendMessage", payload).await
+}
+
+async fn send_raw_telegram_method(
+    ctx: &ChildBotContext,
+    method: &str,
+    payload: Value,
+) -> Result<()> {
+    let url = format!(
+        "https://api.telegram.org/bot{}/{}",
+        ctx.config.telegram_token, method,
+    );
+    let response = ctx.http.post(url).json(&payload).send().await?;
+    let status = response.status();
+    let body = response.text().await?;
+    if !status.is_success() {
+        return Err(anyhow!("Telegram API {method} failed with {status}: {body}"));
+    }
+    let parsed: Value = serde_json::from_str(&body)?;
+    if parsed.get("ok").and_then(Value::as_bool) == Some(true) {
+        Ok(())
+    } else {
+        Err(anyhow!("Telegram API {method} returned error: {body}"))
     }
 }
 
