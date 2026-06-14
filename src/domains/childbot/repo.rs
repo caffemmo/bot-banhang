@@ -38,6 +38,15 @@ pub struct ChildBotPurchaseRequest {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct ChildBotOrderSummary {
+    pub order_id: String,
+    pub buyer_user_id: i64,
+    pub product_name: String,
+    pub amount: i64,
+    pub created_at: String,
+}
+
 pub fn hash_api_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
@@ -292,6 +301,28 @@ pub async fn insert_child_bot_order(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub async fn list_child_bot_order_summaries(
+    pool: &SqlitePool,
+    child_bot_id: i64,
+    limit: i64,
+) -> Result<Vec<ChildBotOrderSummary>> {
+    ensure_schema(pool).await?;
+    let rows = sqlx::query_as::<_, ChildBotOrderSummary>(
+        r#"SELECT cbo.order_id, cbo.buyer_user_id, p.name AS product_name, o.amount, cbo.created_at
+        FROM child_bot_orders cbo
+        JOIN orders o ON o.id = cbo.order_id
+        JOIN products p ON p.id = o.product_id
+        WHERE cbo.child_bot_id = ?
+        ORDER BY cbo.created_at DESC
+        LIMIT ?"#,
+    )
+    .bind(child_bot_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 fn normalize_optional(value: Option<&str>) -> Option<String> {
