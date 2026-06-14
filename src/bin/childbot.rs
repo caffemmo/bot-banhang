@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::sync::Arc;
 
@@ -8,6 +9,9 @@ use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::prelude::*;
 use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message};
 use tracing_subscriber::EnvFilter;
+
+const PRODUCT_BUTTON_NAME_MAX_CHARS: usize = 46;
+const CATEGORY_PRODUCT_LIMIT: usize = 16;
 
 #[derive(Clone)]
 struct ChildBotConfig {
@@ -120,8 +124,10 @@ async fn main() -> Result<()> {
 
 async fn handle_message(bot: Bot, msg: Message, ctx: Arc<ChildBotContext>) -> Result<()> {
     let text = msg.text().unwrap_or("").trim();
-    if text.starts_with("/start") || text.starts_with("/shop") {
-        send_home(&bot, &msg, &ctx).await?;
+    if text.starts_with("/start") || text.starts_with("/menu") {
+        send_home_to_chat(&bot, msg.chat.id, &ctx).await?;
+    } else if text.starts_with("/shop") {
+        send_categories(&bot, msg.chat.id, &ctx).await?;
     }
     Ok(())
 }
@@ -130,10 +136,31 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
     let Some(data) = q.data.clone() else {
         return Ok(());
     };
+    if data == "home" {
+        let _ = bot.answer_callback_query(q.id.clone()).await;
+        if let Some(msg) = &q.message {
+            send_home_to_chat(&bot, msg.chat().id, &ctx).await?;
+        }
+        return Ok(());
+    }
     if data == "products" {
         let _ = bot.answer_callback_query(q.id.clone()).await;
         if let Some(msg) = &q.message {
-            send_products(&bot, msg.chat().id, &ctx).await?;
+            send_categories(&bot, msg.chat().id, &ctx).await?;
+        }
+        return Ok(());
+    }
+    if let Some(category_index) = data.strip_prefix("cat:") {
+        let _ = bot.answer_callback_query(q.id.clone()).await;
+        if let Some(msg) = &q.message {
+            send_category_products(&bot, msg.chat().id, &ctx, category_index).await?;
+        }
+        return Ok(());
+    }
+    if let Some(product_id) = data.strip_prefix("prod:").and_then(|raw| raw.parse::<i64>().ok()) {
+        let _ = bot.answer_callback_query(q.id.clone()).await;
+        if let Some(msg) = &q.message {
+            send_product_detail(&bot, msg.chat().id, &ctx, product_id).await?;
         }
         return Ok(());
     }
@@ -153,63 +180,182 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
     Ok(())
 }
 
-async fn send_home(bot: &Bot, msg: &Message, ctx: &ChildBotContext) -> Result<()> {
+async fn send_home_to_chat(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
     let text = format!(
-        "{}\n\nChọn sản phẩm bên dưới. Mua hàng thành công sẽ nhận dữ liệu ngay tại bot này.",
+        "📣 {}\n\nBot bán hàng tự động. Chọn menu bên dưới để xem sản phẩm và mua hàng.",
         ctx.config.shop_name,
     );
-    bot.send_message(msg.chat.id, text)
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-            "🛒 Xem sản phẩm",
-            "products",
-        )]]))
+    bot.send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback("🛒 Xem sản phẩm", "products")],
+            vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")],
+        ]))
         .await?;
     Ok(())
 }
 
-async fn send_products(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
+async fn send_categories(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
     let products = api_get::<Vec<ProductItem>>(ctx, "/api/childbot/products").await?;
     if products.is_empty() {
         bot.send_message(chat_id, "Hiện chưa có sản phẩm.").await?;
         return Ok(());
     }
 
+    let categories = category_counts(&products);
     let mut rows = Vec::new();
-    let mut lines = vec!["🛒 Danh sách sản phẩm".to_string(), String::new()];
-    for product in products.iter().take(30) {
-        let category = product.category.clone().unwrap_or_else(|| "Khác".to_string());
+    rows.push(vec![InlineKeyboardButton::callback(
+        format!("📦 Tất cả sản phẩm ({})", products.len()),
+        "cat:all",
+    )]);
+
+    let mut row = Vec::new();
+    for (index, (category, count)) in categories.iter().enumerate() {
+        row.push(InlineKeyboardButton::callback(
+            format!("{} ({})", truncate_label(category, 22), count),
+            format!("cat:{index}"),
+        ));
+        if row.len() == 2 {
+            rows.push(row);
+            row = Vec::new();
+        }
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows.push(vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")]);
+
+    bot.send_message(chat_id, "🛒 Danh mục sản phẩm\n\nChọn danh mục bạn muốn xem:")
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+async fn send_category_products(
+    bot: &Bot,
+    chat_id: ChatId,
+    ctx: &ChildBotContext,
+    category_index: &str,
+) -> Result<()> {
+    let products = api_get::<Vec<ProductItem>>(ctx, "/api/childbot/products").await?;
+    let categories = category_counts(&products);
+    let selected_category = if category_index == "all" {
+        None
+    } else {
+        let index = category_index.parse::<usize>().ok();
+        index.and_then(|i| categories.get(i).map(|(name, _)| name.clone()))
+    };
+
+    let filtered = products
+        .iter()
+        .filter(|product| {
+            selected_category
+                .as_ref()
+                .map(|category| product_category(product) == *category)
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+
+    if filtered.is_empty() {
+        bot.send_message(chat_id, "Danh mục này chưa có sản phẩm.")
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+                "⬅️ Quay lại danh mục",
+                "products",
+            )]]))
+            .await?;
+        return Ok(());
+    }
+
+    let title = selected_category.unwrap_or_else(|| "Tất cả sản phẩm".to_string());
+    let mut lines = vec![format!("📦 {title}"), String::new()];
+    let mut rows = Vec::new();
+    for product in filtered.iter().take(CATEGORY_PRODUCT_LIMIT) {
         let stock_note = if product.delivery_type == "manual_input" {
             "dịch vụ".to_string()
         } else {
             format!("còn {}", product.stock_count)
         };
         lines.push(format!(
-            "#{} | {} | {} | {} | {}",
+            "#{} | {} | {} | {}",
             product.id,
             product.name,
             format_vnd(product.price),
-            category,
             stock_note,
         ));
+        rows.push(vec![InlineKeyboardButton::callback(
+            truncate_label(&product.name, PRODUCT_BUTTON_NAME_MAX_CHARS),
+            format!("prod:{}", product.id),
+        )]);
+    }
+    if filtered.len() > CATEGORY_PRODUCT_LIMIT {
+        lines.push(format!(
+            "\nĐang hiển thị {CATEGORY_PRODUCT_LIMIT}/{} sản phẩm đầu tiên.",
+            filtered.len(),
+        ));
+    }
+    rows.push(vec![
+        InlineKeyboardButton::callback("⬅️ Danh mục", "products"),
+        InlineKeyboardButton::callback("🏠 Menu", "home"),
+    ]);
 
-        if product.delivery_type == "manual_input" && !product.plans.is_empty() {
-            for plan in product.plans.iter().take(3) {
-                rows.push(vec![InlineKeyboardButton::callback(
-                    format!("{} - {}", product.name, format_vnd(plan.price)),
-                    format!("buyplan:{}:{}", product.id, plan.id),
-                )]);
-            }
-        } else if product.stock_count > 0 {
+    bot.send_message(chat_id, lines.join("\n"))
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+async fn send_product_detail(
+    bot: &Bot,
+    chat_id: ChatId,
+    ctx: &ChildBotContext,
+    product_id: i64,
+) -> Result<()> {
+    let products = api_get::<Vec<ProductItem>>(ctx, "/api/childbot/products").await?;
+    let Some(product) = products.into_iter().find(|item| item.id == product_id) else {
+        bot.send_message(chat_id, "Sản phẩm không tồn tại hoặc đã ngừng bán.")
+            .await?;
+        return Ok(());
+    };
+
+    let stock_note = if product.delivery_type == "manual_input" {
+        "Dịch vụ xử lý theo yêu cầu".to_string()
+    } else {
+        format!("Kho còn: {}", product.stock_count)
+    };
+    let description = product
+        .description
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Không có mô tả.".to_string());
+    let text = format!(
+        "📦 {}\n\nGiá: {}\n{}\n\n{}",
+        product.name,
+        format_vnd(product.price),
+        stock_note,
+        description,
+    );
+
+    let mut rows = Vec::new();
+    if product.delivery_type == "manual_input" && !product.plans.is_empty() {
+        for plan in product.plans.iter().take(8) {
             rows.push(vec![InlineKeyboardButton::callback(
-                format!("Mua {}", product.name),
-                format!("buy:{}", product.id),
+                format!("Mua {} - {}", truncate_label(&plan.label, 24), format_vnd(plan.price)),
+                format!("buyplan:{}:{}", product.id, plan.id),
             )]);
         }
+    } else if product.stock_count > 0 {
+        rows.push(vec![InlineKeyboardButton::callback(
+            "✅ Mua ngay",
+            format!("buy:{}", product.id),
+        )]);
+    } else {
+        rows.push(vec![InlineKeyboardButton::callback("Hết hàng", "products")]);
     }
-    if rows.is_empty() {
-        rows.push(vec![InlineKeyboardButton::callback("Tải lại", "products")]);
-    }
-    bot.send_message(chat_id, lines.join("\n"))
+    rows.push(vec![
+        InlineKeyboardButton::callback("⬅️ Danh mục", "products"),
+        InlineKeyboardButton::callback("🏠 Menu", "home"),
+    ]);
+
+    bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
         .await?;
     Ok(())
@@ -277,6 +423,36 @@ async fn create_purchase_request(
         }
     }
     Ok(())
+}
+
+fn category_counts(products: &[ProductItem]) -> Vec<(String, usize)> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for product in products {
+        *counts.entry(product_category(product)).or_insert(0) += 1;
+    }
+    counts.into_iter().collect()
+}
+
+fn product_category(product: &ProductItem) -> String {
+    product
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Khác")
+        .to_string()
+}
+
+fn truncate_label(value: &str, max_chars: usize) -> String {
+    let mut result = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index >= max_chars {
+            result.push('…');
+            return result;
+        }
+        result.push(ch);
+    }
+    result
 }
 
 async fn api_get<T>(ctx: &ChildBotContext, path: &str) -> Result<T>
