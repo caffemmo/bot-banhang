@@ -1,6 +1,7 @@
 pub mod cmd_affiliate;
 pub mod cmd_api;
 pub mod cmd_broadcast;
+pub mod cmd_childbot;
 pub mod cmd_group_sales;
 pub mod cmd_help;
 pub mod cmd_orders;
@@ -60,6 +61,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_start_affiliate::StartAffiliatePlugin),
         Box::new(cmd_start::StartCommandPlugin),
         Box::new(cmd_affiliate::AffiliateCommandPlugin),
+        Box::new(cmd_childbot::ChildBotCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),
         Box::new(cmd_api::ApiCommandPlugin),
         Box::new(cmd_broadcast::BroadcastCommandPlugin),
