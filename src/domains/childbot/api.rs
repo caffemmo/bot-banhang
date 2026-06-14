@@ -39,6 +39,23 @@ pub struct ChildBotInfoResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChildBotBalanceResponse {
+    pub owner_user_id: i64,
+    pub balance: i64,
+    pub balance_display: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChildBotOrderItem {
+    pub order_id: String,
+    pub buyer_user_id: i64,
+    pub product_name: String,
+    pub amount: i64,
+    pub amount_display: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ChildBotProductItem {
     pub id: i64,
     pub name: String,
@@ -130,6 +147,44 @@ pub async fn me(
         bot_username: auth.child_bot.bot_username,
         shop_name: auth.child_bot.shop_name,
     }))
+}
+
+pub async fn balance(
+    State(ctx): State<Arc<AppContext>>,
+    headers: HeaderMap,
+) -> ApiResult<ChildBotBalanceResponse> {
+    let auth = require_child_bot_auth(&ctx, &headers).await?;
+    let wallet = wallet_repo::get_or_create_wallet(&ctx.pool, auth.child_bot.owner_user_id)
+        .await
+        .map_err(|e| ApiError::internal(format!("get child bot owner wallet failed: {e}")))?;
+    Ok(ok(ChildBotBalanceResponse {
+        owner_user_id: auth.child_bot.owner_user_id,
+        balance: wallet.balance,
+        balance_display: format_vnd(wallet.balance),
+    }))
+}
+
+pub async fn list_orders(
+    State(ctx): State<Arc<AppContext>>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<ChildBotOrderItem>> {
+    let auth = require_child_bot_auth(&ctx, &headers).await?;
+    let orders = repo::list_child_bot_order_summaries(&ctx.pool, auth.child_bot.id, 20)
+        .await
+        .map_err(|e| ApiError::internal(format!("list child bot orders failed: {e}")))?;
+    Ok(ok(
+        orders
+            .into_iter()
+            .map(|order| ChildBotOrderItem {
+                order_id: order.order_id,
+                buyer_user_id: order.buyer_user_id,
+                product_name: order.product_name,
+                amount: order.amount,
+                amount_display: format_vnd(order.amount),
+                created_at: order.created_at,
+            })
+            .collect(),
+    ))
 }
 
 pub async fn list_products(
@@ -434,6 +489,8 @@ fn new_childbot_memo(child_bot_id: i64) -> String {
 pub fn router() -> Router<Arc<AppContext>> {
     Router::new()
         .route("/api/childbot/me", get(me))
+        .route("/api/childbot/balance", get(balance))
+        .route("/api/childbot/orders", get(list_orders))
         .route("/api/childbot/products", get(list_products))
         .route("/api/childbot/purchase-requests", post(create_purchase_request))
         .route("/api/childbot/purchase-requests/:request_id", get(get_request_status))
