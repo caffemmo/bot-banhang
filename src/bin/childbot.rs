@@ -73,6 +73,9 @@ struct PurchaseRequestResponse {
     request_id: i64,
     amount_display: String,
     confirmation_sent: bool,
+    order_id: Option<String>,
+    balance_after_display: Option<String>,
+    delivered_data: Option<String>,
 }
 
 #[tokio::main]
@@ -152,7 +155,7 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
 
 async fn send_home(bot: &Bot, msg: &Message, ctx: &ChildBotContext) -> Result<()> {
     let text = format!(
-        "{}\n\nChọn sản phẩm bên dưới. Khi bạn mua hàng, bot chính sẽ gửi nút xác nhận trước khi trừ ví.",
+        "{}\n\nChọn sản phẩm bên dưới. Mua hàng thành công sẽ nhận dữ liệu ngay tại bot này.",
         ctx.config.shop_name,
     );
     bot.send_message(msg.chat.id, text)
@@ -240,15 +243,24 @@ async fn create_purchase_request(
         Ok(response) => {
             let _ = bot
                 .answer_callback_query(q.id.clone())
-                .text("Đã gửi yêu cầu xác nhận sang bot chính")
+                .text("Mua hàng thành công")
                 .await;
             if let Some(msg) = &q.message {
+                let order_id = response.order_id.unwrap_or_else(|| "-".to_string());
+                let balance_after = response
+                    .balance_after_display
+                    .unwrap_or_else(|| "-".to_string());
+                let delivered_data = response
+                    .delivered_data
+                    .unwrap_or_else(|| "Không có dữ liệu giao hàng.".to_string());
                 bot.send_message(
                     msg.chat().id,
                     format!(
-                        "✅ Đã tạo yêu cầu mua #{}\nSố tiền: {}\n\nVui lòng mở bot chính và bấm Xác nhận mua để trừ ví và nhận hàng.",
-                        response.request_id,
+                        "✅ Mua hàng thành công\n\nĐơn: {}\nSố tiền: {}\nSố dư CTV còn lại: {}\n\nDữ liệu giao hàng:\n{}",
+                        order_id,
                         response.amount_display,
+                        balance_after,
+                        delivered_data,
                     ),
                 )
                 .await?;
@@ -257,7 +269,7 @@ async fn create_purchase_request(
         Err(err) => {
             let _ = bot
                 .answer_callback_query(q.id.clone())
-                .text("Không tạo được yêu cầu mua")
+                .text("Không mua được sản phẩm")
                 .await;
             if let Some(msg) = &q.message {
                 bot.send_message(msg.chat().id, format!("❌ {err}")).await?;
