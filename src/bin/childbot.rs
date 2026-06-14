@@ -5,10 +5,11 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
+use teloxide::payloads::{AnswerCallbackQuerySetters, SendAnimationSetters, SendMessageSetters};
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message};
+use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message};
 use tracing_subscriber::EnvFilter;
+use url::Url;
 
 const PRODUCT_BUTTON_NAME_MAX_CHARS: usize = 46;
 const CATEGORY_PRODUCT_LIMIT: usize = 16;
@@ -18,6 +19,7 @@ struct ChildBotConfig {
     api_base_url: String,
     api_key: String,
     shop_name: String,
+    welcome_animation: Option<String>,
 }
 
 #[derive(Clone)]
@@ -98,6 +100,10 @@ async fn main() -> Result<()> {
             .to_string(),
         api_key: env::var("CHILDBOT_API_KEY").map_err(|_| anyhow!("CHILDBOT_API_KEY is required"))?,
         shop_name: env::var("CHILDBOT_SHOP_NAME").unwrap_or_else(|_| "Shop CTV".to_string()),
+        welcome_animation: env::var("CHILDBOT_WELCOME_ANIMATION")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
     };
     let ctx = Arc::new(ChildBotContext {
         http: Client::new(),
@@ -182,16 +188,47 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
 
 async fn send_home_to_chat(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
     let text = format!(
-        "📣 {}\n\nBot bán hàng tự động. Chọn menu bên dưới để xem sản phẩm và mua hàng.",
+        "🏪 {}\n\n⚡ Bot bán hàng tự động 24/7\n🛒 Chọn sản phẩm, thanh toán bằng số dư CTV\n📦 Mua thành công nhận hàng ngay tại bot này",
         ctx.config.shop_name,
     );
+    let keyboard = home_keyboard();
+    if let Some(animation) = &ctx.config.welcome_animation {
+        match input_file_from_value(animation) {
+            Ok(input_file) => {
+                match bot
+                    .send_animation(chat_id, input_file)
+                    .caption(text.clone())
+                    .reply_markup(keyboard.clone())
+                    .await
+                {
+                    Ok(_) => return Ok(()),
+                    Err(err) => tracing::warn!("failed to send child bot welcome animation: {err}"),
+                }
+            }
+            Err(err) => tracing::warn!("invalid child bot welcome animation: {err}"),
+        }
+    }
+
     bot.send_message(chat_id, text)
-        .reply_markup(InlineKeyboardMarkup::new(vec![
-            vec![InlineKeyboardButton::callback("🛒 Xem sản phẩm", "products")],
-            vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")],
-        ]))
+        .reply_markup(keyboard)
         .await?;
     Ok(())
+}
+
+fn home_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback("🛒 Xem sản phẩm", "products")],
+        vec![InlineKeyboardButton::callback("🔥 Hàng nổi bật", "cat:all")],
+        vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")],
+    ])
+}
+
+fn input_file_from_value(value: &str) -> Result<InputFile> {
+    if value.starts_with("http://") || value.starts_with("https://") {
+        Ok(InputFile::url(Url::parse(value)?))
+    } else {
+        Ok(InputFile::file_id(value.to_string()))
+    }
 }
 
 async fn send_categories(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
@@ -211,7 +248,7 @@ async fn send_categories(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> R
     let mut row = Vec::new();
     for (index, (category, count)) in categories.iter().enumerate() {
         row.push(InlineKeyboardButton::callback(
-            format!("{} ({})", truncate_label(category, 22), count),
+            format!("{} {} ({})", category_icon(category), truncate_label(category, 20), count),
             format!("cat:{index}"),
         ));
         if row.len() == 2 {
@@ -266,7 +303,7 @@ async fn send_category_products(
     }
 
     let title = selected_category.unwrap_or_else(|| "Tất cả sản phẩm".to_string());
-    let mut lines = vec![format!("📦 {title}"), String::new()];
+    let mut lines = vec![format!("{} {title}", category_icon(&title)), String::new()];
     let mut rows = Vec::new();
     for product in filtered.iter().take(CATEGORY_PRODUCT_LIMIT) {
         let stock_note = if product.delivery_type == "manual_input" {
@@ -282,7 +319,7 @@ async fn send_category_products(
             stock_note,
         ));
         rows.push(vec![InlineKeyboardButton::callback(
-            truncate_label(&product.name, PRODUCT_BUTTON_NAME_MAX_CHARS),
+            format!("{} {}", category_icon(&product_category(product)), truncate_label(&product.name, PRODUCT_BUTTON_NAME_MAX_CHARS)),
             format!("prod:{}", product.id),
         )]);
     }
@@ -316,10 +353,11 @@ async fn send_product_detail(
         return Ok(());
     };
 
+    let category = product_category(&product);
     let stock_note = if product.delivery_type == "manual_input" {
-        "Dịch vụ xử lý theo yêu cầu".to_string()
+        "🧾 Dịch vụ xử lý theo yêu cầu".to_string()
     } else {
-        format!("Kho còn: {}", product.stock_count)
+        format!("📦 Kho còn: {}", product.stock_count)
     };
     let description = product
         .description
@@ -327,10 +365,12 @@ async fn send_product_detail(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "Không có mô tả.".to_string());
     let text = format!(
-        "📦 {}\n\nGiá: {}\n{}\n\n{}",
+        "{} {}\n\n💵 Giá: {}\n{}\n🏷️ Danh mục: {}\n\n{}",
+        category_icon(&category),
         product.name,
         format_vnd(product.price),
         stock_note,
+        category,
         description,
     );
 
@@ -338,7 +378,7 @@ async fn send_product_detail(
     if product.delivery_type == "manual_input" && !product.plans.is_empty() {
         for plan in product.plans.iter().take(8) {
             rows.push(vec![InlineKeyboardButton::callback(
-                format!("Mua {} - {}", truncate_label(&plan.label, 24), format_vnd(plan.price)),
+                format!("✅ {} - {}", truncate_label(&plan.label, 24), format_vnd(plan.price)),
                 format!("buyplan:{}:{}", product.id, plan.id),
             )]);
         }
@@ -348,7 +388,7 @@ async fn send_product_detail(
             format!("buy:{}", product.id),
         )]);
     } else {
-        rows.push(vec![InlineKeyboardButton::callback("Hết hàng", "products")]);
+        rows.push(vec![InlineKeyboardButton::callback("⛔ Hết hàng", "products")]);
     }
     rows.push(vec![
         InlineKeyboardButton::callback("⬅️ Danh mục", "products"),
@@ -402,7 +442,7 @@ async fn create_purchase_request(
                 bot.send_message(
                     msg.chat().id,
                     format!(
-                        "✅ Mua hàng thành công\n\nĐơn: {}\nSố tiền: {}\nSố dư CTV còn lại: {}\n\nDữ liệu giao hàng:\n{}",
+                        "✅ Mua hàng thành công\n\n🧾 Đơn: {}\n💵 Số tiền: {}\n👛 Số dư CTV còn lại: {}\n\n📦 Dữ liệu giao hàng:\n{}",
                         order_id,
                         response.amount_display,
                         balance_after,
@@ -441,6 +481,35 @@ fn product_category(product: &ProductItem) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("Khác")
         .to_string()
+}
+
+fn category_icon(category: &str) -> &'static str {
+    let normalized = category.to_ascii_uppercase();
+    if normalized.contains("CANVA") {
+        "🎨"
+    } else if normalized.contains("CAPCUT") || normalized.contains("VIDEO") {
+        "🎬"
+    } else if normalized.contains("CHATGPT") || normalized.contains("GEMINI") || normalized.contains("AI") {
+        "🤖"
+    } else if normalized.contains("PROXY") || normalized.contains("IPV6") {
+        "🌐"
+    } else if normalized.contains("TUT") || normalized.contains("TRICK") {
+        "📚"
+    } else if normalized.contains("INSTAGRAM") {
+        "📸"
+    } else if normalized.contains("META") || normalized.contains("FACEBOOK") || normalized.contains("ACC") {
+        "✅"
+    } else if normalized.contains("KEY") || normalized.contains("HMA") {
+        "🔑"
+    } else if normalized.contains("SUPPORT") || normalized.contains("CHAT") {
+        "💬"
+    } else if normalized.contains("CLONE") {
+        "📦"
+    } else if normalized.contains("TẤT CẢ") || normalized.contains("TAT CA") {
+        "🧰"
+    } else {
+        "✨"
+    }
 }
 
 fn truncate_label(value: &str, max_chars: usize) -> String {
