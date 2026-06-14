@@ -17,6 +17,7 @@ pub struct StartAffiliatePlugin;
 
 const AFFILIATE_REGISTER_CALLBACK: &str = "affiliate:register";
 const CHILD_BOT_GUIDE_CALLBACK: &str = "childbot:guide";
+const CHILD_BOT_BENEFITS_CALLBACK: &str = "childbot:benefits";
 const CHILD_BOT_READY_CALLBACK: &str = "childbot:ready";
 const DEFAULT_COMMISSION_BPS: i64 = 500;
 const ADMIN_CONTACT_URL: &str = "https://t.me/thang_hub";
@@ -103,6 +104,13 @@ impl AppPlugin for StartAffiliatePlugin {
                 }
                 Ok(true)
             }
+            CHILD_BOT_BENEFITS_CALLBACK => {
+                let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+                if let Some(msg) = &q.message {
+                    send_child_bot_benefits(&ctx, msg.chat().id).await?;
+                }
+                Ok(true)
+            }
             CHILD_BOT_READY_CALLBACK => {
                 let _ = ctx
                     .bot
@@ -144,6 +152,7 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
             ],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", AFFILIATE_REGISTER_CALLBACK)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", CHILD_BOT_GUIDE_CALLBACK)],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot_benefits", "🎁 Quyền lợi bot con", CHILD_BOT_BENEFITS_CALLBACK)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
     })
@@ -174,14 +183,37 @@ async fn register_affiliate_and_send_link(
 }
 
 async fn send_child_bot_setup_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
-    let text = "🤖 TẠO BOT BÁN HÀNG RIÊNG\n\nBạn có thể có bot bán hàng riêng giống shop chính, chạy trên VPS của bạn.\n\nBạn cần chuẩn bị:\n1. VPS Ubuntu riêng, tối thiểu 1GB RAM để test, khuyên dùng 2GB RAM trở lên.\n2. Token bot Telegram tạo từ @BotFather.\n3. Tên shop hoặc tên bot muốn hiển thị.\n\nQuy trình:\n1. Bạn chuẩn bị VPS và token bot.\n2. Liên hệ admin để được cài bot con.\n3. Bot con sẽ bán hàng bằng dữ liệu từ hệ thống chính.\n4. Đơn hàng và hoa hồng CTV vẫn được ghi nhận tự động.\n\nLưu ý: không gửi token hoặc mật khẩu VPS ở nhóm công khai. Hãy liên hệ trực tiếp admin để được hỗ trợ cài đặt.";
+    let text = "🤖 TẠO BOT BÁN HÀNG RIÊNG\n\nBạn có thể có bot bán hàng riêng giống shop chính, chạy trên chính VPS của bạn.\n\nBạn phải cần chuẩn bị:\n1. Tạo Token bot Telegram tạo từ @BotFather.\n2. Tên shop hoặc tên bot muốn hiển thị.\n3. Phí VPS (69K 1 THÁNG)\n\nQuy trình:\n1. Bạn chuẩn bị VPS và token bot.\n2. Liên hệ admin để được cài bot con.\n3. Bot con sẽ bán hàng bằng dữ liệu từ hệ thống chính.\n4. Đơn hàng và hoa hồng CTV vẫn được ghi nhận tự động.\n\nLưu ý: không gửi token hoặc mật khẩu VPS ở nhóm công khai. Hãy liên hệ trực tiếp admin để được hỗ trợ cài đặt.";
 
     ctx.bot
         .send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![InlineKeyboardButton::callback(
+                "🎁 Quyền lợi bot con",
+                CHILD_BOT_BENEFITS_CALLBACK,
+            )],
+            vec![InlineKeyboardButton::callback(
                 "✅ Tôi đã chuẩn bị xong",
                 CHILD_BOT_READY_CALLBACK,
+            )],
+            vec![InlineKeyboardButton::url(
+                "👨‍💻 Liên hệ admin cài đặt",
+                Url::parse(ADMIN_CONTACT_URL)?,
+            )],
+        ]))
+        .await?;
+    Ok(())
+}
+
+async fn send_child_bot_benefits(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let text = "🎁 QUYỀN LỢI TẠO BOT CON\n\n🔥 Quyền lợi độc quyền:\n1. Được giảm 10% cho tất cả mặt hàng từ bot chính.\n2. Được tự tăng chỉnh giá bên bot con theo ý muốn.\n\n🏪 Có bot bán hàng riêng\nBot hiển thị tên shop riêng, giới thiệu riêng, nút menu riêng. Khách sẽ thấy shop của bạn chuyên nghiệp hơn gửi link CTV thường.\n\n🛒 Bán toàn bộ sản phẩm từ bot chính\nBot con tự lấy danh mục, sản phẩm, giá và tồn kho từ bot chính. Chủ CTV không cần nhập hàng, không cần quản lý kho.\n\n⚡ Tự động giao hàng\nKhi người mua thanh toán hoặc mua thành công, bot con gọi hệ thống chính lấy hàng và giao ngay. Chủ CTV không cần online xử lý đơn.\n\n💰 Dùng số dư CTV để nhập hàng\nChủ CTV nạp tiền vào bot chính. Khi khách mua ở bot con, hệ thống trừ số dư CTV tương ứng. Dễ quản lý, không cần cấp quyền nhạy cảm.\n\n⚙️ Tự đặt thông tin shop\nCTV có thể tự chỉnh:\n/setname tên shop\n/setintro lời giới thiệu\n/setcontact liên hệ hỗ trợ\n/setbank thông tin nhận thanh toán\n\n📊 Xem số dư và đơn hàng\nDùng /mybalance để xem số dư, /myorders để xem đơn phát sinh từ bot con.\n\n🧩 Không cần biết code\nCTV chỉ cần tạo bot bằng @BotFather và chuẩn bị VPS. Phần kỹ thuật cài đặt sẽ được admin hỗ trợ.\n\n🔒 Không lộ source chính\nBot con chỉ là client gọi API. Khách có VPS riêng cũng không cần cầm source bot chính, chỉ có file chạy bot con và API key giới hạn quyền.\n\n🔄 Cập nhật sản phẩm tự động\nKhi bot chính đổi sản phẩm, giá hoặc tồn kho, bot con tự lấy dữ liệu mới. CTV không phải sửa thủ công.\n\n🏷️ Có thương hiệu riêng\nBot con có thể đặt tên shop riêng, avatar bot riêng, mô tả riêng và link riêng để quảng bá.";
+
+    ctx.bot
+        .send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback(
+                "🤖 Xem cách tạo bot con",
+                CHILD_BOT_GUIDE_CALLBACK,
             )],
             vec![InlineKeyboardButton::url(
                 "👨‍💻 Liên hệ admin cài đặt",
