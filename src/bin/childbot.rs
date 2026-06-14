@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendAnimationSetters, SendMessageSetters};
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message};
+use teloxide::types::{CallbackQuery, ChatId, FileId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message};
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
@@ -250,7 +250,7 @@ fn input_file_from_value(value: &str) -> Result<InputFile> {
     if value.starts_with("http://") || value.starts_with("https://") {
         Ok(InputFile::url(Url::parse(value)?))
     } else {
-        Ok(InputFile::file_id(value.to_string()))
+        Ok(InputFile::file_id(FileId(value.to_string())))
     }
 }
 
@@ -293,7 +293,7 @@ async fn send_categories(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> R
 }
 
 async fn send_category_products(
-    bot: &Bot,
+    _bot: &Bot,
     chat_id: ChatId,
     ctx: &ChildBotContext,
     category_index: &str,
