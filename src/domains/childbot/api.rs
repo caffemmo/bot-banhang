@@ -7,17 +7,21 @@ use axum::{
     http::HeaderMap,
     routing::{get, post},
 };
+use chrono::Utc;
+use rand::{Rng, distributions::Alphanumeric};
 use serde::{Deserialize, Serialize};
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::Requester;
-use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
 use crate::app::AppContext;
 use crate::bot::plugins::cmd_wallet::format_vnd;
 use crate::core::responses::{ApiError, ApiResult, ok};
+use crate::domains::orders::admin_notify::notify_admins_order_paid;
 use crate::domains::orders::api as orders_api;
-use crate::domains::products::models::ProductPlan;
+use crate::domains::orders::fulfillment::PaymentSource;
+use crate::domains::orders::models::{Order, OrderStatus, OrderWithProduct};
+use crate::domains::orders::repo as orders_repo;
+use crate::domains::products::models::{Product, ProductPlan};
 use crate::domains::products::repo as products_repo;
+use crate::domains::wallet::repo as wallet_repo;
 
 use super::repo::{self, ChildBotRecord};
 
@@ -69,6 +73,19 @@ pub struct PurchaseRequestResponse {
     pub amount: i64,
     pub amount_display: String,
     pub confirmation_sent: bool,
+    pub order_id: Option<String>,
+    pub balance_after: Option<i64>,
+    pub balance_after_display: Option<String>,
+    pub delivered_data: Option<String>,
+}
+
+struct DirectChildBotOrder {
+    order_id: String,
+    product_id: i64,
+    qty: i64,
+    amount: i64,
+    balance_after: i64,
+    delivered_data: String,
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, ApiError> {
@@ -173,6 +190,10 @@ pub async fn get_request_status(
         amount: request.amount,
         amount_display: format_vnd(request.amount),
         confirmation_sent: true,
+        order_id: request.order_id,
+        balance_after: None,
+        balance_after_display: None,
+        delivered_data: None,
     }))
 }
 
@@ -182,24 +203,26 @@ pub async fn create_purchase_request(
     Json(payload): Json<CreatePurchaseRequestPayload>,
 ) -> ApiResult<PurchaseRequestResponse> {
     let auth = require_child_bot_auth(&ctx, &headers).await?;
-    let request = create_pending_request(&ctx, &auth.child_bot, payload)
+    let buyer_user_id = payload.telegram_id;
+    let order = buy_with_reseller_wallet(&ctx, &auth.child_bot, payload)
         .await
         .map_err(child_bot_request_error)?;
-    send_confirmation_to_buyer(&ctx, &auth.child_bot, &request)
-        .await
-        .map_err(|e| ApiError::validation(format!("Không gửi được xác nhận cho khách. Khách cần bấm /start ở bot chính trước. Chi tiết: {e}")))?;
 
     Ok(ok(PurchaseRequestResponse {
-        request_id: request.id,
-        status: request.status,
-        child_bot_id: request.child_bot_id,
-        affiliate_user_id: request.affiliate_user_id,
-        telegram_id: request.buyer_user_id,
-        product_id: request.product_id,
-        qty: request.qty,
-        amount: request.amount,
-        amount_display: format_vnd(request.amount),
-        confirmation_sent: true,
+        request_id: 0,
+        status: "paid".to_string(),
+        child_bot_id: auth.child_bot.id,
+        affiliate_user_id: auth.child_bot.owner_user_id,
+        telegram_id: buyer_user_id,
+        product_id: order.product_id,
+        qty: order.qty,
+        amount: order.amount,
+        amount_display: format_vnd(order.amount),
+        confirmation_sent: false,
+        order_id: Some(order.order_id),
+        balance_after: Some(order.balance_after),
+        balance_after_display: Some(format_vnd(order.balance_after)),
+        delivered_data: Some(order.delivered_data),
     }))
 }
 
@@ -208,6 +231,8 @@ fn child_bot_request_error(err: anyhow::Error) -> ApiError {
     if msg.contains("not found") {
         ApiError::not_found(msg)
     } else if msg.contains("telegram_id")
+        || msg.contains("không đủ")
+        || msg.contains("not enough")
         || msg.contains("qty")
         || msg.contains("plan")
         || msg.contains("stock")
@@ -218,11 +243,11 @@ fn child_bot_request_error(err: anyhow::Error) -> ApiError {
     }
 }
 
-async fn create_pending_request(
+async fn buy_with_reseller_wallet(
     ctx: &AppContext,
     child_bot: &ChildBotRecord,
     payload: CreatePurchaseRequestPayload,
-) -> Result<repo::ChildBotPurchaseRequest> {
+) -> Result<DirectChildBotOrder> {
     if payload.telegram_id <= 0 {
         return Err(anyhow!("telegram_id is invalid"));
     }
@@ -243,67 +268,130 @@ async fn create_pending_request(
     } else {
         qty
     };
-    if delivery_type != "manual_input" {
-        let stock_count = products_repo::count_product_items(&ctx.pool, product.id).await?;
-        if stock_count < order_qty {
-            return Err(anyhow!("stock is not enough"));
-        }
-    }
     let amount = selected_plan
         .as_ref()
         .map(|plan| plan.price)
         .unwrap_or(product.price * qty);
 
-    repo::create_purchase_request(
-        &ctx.pool,
-        child_bot.id,
-        child_bot.owner_user_id,
-        payload.telegram_id,
-        payload.chat_id.unwrap_or(payload.telegram_id),
+    let reseller_user_id = child_bot.owner_user_id;
+    let wallet = wallet_repo::get_or_create_wallet(&ctx.pool, reseller_user_id).await?;
+    if wallet.balance < amount {
+        return Err(anyhow!(
+            "Số dư ví CTV không đủ. Hiện có {}, cần {}",
+            format_vnd(wallet.balance),
+            format_vnd(amount),
+        ));
+    }
+
+    let mut order = Order::new(
+        reseller_user_id,
+        reseller_user_id,
         product.id,
         order_qty,
-        selected_plan.map(|plan| plan.id),
-        payload.customer_input.as_deref(),
         amount,
+        new_childbot_memo(child_bot.id),
+        payload.customer_input.clone(),
+        selected_plan.as_ref().map(|plan| plan.id),
+        selected_plan.as_ref().map(|plan| plan.label.clone()),
+        selected_plan.as_ref().map(|plan| plan.months),
+        selected_plan.as_ref().map(|plan| plan.price),
+    );
+
+    let mut tx = ctx.pool.begin().await?;
+    let (delivered_data, reserved_item_ids) =
+        reserve_delivery_data(&mut tx, &product, &delivery_type, order_qty, payload.customer_input.as_deref()).await?;
+    order.delivered_data = Some(delivered_data.clone());
+    order.reserved_item_ids = reserved_item_ids;
+    orders_repo::insert_order_tx(&mut tx, &order).await?;
+    let balance_after = wallet_repo::debit_wallet(
+        &mut tx,
+        reseller_user_id,
+        amount,
+        &order.id,
+        Some("childbot_reseller_wallet_purchase"),
+    )
+    .await?;
+    let paid_at = Utc::now();
+    orders_repo::mark_order_paid(
+        &mut tx,
+        &order.id,
+        "childbot_reseller_wallet",
+        paid_at,
+        Some(&delivered_data),
+        order.reserved_item_ids.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
+
+    order.status = OrderStatus::Paid;
+    order.payment_tx_id = Some("childbot_reseller_wallet".to_string());
+    order.paid_at = Some(paid_at.to_rfc3339());
+
+    repo::insert_child_bot_order(
+        &ctx.pool,
+        &order.id,
+        child_bot.id,
+        reseller_user_id,
+        payload.telegram_id,
+    )
+    .await?;
+
+    let paid_order = OrderWithProduct {
+        order: order.clone(),
+        product: product.clone(),
+    };
+    if let Err(err) = notify_admins_order_paid(
+        ctx,
+        &paid_order,
+        "childbot_reseller_wallet",
+        paid_at,
+        &PaymentSource::ClientApiWallet,
     )
     .await
+    {
+        tracing::error!("send paid-order admin notification after child bot wallet payment failed: {err}");
+    }
+
+    Ok(DirectChildBotOrder {
+        order_id: order.id,
+        product_id: product.id,
+        qty: order_qty,
+        amount,
+        balance_after,
+        delivered_data,
+    })
 }
 
-async fn send_confirmation_to_buyer(
-    ctx: &AppContext,
-    child_bot: &ChildBotRecord,
-    request: &repo::ChildBotPurchaseRequest,
-) -> Result<()> {
-    let product = products_repo::get_product(&ctx.pool, request.product_id)
-        .await?
-        .ok_or_else(|| anyhow!("product not found"))?;
-    let shop_name = child_bot
-        .shop_name
-        .clone()
-        .or_else(|| child_bot.bot_username.clone())
-        .unwrap_or_else(|| format!("Bot con #{}", child_bot.id));
-    let text = format!(
-        "🤖 Xác nhận mua hàng từ bot con\n\nShop: {}\nSản phẩm: {}\nSố lượng: {}\nSố tiền: {}\n\nBấm xác nhận nếu đúng là bạn đang mua đơn này. Bot chính chỉ trừ ví sau khi bạn bấm xác nhận.",
-        shop_name,
-        product.name,
-        request.qty,
-        format_vnd(request.amount),
-    );
-    let keyboard = InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback(
-            "✅ Xác nhận mua",
-            format!("childbot_order:confirm:{}:{}", request.id, request.confirm_token),
-        ),
-        InlineKeyboardButton::callback(
-            "❌ Hủy",
-            format!("childbot_order:cancel:{}:{}", request.id, request.confirm_token),
-        ),
-    ]]);
-    ctx.bot
-        .send_message(ChatId(request.buyer_chat_id), text)
-        .reply_markup(keyboard)
-        .await?;
-    Ok(())
+async fn reserve_delivery_data(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    product: &Product,
+    delivery_type: &str,
+    qty: i64,
+    customer_input: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    if delivery_type == "manual_input" {
+        let info = customer_input
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("N/A");
+        return Ok((format!("info: {info}"), None));
+    }
+
+    let reserved = products_repo::take_product_items(tx, product.id, qty).await?;
+    let data = reserved
+        .iter()
+        .map(|i| i.content.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if data.trim().is_empty() {
+        return Err(anyhow!("stock is empty"));
+    }
+    let reserved_ids = reserved
+        .iter()
+        .map(|item| item.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok((data, Some(reserved_ids)))
 }
 
 fn select_plan<'a>(
@@ -323,6 +411,16 @@ fn select_plan<'a>(
         .find(|plan| plan.id == plan_id)
         .map(Some)
         .ok_or_else(|| anyhow!("plan not found"))
+}
+
+fn new_childbot_memo(child_bot_id: i64) -> String {
+    let suffix: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(8)
+        .map(char::from)
+        .collect::<String>()
+        .to_ascii_uppercase();
+    format!("CB{child_bot_id}{suffix}")
 }
 
 pub fn router() -> Router<Arc<AppContext>> {
