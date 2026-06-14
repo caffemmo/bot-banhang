@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
@@ -22,6 +24,7 @@ struct ChildBotConfig {
     api_base_url: String,
     api_key: String,
     shop_name: String,
+    settings_path: String,
     welcome_animation: Option<String>,
 }
 
@@ -29,6 +32,14 @@ struct ChildBotConfig {
 struct ChildBotContext {
     http: Client,
     config: ChildBotConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ChildBotSettings {
+    shop_name: Option<String>,
+    intro: Option<String>,
+    bank: Option<String>,
+    contact: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +56,31 @@ struct ApiErrorResponse {
 #[derive(Debug, Deserialize)]
 struct ApiErrorBody {
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChildBotInfoResponse {
+    child_bot_id: i64,
+    owner_user_id: i64,
+    bot_username: Option<String>,
+    shop_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChildBotBalanceResponse {
+    owner_user_id: i64,
+    balance: i64,
+    balance_display: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChildBotOrderItem {
+    order_id: String,
+    buyer_user_id: i64,
+    product_name: String,
+    amount: i64,
+    amount_display: String,
+    created_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,6 +160,8 @@ async fn main() -> Result<()> {
             .to_string(),
         api_key: env::var("CHILDBOT_API_KEY").map_err(|_| anyhow!("CHILDBOT_API_KEY is required"))?,
         shop_name: env::var("CHILDBOT_SHOP_NAME").unwrap_or_else(|_| "Shop CTV".to_string()),
+        settings_path: env::var("CHILDBOT_SETTINGS_PATH")
+            .unwrap_or_else(|_| "./childbot_settings.json".to_string()),
         welcome_animation: env::var("CHILDBOT_WELCOME_ANIMATION")
             .ok()
             .map(|value| value.trim().to_string())
@@ -135,6 +173,7 @@ async fn main() -> Result<()> {
     });
     let bot = Bot::new(token);
     let me = bot.get_me().await?;
+    register_command_menu(&ctx).await?;
     tracing::info!("Child bot started as @{}", me.user.username.unwrap_or_default());
 
     Dispatcher::builder(
@@ -154,10 +193,19 @@ async fn main() -> Result<()> {
 
 async fn handle_message(bot: Bot, msg: Message, ctx: Arc<ChildBotContext>) -> Result<()> {
     let text = msg.text().unwrap_or("").trim();
-    if text.starts_with("/start") || text.starts_with("/menu") {
-        send_home_to_chat(&bot, msg.chat.id, &ctx).await?;
-    } else if text.starts_with("/shop") {
-        send_categories(&bot, msg.chat.id, &ctx).await?;
+    let command = text.split_whitespace().next().unwrap_or("").split('@').next().unwrap_or("");
+    match command {
+        "/start" | "/menu" => send_home_to_chat(&bot, msg.chat.id, &ctx).await?,
+        "/shop" => send_categories(&bot, msg.chat.id, &ctx).await?,
+        "/admin" => send_admin_menu(&bot, msg.chat.id, &msg, &ctx).await?,
+        "/settings" => send_settings(&bot, msg.chat.id, &msg, &ctx).await?,
+        "/mybalance" => send_my_balance(&bot, msg.chat.id, &msg, &ctx).await?,
+        "/myorders" => send_my_orders(&bot, msg.chat.id, &msg, &ctx).await?,
+        "/setname" => set_setting_value(&bot, &msg, &ctx, "shop_name", text).await?,
+        "/setintro" => set_setting_value(&bot, &msg, &ctx, "intro", text).await?,
+        "/setbank" => set_setting_value(&bot, &msg, &ctx, "bank", text).await?,
+        "/setcontact" => set_setting_value(&bot, &msg, &ctx, "contact", text).await?,
+        _ => {}
     }
     Ok(())
 }
@@ -177,6 +225,20 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
         let _ = bot.answer_callback_query(q.id.clone()).await;
         if let Some(msg) = &q.message {
             send_categories(&bot, msg.chat().id, &ctx).await?;
+        }
+        return Ok(());
+    }
+    if data == "admin" || data == "admin:settings" || data == "admin:balance" || data == "admin:orders" {
+        let _ = bot.answer_callback_query(q.id.clone()).await;
+        let Some(msg) = &q.message else { return Ok(()); };
+        if !is_owner_user(&ctx, q.from.id.0 as i64).await? {
+            bot.send_message(msg.chat().id, "❌ Lệnh này chỉ dành cho chủ bot con.").await?;
+            return Ok(());
+        }
+        match data.as_str() {
+            "admin:balance" => send_balance_text(&bot, msg.chat().id, &ctx).await?,
+            "admin:orders" => send_orders_text(&bot, msg.chat().id, &ctx).await?,
+            _ => send_admin_menu_for_owner(&bot, msg.chat().id).await?,
         }
         return Ok(());
     }
@@ -211,10 +273,16 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
 }
 
 async fn send_home_to_chat(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
-    let text = format!(
-        "🏪 {}\n\n⚡ Bot bán hàng tự động 24/7\n🛒 Chọn sản phẩm, thanh toán bằng số dư CTV\n📦 Mua thành công nhận hàng ngay tại bot này",
-        ctx.config.shop_name,
-    );
+    let settings = load_settings(ctx);
+    let shop_name = effective_shop_name(ctx, &settings);
+    let intro = settings.intro.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let text = if let Some(intro) = intro {
+        format!("🏪 {shop_name}\n\n{intro}")
+    } else {
+        format!(
+            "🏪 {shop_name}\n\n⚡ Bot bán hàng tự động 24/7\n🛒 Chọn sản phẩm, thanh toán bằng số dư CTV\n📦 Mua thành công nhận hàng ngay tại bot này"
+        )
+    };
     let keyboard = home_keyboard();
     if let Some(animation) = &ctx.config.welcome_animation {
         match input_file_from_value(animation) {
@@ -243,8 +311,180 @@ fn home_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::callback("🛒 Xem sản phẩm", "products")],
         vec![InlineKeyboardButton::callback("🔥 Hàng nổi bật", "cat:all")],
+        vec![InlineKeyboardButton::callback("⚙️ Quản trị", "admin")],
         vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")],
     ])
+}
+
+async fn send_admin_menu(bot: &Bot, chat_id: ChatId, msg: &Message, ctx: &ChildBotContext) -> Result<()> {
+    if !ensure_owner_message(bot, chat_id, msg, ctx).await? {
+        return Ok(());
+    }
+    send_admin_menu_for_owner(bot, chat_id).await
+}
+
+async fn send_admin_menu_for_owner(bot: &Bot, chat_id: ChatId) -> Result<()> {
+    let text = "⚙️ Admin bot con\n\n/setname Tên shop\n/setintro Nội dung giới thiệu\n/setbank Thông tin ngân hàng\n/setcontact Thông tin hỗ trợ\n/mybalance Xem số dư CTV\n/myorders Xem đơn bot con\n/settings Xem cấu hình";
+    let keyboard = InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("💰 Số dư", "admin:balance"),
+            InlineKeyboardButton::callback("🧾 Đơn hàng", "admin:orders"),
+        ],
+        vec![InlineKeyboardButton::callback("⚙️ Cấu hình", "admin:settings")],
+        vec![InlineKeyboardButton::callback("🏠 Menu chính", "home")],
+    ]);
+    bot.send_message(chat_id, text).reply_markup(keyboard).await?;
+    Ok(())
+}
+
+async fn send_settings(bot: &Bot, chat_id: ChatId, msg: &Message, ctx: &ChildBotContext) -> Result<()> {
+    if !ensure_owner_message(bot, chat_id, msg, ctx).await? {
+        return Ok(());
+    }
+    let settings = load_settings(ctx);
+    bot.send_message(chat_id, settings_text(ctx, &settings)).await?;
+    Ok(())
+}
+
+async fn send_my_balance(bot: &Bot, chat_id: ChatId, msg: &Message, ctx: &ChildBotContext) -> Result<()> {
+    if !ensure_owner_message(bot, chat_id, msg, ctx).await? {
+        return Ok(());
+    }
+    send_balance_text(bot, chat_id, ctx).await
+}
+
+async fn send_balance_text(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
+    let balance = api_get::<ChildBotBalanceResponse>(ctx, "/api/childbot/balance").await?;
+    bot.send_message(
+        chat_id,
+        format!("💰 Số dư CTV\n\nID: {}\nSố dư: {}", balance.owner_user_id, balance.balance_display),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn send_my_orders(bot: &Bot, chat_id: ChatId, msg: &Message, ctx: &ChildBotContext) -> Result<()> {
+    if !ensure_owner_message(bot, chat_id, msg, ctx).await? {
+        return Ok(());
+    }
+    send_orders_text(bot, chat_id, ctx).await
+}
+
+async fn send_orders_text(bot: &Bot, chat_id: ChatId, ctx: &ChildBotContext) -> Result<()> {
+    let orders = api_get::<Vec<ChildBotOrderItem>>(ctx, "/api/childbot/orders").await?;
+    if orders.is_empty() {
+        bot.send_message(chat_id, "🧾 Chưa có đơn nào từ bot con.").await?;
+        return Ok(());
+    }
+    let mut lines = vec!["🧾 Đơn bot con gần đây".to_string(), String::new()];
+    for order in orders.iter().take(10) {
+        lines.push(format!(
+            "• {} — {} — khách {} — {}",
+            order.product_name, order.amount_display, order.buyer_user_id, order.created_at
+        ));
+    }
+    bot.send_message(chat_id, lines.join("\n")).await?;
+    Ok(())
+}
+
+async fn set_setting_value(bot: &Bot, msg: &Message, ctx: &ChildBotContext, key: &str, text: &str) -> Result<()> {
+    let chat_id = msg.chat.id;
+    if !ensure_owner_message(bot, chat_id, msg, ctx).await? {
+        return Ok(());
+    }
+    let value = text.split_once(' ').map(|(_, value)| value.trim()).unwrap_or("");
+    if value.is_empty() {
+        let usage = match key {
+            "shop_name" => "/setname Tên shop",
+            "intro" => "/setintro Nội dung giới thiệu",
+            "bank" => "/setbank Ngân hàng - STK - Chủ tài khoản",
+            "contact" => "/setcontact @username hoặc số điện thoại",
+            _ => "/settings",
+        };
+        bot.send_message(chat_id, format!("Vui lòng nhập theo mẫu:\n{usage}")).await?;
+        return Ok(());
+    }
+    let mut settings = load_settings(ctx);
+    match key {
+        "shop_name" => settings.shop_name = Some(value.to_string()),
+        "intro" => settings.intro = Some(value.to_string()),
+        "bank" => settings.bank = Some(value.to_string()),
+        "contact" => settings.contact = Some(value.to_string()),
+        _ => {}
+    }
+    save_settings(ctx, &settings)?;
+    bot.send_message(chat_id, format!("✅ Đã lưu cấu hình\n\n{}", settings_text(ctx, &settings))).await?;
+    Ok(())
+}
+
+async fn ensure_owner_message(bot: &Bot, chat_id: ChatId, msg: &Message, ctx: &ChildBotContext) -> Result<bool> {
+    let user_id = msg.from.as_ref().map(|user| user.id.0 as i64).unwrap_or(0);
+    if is_owner_user(ctx, user_id).await? {
+        return Ok(true);
+    }
+    bot.send_message(chat_id, "❌ Lệnh này chỉ dành cho chủ bot con.").await?;
+    Ok(false)
+}
+
+async fn is_owner_user(ctx: &ChildBotContext, user_id: i64) -> Result<bool> {
+    if user_id <= 0 {
+        return Ok(false);
+    }
+    let info = api_get::<ChildBotInfoResponse>(ctx, "/api/childbot/me").await?;
+    Ok(info.owner_user_id == user_id)
+}
+
+fn settings_text(ctx: &ChildBotContext, settings: &ChildBotSettings) -> String {
+    format!(
+        "⚙️ Cấu hình bot con\n\nTên shop: {}\nGiới thiệu: {}\nNgân hàng: {}\nLiên hệ: {}",
+        effective_shop_name(ctx, settings),
+        settings.intro.as_deref().unwrap_or("Chưa cài"),
+        settings.bank.as_deref().unwrap_or("Chưa cài"),
+        settings.contact.as_deref().unwrap_or("Chưa cài"),
+    )
+}
+
+fn effective_shop_name(ctx: &ChildBotContext, settings: &ChildBotSettings) -> String {
+    settings
+        .shop_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&ctx.config.shop_name)
+        .to_string()
+}
+
+fn load_settings(ctx: &ChildBotContext) -> ChildBotSettings {
+    let path = Path::new(&ctx.config.settings_path);
+    let Ok(content) = fs::read_to_string(path) else {
+        return ChildBotSettings::default();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn save_settings(ctx: &ChildBotContext, settings: &ChildBotSettings) -> Result<()> {
+    let path = Path::new(&ctx.config.settings_path);
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(settings)?)?;
+    Ok(())
+}
+
+async fn register_command_menu(ctx: &ChildBotContext) -> Result<()> {
+    let commands = json!([
+        {"command":"start","description":"Bắt đầu"},
+        {"command":"shop","description":"Xem sản phẩm"},
+        {"command":"admin","description":"Admin bot con"},
+        {"command":"settings","description":"Xem cấu hình"},
+        {"command":"setname","description":"Đổi tên shop"},
+        {"command":"setintro","description":"Đổi giới thiệu"},
+        {"command":"setbank","description":"Cài thông tin ngân hàng"},
+        {"command":"setcontact","description":"Cài thông tin hỗ trợ"},
+        {"command":"mybalance","description":"Xem số dư CTV"},
+        {"command":"myorders","description":"Xem đơn bot con"}
+    ]);
+    send_raw_telegram_method(ctx, "setMyCommands", json!({ "commands": commands })).await
 }
 
 fn input_file_from_value(value: &str) -> Result<InputFile> {
