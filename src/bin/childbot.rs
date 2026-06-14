@@ -548,21 +548,19 @@ fn category_icon(category: &str) -> &'static str {
 
 fn category_button(category: &CategorySummary, callback_data: String) -> ButtonSpec {
     let label = format!("{} ({})", truncate_label(&category.name, 20), category.count);
-    let icon = clean_optional(&category.emoji).unwrap_or_else(|| category_icon(&category.name).to_string());
-    let text = format!("{icon} {label}");
     if let Some(icon_id) = clean_optional(&category.custom_emoji_id) {
-        return button_spec(text, callback_data, Some(icon_id));
+        return button_spec(label, callback_data, Some(icon_id));
     }
-    button_spec(text, callback_data, None)
+    let icon = clean_optional(&category.emoji).unwrap_or_else(|| category_icon(&category.name).to_string());
+    button_spec(format!("{icon} {label}"), callback_data, None)
 }
 
 fn product_button(product: &ProductItem, callback_data: String) -> ButtonSpec {
     let label = truncate_label(&product.name, PRODUCT_BUTTON_NAME_MAX_CHARS);
-    let text = format!("{} {label}", product_static_icon(product));
     if let Some(icon_id) = product_icon_custom_id(product) {
-        return button_spec(text, callback_data, Some(icon_id));
+        return button_spec(label, callback_data, Some(icon_id));
     }
-    button_spec(text, callback_data, None)
+    button_spec(format!("{} {label}", product_static_icon(product)), callback_data, None)
 }
 
 fn product_static_icon(product: &ProductItem) -> String {
