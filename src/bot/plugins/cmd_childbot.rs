@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use rand::{Rng, distributions::Alphanumeric};
-use sqlx::{Sqlite, Transaction};
+use sqlx::Transaction;
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::prelude::Requester;
 use teloxide::types::{BotCommand, CallbackQuery, ChatId, Message};
@@ -200,6 +200,23 @@ async fn confirm_childbot_order(
         return Ok(());
     }
 
+    let locked = childbot_repo::mark_purchase_request_status_from(
+        &ctx.pool,
+        request.id,
+        "pending",
+        "processing",
+        None,
+    )
+    .await?;
+    if !locked {
+        let _ = ctx
+            .bot
+            .answer_callback_query(q.id.clone())
+            .text("Yêu cầu này đang được xử lý hoặc đã xử lý.")
+            .await;
+        return Ok(());
+    }
+
     let _ = ctx
         .bot
         .answer_callback_query(q.id.clone())
@@ -224,6 +241,14 @@ async fn confirm_childbot_order(
             }
         }
         Err(err) => {
+            let _ = childbot_repo::mark_purchase_request_status_from(
+                &ctx.pool,
+                request.id,
+                "processing",
+                "failed",
+                None,
+            )
+            .await;
             if let Some(msg) = &q.message {
                 ctx.bot
                     .send_message(msg.chat().id, format!("❌ Không thể mua hàng: {err}"))
@@ -245,14 +270,29 @@ async fn cancel_childbot_order(
         return Ok(());
     };
     if request.confirm_token == token && request.buyer_user_id == q.from.id.0 as i64 {
-        let _ = childbot_repo::mark_purchase_request_status(&ctx.pool, request_id, "cancelled", None).await;
+        let cancelled = childbot_repo::mark_purchase_request_status_from(
+            &ctx.pool,
+            request_id,
+            "pending",
+            "cancelled",
+            None,
+        )
+        .await
+        .unwrap_or(false);
+        let text = if cancelled {
+            "Đã hủy yêu cầu mua."
+        } else {
+            "Yêu cầu này đã được xử lý."
+        };
         let _ = ctx
             .bot
             .answer_callback_query(q.id.clone())
-            .text("Đã hủy yêu cầu mua.")
+            .text(text)
             .await;
-        if let Some(msg) = &q.message {
-            let _ = ctx.bot.send_message(msg.chat().id, "Đã hủy yêu cầu mua từ bot con.").await;
+        if cancelled {
+            if let Some(msg) = &q.message {
+                let _ = ctx.bot.send_message(msg.chat().id, "Đã hủy yêu cầu mua từ bot con.").await;
+            }
         }
     }
     Ok(())
@@ -333,7 +373,18 @@ async fn fulfill_childbot_request(
     .await?;
     tx.commit().await?;
 
-    childbot_repo::mark_purchase_request_status(&ctx.pool, request.id, "paid", Some(&order.id)).await?;
+    order.status = OrderStatus::Paid;
+    order.payment_tx_id = Some("childbot_wallet".to_string());
+    order.paid_at = Some(paid_at.to_rfc3339());
+
+    childbot_repo::mark_purchase_request_status_from(
+        &ctx.pool,
+        request.id,
+        "processing",
+        "paid",
+        Some(&order.id),
+    )
+    .await?;
     childbot_repo::insert_child_bot_order(
         &ctx.pool,
         &order.id,
@@ -344,9 +395,6 @@ async fn fulfill_childbot_request(
     .await?;
     record_childbot_commission(ctx, request.affiliate_user_id, request.buyer_user_id, &order, &product).await?;
 
-    order.status = OrderStatus::Paid;
-    order.payment_tx_id = Some("childbot_wallet".to_string());
-    order.paid_at = Some(paid_at.to_rfc3339());
     let paid_order = OrderWithProduct {
         order: order.clone(),
         product: product.clone(),
