@@ -14,6 +14,7 @@ use url::Url;
 
 const PRODUCT_BUTTON_NAME_MAX_CHARS: usize = 46;
 const CATEGORY_PRODUCT_LIMIT: usize = 16;
+const ALL_PRODUCTS_TEXT_LIMIT: usize = 80;
 
 #[derive(Clone)]
 struct ChildBotConfig {
@@ -328,18 +329,20 @@ async fn send_category_products(
         return Ok(());
     }
 
+    if selected_category.is_none() {
+        let rows = category_keyboard_rows(&categories);
+        let text = all_products_text(&products, &categories);
+        send_message_json_keyboard(ctx, chat_id, text, rows).await?;
+        return Ok(());
+    }
+
     let title = selected_category.unwrap_or_else(|| "Tất cả sản phẩm".to_string());
     let mut lines = vec![format!("{} {title}", category_icon(&title)), String::new()];
     let mut rows = Vec::new();
     for product in filtered.iter().take(CATEGORY_PRODUCT_LIMIT) {
-        let stock_note = if product.delivery_type == "manual_input" {
-            "dịch vụ".to_string()
-        } else {
-            format!("còn {}", product.stock_count)
-        };
+        let stock_note = product_stock_note(product);
         lines.push(format!(
-            "#{} | {} | {} | {}",
-            product.id,
+            "• {} — {} ({})",
             product.name,
             format_vnd(product.price),
             stock_note,
@@ -486,6 +489,67 @@ async fn create_purchase_request(
     Ok(())
 }
 
+fn all_products_text(products: &[ProductItem], categories: &[CategorySummary]) -> String {
+    let mut lines = vec!["✨ Tất cả sản phẩm".to_string(), String::new()];
+    let mut shown = 0usize;
+    for category in categories {
+        if shown >= ALL_PRODUCTS_TEXT_LIMIT {
+            break;
+        }
+        lines.push(format!("{} {}", category_text_icon(category), category.name));
+        for product in products.iter().filter(|item| product_category(item) == category.name) {
+            if shown >= ALL_PRODUCTS_TEXT_LIMIT {
+                break;
+            }
+            lines.push(format!(
+                "• {} — {} ({})",
+                product.name,
+                format_vnd(product.price),
+                product_stock_note(product),
+            ));
+            shown += 1;
+        }
+        lines.push(String::new());
+    }
+    if shown < products.len() {
+        lines.push(format!("Đang hiển thị {shown}/{} sản phẩm đầu tiên.", products.len()));
+    }
+    trim_trailing_empty_lines(&mut lines);
+    lines.join("\n")
+}
+
+fn category_keyboard_rows(categories: &[CategorySummary]) -> Vec<Vec<ButtonSpec>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    for (index, category) in categories.iter().enumerate() {
+        row.push(category_button(category, format!("cat:{index}")));
+        if row.len() == 3 {
+            rows.push(row);
+            row = Vec::new();
+        }
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows.push(vec![button_spec("🔨 Tích hợp API", "home", None)]);
+    rows.push(vec![button_spec("⬅️ Quay lại", "products", None)]);
+    rows
+}
+
+fn trim_trailing_empty_lines(lines: &mut Vec<String>) {
+    while lines.last().map(|line| line.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+}
+
+fn product_stock_note(product: &ProductItem) -> String {
+    if product.delivery_type == "manual_input" {
+        "dịch vụ".to_string()
+    } else {
+        format!("còn {}", product.stock_count)
+    }
+}
+
 fn category_counts(products: &[ProductItem]) -> Vec<CategorySummary> {
     let mut counts = BTreeMap::<String, CategorySummary>::new();
     for product in products {
@@ -546,13 +610,20 @@ fn category_icon(category: &str) -> &'static str {
     }
 }
 
+fn category_text_icon(category: &CategorySummary) -> String {
+    clean_optional(&category.emoji).unwrap_or_else(|| category_icon(&category.name).to_string())
+}
+
 fn category_button(category: &CategorySummary, callback_data: String) -> ButtonSpec {
-    let label = format!("{} ({})", truncate_label(&category.name, 20), category.count);
+    let label = if category.count > 0 {
+        format!("{} ({})", truncate_label(&category.name, 20), category.count)
+    } else {
+        truncate_label(&category.name, 20)
+    };
     if let Some(icon_id) = clean_optional(&category.custom_emoji_id) {
         return button_spec(label, callback_data, Some(icon_id));
     }
-    let icon = clean_optional(&category.emoji).unwrap_or_else(|| category_icon(&category.name).to_string());
-    button_spec(format!("{icon} {label}"), callback_data, None)
+    button_spec(format!("{} {label}", category_text_icon(category)), callback_data, None)
 }
 
 fn product_button(product: &ProductItem, callback_data: String) -> ButtonSpec {
