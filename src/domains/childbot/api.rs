@@ -274,6 +274,14 @@ pub async fn create_purchase_request(
     let order = buy_with_reseller_wallet(&ctx, &auth.child_bot, payload)
         .await
         .map_err(child_bot_request_error)?;
+    let delivered_data = if let Some(usage) = order.usage_instructions.as_deref() {
+        format!(
+            "{}\n\n📘 Hướng dẫn sử dụng\n\n{}",
+            order.delivered_data, usage
+        )
+    } else {
+        order.delivered_data.clone()
+    };
 
     Ok(ok(PurchaseRequestResponse {
         request_id: 0,
@@ -289,7 +297,7 @@ pub async fn create_purchase_request(
         order_id: Some(order.order_id),
         balance_after: Some(order.balance_after),
         balance_after_display: Some(format_vnd(order.balance_after)),
-        delivered_data: Some(order.delivered_data),
+        delivered_data: Some(delivered_data),
         usage_instructions: order.usage_instructions,
     }))
 }
