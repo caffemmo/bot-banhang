@@ -21,6 +21,7 @@ use crate::domains::orders::models::{Order, OrderStatus, OrderWithProduct};
 use crate::domains::orders::repo as orders_repo;
 use crate::domains::products::models::{Product, ProductPlan};
 use crate::domains::products::repo as products_repo;
+use crate::domains::products::usage_instructions;
 use crate::domains::wallet::repo as wallet_repo;
 
 use super::repo::{self, ChildBotRecord};
@@ -98,6 +99,7 @@ pub struct PurchaseRequestResponse {
     pub balance_after: Option<i64>,
     pub balance_after_display: Option<String>,
     pub delivered_data: Option<String>,
+    pub usage_instructions: Option<String>,
 }
 
 struct DirectChildBotOrder {
@@ -107,6 +109,7 @@ struct DirectChildBotOrder {
     amount: i64,
     balance_after: i64,
     delivered_data: String,
+    usage_instructions: Option<String>,
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, ApiError> {
@@ -257,6 +260,7 @@ pub async fn get_request_status(
         balance_after: None,
         balance_after_display: None,
         delivered_data: None,
+        usage_instructions: None,
     }))
 }
 
@@ -286,6 +290,7 @@ pub async fn create_purchase_request(
         balance_after: Some(order.balance_after),
         balance_after_display: Some(format_vnd(order.balance_after)),
         delivered_data: Some(order.delivered_data),
+        usage_instructions: order.usage_instructions,
     }))
 }
 
@@ -361,8 +366,14 @@ async fn buy_with_reseller_wallet(
     );
 
     let mut tx = ctx.pool.begin().await?;
-    let (delivered_data, reserved_item_ids) =
-        reserve_delivery_data(&mut tx, &product, &delivery_type, order_qty, payload.customer_input.as_deref()).await?;
+    let (delivered_data, reserved_item_ids) = reserve_delivery_data(
+        &mut tx,
+        &product,
+        &delivery_type,
+        order_qty,
+        payload.customer_input.as_deref(),
+    )
+    .await?;
     order.delivered_data = Some(delivered_data.clone());
     order.reserved_item_ids = reserved_item_ids;
     orders_repo::insert_order_tx(&mut tx, &order).await?;
@@ -415,6 +426,11 @@ async fn buy_with_reseller_wallet(
         tracing::error!("send paid-order admin notification after child bot wallet payment failed: {err}");
     }
 
+    let usage_instructions = usage_instructions::get_usage_instructions(&ctx.pool, product.id)
+        .await?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
     Ok(DirectChildBotOrder {
         order_id: order.id,
         product_id: product.id,
@@ -422,6 +438,7 @@ async fn buy_with_reseller_wallet(
         amount,
         balance_after,
         delivered_data,
+        usage_instructions,
     })
 }
 
