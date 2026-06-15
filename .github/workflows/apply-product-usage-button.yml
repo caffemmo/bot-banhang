@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - .github/workflows/apply-product-usage-button.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
