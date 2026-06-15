@@ -27,6 +27,7 @@ pub fn router(ctx: Arc<AppContext>) -> Router<Arc<AppContext>> {
         .merge(crypto_pay::api::router())
         .merge(i18n::api::router())
         .merge(products::api::router())
+        .merge(products::usage_instructions::router())
         .merge(orders::api::router())
         .merge(orders::webhook_events::router())
         .merge(stats::api::router())
