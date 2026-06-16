@@ -4394,6 +4394,9 @@ impl AppPlugin for ShopCommandPlugin {
             State::TopupEnterAmount => {}
             State::TopupUsdtEnterAmount => {}
             State::TopupBinanceEnterAmount => {}
+            State::CreatingTutTitle => {}
+            State::CreatingTutTeaser { .. } => {}
+            State::CreatingTutContent { .. } => {}
         }
 
         Ok(false)
