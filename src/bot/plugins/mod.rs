@@ -1,3 +1,4 @@
+pub mod cmd_admin_menu;
 pub mod cmd_affiliate;
 pub mod cmd_api;
 pub mod cmd_broadcast;
@@ -60,6 +61,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
     vec![
         Box::new(cmd_start_affiliate::StartAffiliatePlugin),
         Box::new(cmd_start::StartCommandPlugin),
+        Box::new(cmd_admin_menu::AdminMenuCommandPlugin),
         Box::new(cmd_affiliate::AffiliateCommandPlugin),
         Box::new(cmd_childbot::ChildBotCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),

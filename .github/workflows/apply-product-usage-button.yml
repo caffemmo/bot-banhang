@@ -1,0 +1,216 @@
+name: Apply product usage button patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-product-usage-button.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch shop product usage button
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/bot/plugins/cmd_shop.rs')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(source, old, new, label):
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              return source.replace(old, new, 1)
+
+          text = replace_once(
+              text,
+              'use crate::domains::products::repo;\n',
+              'use crate::domains::products::{repo, usage_instructions};\n',
+              'products import',
+          )
+
+          text = text.replace(
+              'quantity_keyboard(&ctx, &lang, false),',
+              'quantity_keyboard(&ctx, &lang, false, Some(product_id)),',
+          )
+          text = text.replace(
+              '.reply_markup(quantity_keyboard(&ctx, &lang, false))',
+              '.reply_markup(quantity_keyboard(&ctx, &lang, false, Some(product_id)))',
+          )
+
+          text = replace_once(
+              text,
+              '    } else if data.starts_with("qty:") {\n',
+              '    } else if let Some(product_id) = data\n'
+              '        .strip_prefix("usage:")\n'
+              '        .and_then(|raw| raw.parse::<i64>().ok())\n'
+              '    {\n'
+              '        if let Some(msg) = &q.message {\n'
+              '            send_product_usage_instructions(ctx.clone(), msg.chat().id, product_id, &lang).await?;\n'
+              '        }\n'
+              '    } else if data.starts_with("qty:") {\n',
+              'usage callback branch',
+          )
+
+          helper = r'''async fn send_product_usage_instructions(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    product_id: i64,
+    lang: &str,
+) -> Result<()> {
+    let Some(product) = repo::get_product(&ctx.pool, product_id).await? else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                tl(&ctx, lang, "product_not_found", "Product does not exist."),
+            )
+            .reply_markup(shop_action_result_keyboard(&ctx, lang))
+            .await?;
+        return Ok(());
+    };
+
+    let Some(content) = usage_instructions::get_usage_instructions(&ctx.pool, product_id)
+        .await?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                tl(
+                    &ctx,
+                    lang,
+                    "product_usage_empty",
+                    "Sản phẩm này chưa có hướng dẫn sử dụng.",
+                ),
+            )
+            .reply_markup(shop_action_result_keyboard(&ctx, lang))
+            .await?;
+        return Ok(());
+    };
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "📘 Hướng dẫn sử dụng\n\nSản phẩm: {}\n\n{}",
+                product.name, content
+            ),
+        )
+        .reply_markup(shop_action_result_keyboard(&ctx, lang))
+        .await?;
+    Ok(())
+}
+
+'''
+          text = replace_once(
+              text,
+              'async fn handle_qty_message(\n',
+              helper + 'async fn handle_qty_message(\n',
+              'usage helper insert',
+          )
+
+          old_keyboard = r'''fn quantity_keyboard(ctx: &AppContext, lang: &str, require_input: bool) -> InlineKeyboardMarkup {
+    let values = if require_input {
+        vec![1, 6, 12]
+    } else {
+        vec![1, 2, 3, 5, 10]
+    };
+    let buttons = values
+        .into_iter()
+        .map(|v| InlineKeyboardButton::callback(v.to_string(), format!("qty:{v}")))
+        .collect::<Vec<_>>();
+    InlineKeyboardMarkup::new(vec![
+        buttons,
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "start_btn_wallet",
+            "💳 Wallet",
+            "start:wallet",
+        )],
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "back_btn",
+            "⬅️ Back",
+            "start:shop",
+        )],
+    ])
+}
+'''
+          new_keyboard = r'''fn quantity_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    require_input: bool,
+    product_id: Option<i64>,
+) -> InlineKeyboardMarkup {
+    let values = if require_input {
+        vec![1, 6, 12]
+    } else {
+        vec![1, 2, 3, 5, 10]
+    };
+    let buttons = values
+        .into_iter()
+        .map(|v| InlineKeyboardButton::callback(v.to_string(), format!("qty:{v}")))
+        .collect::<Vec<_>>();
+    let mut rows = vec![
+        buttons,
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "start_btn_wallet",
+            "💳 Wallet",
+            "start:wallet",
+        )],
+    ];
+    if let Some(product_id) = product_id {
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "product_usage_btn",
+            "📘 Hướng dẫn sử dụng",
+            format!("usage:{product_id}"),
+        )]);
+    }
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "back_btn",
+        "⬅️ Back",
+        "start:shop",
+    )]);
+    InlineKeyboardMarkup::new(rows)
+}
+'''
+          text = replace_once(text, old_keyboard, new_keyboard, 'quantity keyboard')
+
+          text = replace_once(
+              text,
+              '        || text.starts_with("qty:")\n',
+              '        || text.starts_with("qty:")\n        || text.starts_with("usage:")\n',
+              'shop callback routing',
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply-product-usage-button.yml
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/bot/plugins/cmd_shop.rs .github/workflows/apply-product-usage-button.yml
+          git diff --cached --check
+          git commit -m "Add product usage button to product details"
+          git push

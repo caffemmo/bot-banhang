@@ -20,6 +20,8 @@ use crate::domains::orders::webhook::TOPUP_TTL_MINUTES;
 use crate::domains::products::repo;
 use crate::domains::wallet::repo as wallet_repo;
 
+const ORDER_RETENTION_DAYS: i64 = 7;
+
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut cleanup_ticker = time::interval(time::Duration::from_secs(60));
 
@@ -175,11 +177,32 @@ async fn run_cleanup_tick(ctx: &Arc<AppContext>) {
         error!("Binance Pay note worker tick failed: {err}");
     }
 
+    match delete_orders_older_than(&ctx.pool, Utc::now()).await {
+        Ok(deleted) if deleted > 0 => {
+            info!("deleted {deleted} orders older than {ORDER_RETENTION_DAYS} days");
+        }
+        Ok(_) => {}
+        Err(err) => error!("delete old orders failed: {err}"),
+    }
+
     info!("pending cleanup tick finished");
 }
 
 fn order_cleanup_cutoff(now: DateTime<Utc>) -> String {
     (now - Duration::minutes(RESERVE_TTL_MINUTES)).to_rfc3339()
+}
+
+fn order_retention_cutoff(now: DateTime<Utc>) -> String {
+    (now - Duration::days(ORDER_RETENTION_DAYS)).to_rfc3339()
+}
+
+async fn delete_orders_older_than(pool: &sqlx::SqlitePool, now: DateTime<Utc>) -> Result<u64> {
+    let cutoff = order_retention_cutoff(now);
+    let result = sqlx::query("DELETE FROM orders WHERE created_at < ?")
+        .bind(cutoff)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
 }
 
 fn crypto_cleanup_cutoff(now: DateTime<Utc>) -> String {
@@ -198,6 +221,15 @@ mod tests {
         let cutoff = order_cleanup_cutoff(now);
 
         assert_eq!(cutoff, "2026-05-14T10:01:00+00:00");
+    }
+
+    #[test]
+    fn order_retention_cutoff_keeps_recent_week_of_orders() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 15, 10, 6, 0).unwrap();
+
+        let cutoff = order_retention_cutoff(now);
+
+        assert_eq!(cutoff, "2026-06-08T10:06:00+00:00");
     }
 
     #[test]
