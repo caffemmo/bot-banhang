@@ -9,6 +9,7 @@ pub mod cmd_orders;
 pub mod cmd_shop;
 pub mod cmd_start;
 pub mod cmd_start_affiliate;
+pub mod cmd_tut;
 pub mod cmd_wallet;
 pub mod example;
 
@@ -64,6 +65,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_admin_menu::AdminMenuCommandPlugin),
         Box::new(cmd_affiliate::AffiliateCommandPlugin),
         Box::new(cmd_childbot::ChildBotCommandPlugin),
+        Box::new(cmd_tut::TutCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),
         Box::new(cmd_api::ApiCommandPlugin),
         Box::new(cmd_broadcast::BroadcastCommandPlugin),

@@ -21,6 +21,7 @@ const ADMIN_MENU_AFFILIATE: &str = "admin_menu:affiliate";
 const ADMIN_MENU_CHILDBOT: &str = "admin_menu:childbot";
 const ADMIN_MENU_GROUP: &str = "admin_menu:group";
 const ADMIN_MENU_REFUND: &str = "admin_menu:refund";
+const ADMIN_MENU_TUT: &str = "admin_menu:tut";
 
 #[async_trait::async_trait]
 impl AppPlugin for AdminMenuCommandPlugin {
@@ -100,6 +101,7 @@ impl AppPlugin for AdminMenuCommandPlugin {
             ADMIN_MENU_CHILDBOT => (admin_childbot_text(), admin_back_keyboard()),
             ADMIN_MENU_GROUP => (admin_group_text(), admin_back_keyboard()),
             ADMIN_MENU_REFUND => (admin_refund_text(), admin_back_keyboard()),
+            ADMIN_MENU_TUT => (admin_tut_text(), admin_back_keyboard()),
             _ => (admin_home_text(), admin_home_keyboard()),
         };
 
@@ -152,7 +154,12 @@ fn admin_home_keyboard() -> InlineKeyboardMarkup {
             "💸 Hoàn tiền đơn hàng",
             ADMIN_MENU_REFUND,
         )],
+        vec![InlineKeyboardButton::callback("📚 TUT VIP", ADMIN_MENU_TUT)],
     ])
+}
+
+fn admin_tut_text() -> &'static str {
+    "📚 <b>TUT VIP</b>\n\n<code>/tut</code> - mở menu quản lý TUT VIP.\n<code>/tutadd</code> - admin tạo TUT trong bot: tiêu đề, teaser, nội dung full.\n<code>/tutlist</code> - xem danh sách TUT đã tạo.\n<code>/tutpost &lt;id&gt;</code> - đăng teaser lên kênh đã cấu hình.\n<code>/tutvipadd &lt;telegram_id&gt; [ngày]</code> - cấp VIP thủ công.\n<code>/tutviplist</code> - xem danh sách VIP còn hạn.\n<code>/tutstats</code> - xem thống kê TUT/VIP.\n<code>/myvip</code> - khách xem hạn VIP.\n\nCấu hình cần có trong admin config:\n<code>vip_tut_channel_id</code> - kênh/nhóm để bot đăng teaser, ví dụ <code>@tenkenh</code> hoặc <code>-100...</code>.\n<code>vip_tut_price</code> - giá VIP 30 ngày, mặc định 99000.\n<code>vip_tut_days</code> - số ngày VIP, mặc định 30.\n\nBot phải được thêm làm admin của kênh/nhóm thì mới đăng teaser được."
 }
 
 fn admin_back_keyboard() -> InlineKeyboardMarkup {

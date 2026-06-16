@@ -39,6 +39,14 @@ pub enum State {
     TopupEnterAmount,
     TopupUsdtEnterAmount,
     TopupBinanceEnterAmount,
+    CreatingTutTitle,
+    CreatingTutTeaser {
+        title: String,
+    },
+    CreatingTutContent {
+        title: String,
+        teaser: String,
+    },
 }
 
 pub type BotDialogue = Dialogue<State, SqliteDialogueStorage>;

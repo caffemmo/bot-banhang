@@ -277,10 +277,7 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
             ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_api_integration", "🔌 API integration", "shop_api"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
-            ],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help")],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
     })
@@ -312,16 +309,10 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
                 "wallet:topup_history".to_string(),
             ),
         ],
-        vec![
-            (
-                texts.get_lang("start_btn_api_integration", lang, "🔌 API integration"),
-                "shop_api".to_string(),
-            ),
-            (
-                texts.get_lang("start_btn_help", lang, "Help"),
-                "start:help".to_string(),
-            ),
-        ],
+        vec![(
+            texts.get_lang("start_btn_help", lang, "Help"),
+            "start:help".to_string(),
+        )],
         vec![(
             texts.get_lang("start_btn_language", lang, "🌐 Language"),
             "start:language".to_string(),
@@ -1124,10 +1115,7 @@ mod tests {
                         "wallet:topup_history".to_string()
                     ),
                 ],
-                vec![
-                    ("🔌 Tích hợp API".to_string(), "shop_api".to_string()),
-                    ("Hướng dẫn".to_string(), "start:help".to_string()),
-                ],
+                vec![("Hướng dẫn".to_string(), "start:help".to_string())],
                 vec![("🌐 Ngôn ngữ".to_string(), "start:language".to_string())],
             ]
         );
@@ -1171,7 +1159,7 @@ mod tests {
                 vec!["🛒 Xem sản phẩm".to_string()],
                 vec!["💰 Nạp tiền".to_string(), "💳 Ví tiền".to_string()],
                 vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
-                vec!["🔌 Tích hợp API".to_string(), "Hướng dẫn".to_string()],
+                vec!["Hướng dẫn".to_string()],
                 vec!["🌐 Ngôn ngữ".to_string()],
             ]
         );
