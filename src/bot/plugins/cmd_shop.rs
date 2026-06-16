@@ -77,6 +77,10 @@ fn stock_backed_order_reservation_mode(
     (OrderReservationMode::NoReserve, risk_reason)
 }
 
+fn stock_backed_order_has_enough_stock(available_stock: i64, requested_qty: i64) -> bool {
+    available_stock >= requested_qty && requested_qty > 0
+}
+
 async fn no_reserve_reason_for_user(ctx: &AppContext, user_id: i64) -> Result<Option<String>> {
     let window_started_at = (Utc::now() - Duration::hours(NO_RESERVE_WINDOW_HOURS)).to_rfc3339();
     let summary = orders_repo::order_risk_summary(&ctx.pool, user_id, &window_started_at).await?;
@@ -2031,6 +2035,26 @@ async fn process_order(
                 .await
                 .unwrap_or(0)
         };
+        if !stock_backed_order_has_enough_stock(stock, qty) {
+            ctx.bot
+                .send_message(
+                    chat_id,
+                    trl(
+                        &ctx,
+                        &lang,
+                        "stock_not_enough_no_payment",
+                        "❌ Sản phẩm hiện đã hết hàng hoặc không đủ số lượng.\n\n📦 Kho còn: {stock}\n🔢 Bạn chọn: {qty}\n\nVui lòng chọn sản phẩm khác hoặc quay lại sau.",
+                        &[
+                            ("stock", stock.max(0).to_string()),
+                            ("qty", qty.to_string()),
+                        ],
+                    ),
+                )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
+                .await?;
+            dialogue.update(State::Idle).await?;
+            return Ok(());
+        }
         let (reservation_mode, risk_reason) =
             stock_backed_order_reservation_mode(stock, qty, no_reserve_reason);
         order.reservation_mode = reservation_mode;
@@ -4187,6 +4211,14 @@ mod tests {
         assert_eq!(available_reason, None);
         assert_eq!(short_mode, OrderReservationMode::NoReserve);
         assert_eq!(short_reason, None);
+    }
+
+    #[test]
+    fn stock_backed_order_requires_available_stock_before_payment() {
+        assert!(stock_backed_order_has_enough_stock(2, 2));
+        assert!(!stock_backed_order_has_enough_stock(1, 2));
+        assert!(!stock_backed_order_has_enough_stock(0, 1));
+        assert!(!stock_backed_order_has_enough_stock(5, 0));
     }
 
     #[tokio::test]
