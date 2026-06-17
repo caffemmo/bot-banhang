@@ -154,12 +154,12 @@ fn admin_home_keyboard() -> InlineKeyboardMarkup {
             "💸 Hoàn tiền đơn hàng",
             ADMIN_MENU_REFUND,
         )],
-        vec![InlineKeyboardButton::callback("📚 TUT VIP", ADMIN_MENU_TUT)],
+        vec![InlineKeyboardButton::callback("📚 Quản lý TUT", ADMIN_MENU_TUT)],
     ])
 }
 
 fn admin_tut_text() -> &'static str {
-    "📚 <b>TUT VIP</b>\n\n<code>/tut</code> - mở menu quản lý TUT VIP.\n<code>/tutadd</code> - admin tạo TUT trong bot: tiêu đề, teaser, nội dung full.\n<code>/tutlist</code> - xem danh sách TUT đã tạo.\n<code>/tutpost &lt;id&gt;</code> - đăng teaser lên kênh đã cấu hình.\n<code>/tutvipadd &lt;telegram_id&gt; [ngày]</code> - cấp VIP thủ công.\n<code>/tutviplist</code> - xem danh sách VIP còn hạn.\n<code>/tutstats</code> - xem thống kê TUT/VIP.\n<code>/myvip</code> - khách xem hạn VIP.\n\nCấu hình cần có trong admin config:\n<code>vip_tut_channel_id</code> - kênh/nhóm để bot đăng teaser, ví dụ <code>@tenkenh</code> hoặc <code>-100...</code>.\n<code>vip_tut_price</code> - giá VIP 30 ngày, mặc định 99000.\n<code>vip_tut_days</code> - số ngày VIP, mặc định 30.\n\nBot phải được thêm làm admin của kênh/nhóm thì mới đăng teaser được."
+    "📚 <b>QUẢN LÝ TUT</b>\n\n<code>/tut</code> - mở menu quản lý TUT.\n<code>/tutadd</code> - admin tạo TUT trong bot: tiêu đề, teaser, nội dung full.\n<code>/tutlist</code> - xem danh sách TUT đã tạo, có nhãn FREE/VIP.\n<code>/tutpost &lt;id&gt;</code> - đăng teaser lên kênh đã cấu hình.\n<code>/tutvipadd &lt;telegram_id&gt; [ngày]</code> - cấp VIP thủ công.\n<code>/tutviplist</code> - xem danh sách VIP còn hạn.\n<code>/tutstats</code> - xem thống kê TUT/VIP.\n<code>/myvip</code> - khách xem hạn VIP.\n\nLogic xem:\n• TUT FREE: user thường bấm Xem full là xem được ngay.\n• TUT VIP: user phải mua/có VIP còn hạn mới xem được.\n\nKhi tạo TUT bằng <code>/tutadd</code>:\n• Mặc định nội dung sẽ là TUT VIP.\n• Nếu muốn TUT FREE, ở bước nhập nội dung full hãy để dòng đầu tiên là <code>free</code>, dòng sau mới ghi nội dung.\n\nCấu hình cần có trong admin config:\n<code>vip_tut_channel_id</code> - kênh/nhóm để bot đăng teaser, ví dụ <code>@tenkenh</code> hoặc <code>-100...</code>.\n<code>vip_tut_price</code> - giá VIP 30 ngày, mặc định 99000.\n<code>vip_tut_days</code> - số ngày VIP, mặc định 30.\n\nBot phải được thêm làm admin của kênh/nhóm thì mới đăng teaser được."
 }
 
 fn admin_back_keyboard() -> InlineKeyboardMarkup {
