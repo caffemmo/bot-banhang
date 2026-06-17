@@ -28,6 +28,15 @@
         ]
       },
       {
+        title: 'TUT VIP',
+        icon: '📚',
+        fields: [
+          { key: 'vip_tut_channel_id', label: 'Kênh/nhóm đăng teaser TUT', value: '' },
+          { key: 'vip_tut_price', label: 'Giá gói VIP TUT', value: '99000' },
+          { key: 'vip_tut_days', label: 'Số ngày VIP TUT', value: '30' },
+        ]
+      },
+      {
         title: 'Admin Telegram',
         icon: '🧩',
         fields: [
