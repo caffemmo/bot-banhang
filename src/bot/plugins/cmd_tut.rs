@@ -30,6 +30,7 @@ struct VipTut {
     title: String,
     teaser: String,
     content: String,
+    access_type: String,
     is_active: i64,
     view_count: i64,
     created_by: i64,
@@ -54,15 +55,15 @@ impl AppPlugin for TutCommandPlugin {
         vec![
             BotCommand {
                 command: "tut".to_string(),
-                description: "Admin: manage VIP TUT".to_string(),
+                description: "Admin: manage TUT".to_string(),
             },
             BotCommand {
                 command: "tutadd".to_string(),
-                description: "Admin: add VIP TUT".to_string(),
+                description: "Admin: add TUT".to_string(),
             },
             BotCommand {
                 command: "tutlist".to_string(),
-                description: "Admin: list VIP TUT".to_string(),
+                description: "Admin: list TUT".to_string(),
             },
             BotCommand {
                 command: "tutpost".to_string(),
@@ -281,6 +282,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
             title TEXT NOT NULL,
             teaser TEXT NOT NULL,
             content TEXT NOT NULL,
+            access_type TEXT NOT NULL DEFAULT 'vip',
             is_active INTEGER NOT NULL DEFAULT 1,
             view_count INTEGER NOT NULL DEFAULT 0,
             created_by INTEGER NOT NULL,
@@ -294,6 +296,17 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+
+    let has_access_type = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM pragma_table_info('vip_tuts') WHERE name = 'access_type'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if has_access_type == 0 {
+        sqlx::query("ALTER TABLE vip_tuts ADD COLUMN access_type TEXT NOT NULL DEFAULT 'vip'")
+            .execute(pool)
+            .await?;
+    }
 
     sqlx::query(
         r#"
@@ -329,7 +342,7 @@ async fn start_create_tut(ctx: &AppContext, chat_id: ChatId, dialogue: BotDialog
     ctx.bot
         .send_message(
             chat_id,
-            "📚 Tạo TUT VIP\n\nBước 1/3: gửi tiêu đề TUT.\n\nGõ /cancel để hủy.",
+            "📚 Tạo TUT\n\nBước 1/3: gửi tiêu đề TUT.\n\nGõ /cancel để hủy.",
         )
         .await?;
     Ok(())
@@ -389,7 +402,7 @@ async fn handle_create_teaser(
     ctx.bot
         .send_message(
             msg.chat.id,
-            "Bước 3/3: gửi nội dung full TUT.\n\nNội dung này chỉ VIP còn hạn mới xem được.",
+            "Bước 3/3: gửi nội dung full TUT.\n\nMặc định là TUT VIP.\nNếu muốn user thường xem miễn phí, hãy để dòng đầu tiên là: free",
         )
         .await?;
     Ok(())
@@ -409,21 +422,23 @@ async fn handle_create_content(
         ctx.bot.send_message(msg.chat.id, "Đã hủy tạo TUT.").await?;
         return Ok(());
     }
-    if text.len() < 10 {
+    let (content, access_type) = parse_tut_content_and_access(text);
+    if content.len() < 10 {
         ctx.bot
             .send_message(msg.chat.id, "Nội dung full quá ngắn, gửi lại giúp mình.")
             .await?;
         return Ok(());
     }
 
-    let tut_id = insert_tut(&ctx.pool, &title, &teaser, text, user_id).await?;
+    let tut_id = insert_tut(&ctx.pool, &title, &teaser, &content, access_type, user_id).await?;
     dialogue.update(State::Idle).await?;
+    let access_label = tut_access_label(access_type);
     ctx.bot
         .send_message(
             msg.chat.id,
             format!(
-                "✅ Đã lưu TUT VIP #{}\n\nTiêu đề: {}\n\nBạn có thể đăng teaser lên kênh ngay.",
-                tut_id, title
+                "✅ Đã lưu TUT {} #{}\n\nTiêu đề: {}\n\nBạn có thể đăng teaser lên kênh ngay.",
+                access_label, tut_id, title
             ),
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![
@@ -442,12 +457,12 @@ async fn handle_create_content(
 
 async fn send_tut_admin_menu(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     let text = format!(
-        "📚 QUẢN LÝ TUT VIP\n\n\
-        Admin viết TUT trong bot, bot đăng teaser ra kênh/nhóm. Khách bấm Xem full trong bot sẽ cần VIP còn hạn.\n\n\
+        "📚 QUẢN LÝ TUT\n\n\
+        Admin viết TUT trong bot, chọn FREE hoặc VIP, rồi bot đăng teaser ra kênh/nhóm. TUT FREE ai cũng xem được, TUT VIP cần VIP còn hạn.\n\n\
         Giá VIP hiện tại: {}\n\
         Thời hạn: {} ngày\n\n\
         Lệnh nhanh:\n\
-        /tutadd - thêm TUT\n\
+        /tutadd - thêm TUT, muốn FREE thì dòng đầu nội dung ghi free\n\
         /tutlist - danh sách TUT\n\
         /tutpost <id> - đăng teaser lên kênh cấu hình\n\
         /tutvipadd <telegram_id> [ngày] - cấp VIP thủ công\n\
@@ -479,11 +494,17 @@ async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
         return Ok(());
     }
 
-    let mut text = vec!["📚 DANH SÁCH TUT VIP".to_string(), String::new()];
+    let mut text = vec!["📚 DANH SÁCH TUT".to_string(), String::new()];
     for tut in &rows {
         text.push(format!(
-            "#{} | {} | xem {} | active={} | tạo bởi {} | {}",
-            tut.id, tut.title, tut.view_count, tut.is_active, tut.created_by, tut.created_at
+            "#{} | {} | {} | xem {} | active={} | tạo bởi {} | {}",
+            tut.id,
+            tut_access_label(&tut.access_type),
+            tut.title,
+            tut.view_count,
+            tut.is_active,
+            tut.created_by,
+            tut.created_at
         ));
     }
 
@@ -626,10 +647,12 @@ async fn post_tut_to_configured_channel(ctx: &AppContext, admin_chat_id: ChatId,
         return Ok(());
     };
     let url = Url::parse(&format!("https://t.me/{username}?start=tut_{}", tut.id))?;
-    let text = format!(
-        "🔒 {}\n\n{}\n\n👑 Thành viên VIP xem full ngay trong bot.",
-        tut.title, tut.teaser
-    );
+    let (badge, footer) = if tut_is_free(&tut) {
+        ("🆓", "Mở full miễn phí ngay trong bot.")
+    } else {
+        ("🔒", "👑 Thành viên VIP xem full ngay trong bot.")
+    };
+    let text = format!("{badge} {}\n\n{}\n\n{footer}", tut.title, tut.teaser);
     let sent = ctx
         .bot
         .send_message(channel.clone(), text)
@@ -657,28 +680,34 @@ async fn show_tut_or_paywall(ctx: &AppContext, chat_id: ChatId, user_id: i64, tu
         ctx.bot.send_message(chat_id, "TUT này không tồn tại hoặc đã bị xóa.").await?;
         return Ok(());
     };
-    if !vip_is_active(&ctx.pool, user_id).await? && !is_tut_admin(ctx, user_id) {
+    if !tut_is_free(&tut) && !vip_is_active(&ctx.pool, user_id).await? && !is_tut_admin(ctx, user_id) {
         send_tut_paywall(ctx, chat_id, &tut).await?;
         return Ok(());
     }
     record_tut_view(&ctx.pool, tut.id, user_id).await?;
-    let expires = vip_expires_at(&ctx.pool, user_id)
-        .await?
-        .map(|value| format!("\n👑 VIP còn hạn đến: {value}\n"))
-        .unwrap_or_default();
-    ctx.bot
-        .send_message(
-            chat_id,
-            format!(
-                "✅ Đã mở khóa TUT{}\n📘 {}\n\n{}",
-                expires, tut.title, tut.content
-            ),
-        )
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-            "👑 Kiểm tra VIP",
-            TUT_MYVIP,
-        )]]))
-        .await?;
+    let expires = if tut_is_free(&tut) {
+        "\n🆓 TUT miễn phí\n".to_string()
+    } else {
+        vip_expires_at(&ctx.pool, user_id)
+            .await?
+            .map(|value| format!("\n👑 VIP còn hạn đến: {value}\n"))
+            .unwrap_or_default()
+    };
+    let badge = if tut_is_free(&tut) {
+        "🆓 Đã mở TUT FREE"
+    } else {
+        "✅ Đã mở khóa TUT"
+    };
+    let mut request = ctx.bot.send_message(
+        chat_id,
+        format!("{badge}{expires}\n📘 {}\n\n{}", tut.title, tut.content),
+    );
+    if !tut_is_free(&tut) {
+        request = request.reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback("👑 Kiểm tra VIP", TUT_MYVIP),
+        ]]));
+    }
+    request.await?;
     Ok(())
 }
 
@@ -794,19 +823,21 @@ async fn insert_tut(
     title: &str,
     teaser: &str,
     content: &str,
+    access_type: &str,
     created_by: i64,
 ) -> Result<i64> {
     let now = Utc::now().to_rfc3339();
     let id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO vip_tuts (title, teaser, content, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO vip_tuts (title, teaser, content, access_type, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING id
         "#,
     )
     .bind(title)
     .bind(teaser)
     .bind(content)
+    .bind(access_type)
     .bind(created_by)
     .bind(&now)
     .bind(&now)
@@ -818,7 +849,7 @@ async fn insert_tut(
 async fn get_tut(pool: &SqlitePool, id: i64) -> Result<Option<VipTut>> {
     sqlx::query_as::<_, VipTut>(
         r#"
-        SELECT id, title, teaser, content, is_active, view_count, created_by, created_at, updated_at,
+        SELECT id, title, teaser, content, access_type, is_active, view_count, created_by, created_at, updated_at,
                posted_at, posted_chat_id, posted_message_id
         FROM vip_tuts
         WHERE id = ? AND is_active = 1
@@ -833,7 +864,7 @@ async fn get_tut(pool: &SqlitePool, id: i64) -> Result<Option<VipTut>> {
 async fn list_tuts(pool: &SqlitePool, limit: i64) -> Result<Vec<VipTut>> {
     sqlx::query_as::<_, VipTut>(
         r#"
-        SELECT id, title, teaser, content, is_active, view_count, created_by, created_at, updated_at,
+        SELECT id, title, teaser, content, access_type, is_active, view_count, created_by, created_at, updated_at,
                posted_at, posted_chat_id, posted_message_id
         FROM vip_tuts
         ORDER BY id DESC
@@ -1034,6 +1065,34 @@ fn is_cancel(text: &str) -> bool {
     first == "/cancel" || first.starts_with("/cancel@")
 }
 
+fn parse_tut_content_and_access(text: &str) -> (String, &'static str) {
+    let trimmed = text.trim();
+    let mut lines = trimmed.lines();
+    let Some(first_line) = lines.next() else {
+        return (String::new(), "vip");
+    };
+    let first = first_line.trim().to_lowercase();
+    if first == "free" || first == "mien phi" || first == "miễn phí" {
+        (lines.collect::<Vec<_>>().join("\n").trim().to_string(), "free")
+    } else if first == "vip" {
+        (lines.collect::<Vec<_>>().join("\n").trim().to_string(), "vip")
+    } else {
+        (trimmed.to_string(), "vip")
+    }
+}
+
+fn tut_is_free(tut: &VipTut) -> bool {
+    tut.access_type.eq_ignore_ascii_case("free")
+}
+
+fn tut_access_label(access_type: &str) -> &'static str {
+    if access_type.eq_ignore_ascii_case("free") {
+        "FREE"
+    } else {
+        "VIP"
+    }
+}
+
 fn short_label(value: &str, max_chars: usize) -> String {
     let mut out = String::new();
     for ch in value.chars().take(max_chars) {
@@ -1054,6 +1113,22 @@ mod tests {
         assert_eq!(parse_start_tut_payload("/start tut_123"), Some(123));
         assert_eq!(parse_start_tut_payload("/start@mmo_hub_bot tut_456"), Some(456));
         assert_eq!(parse_start_tut_payload("/start ref_123"), None);
+    }
+
+    #[test]
+    fn parse_tut_content_and_access_accepts_free_and_vip() {
+        assert_eq!(
+            parse_tut_content_and_access("free\nNội dung xem miễn phí"),
+            ("Nội dung xem miễn phí".to_string(), "free")
+        );
+        assert_eq!(
+            parse_tut_content_and_access("vip\nNội dung chỉ VIP xem"),
+            ("Nội dung chỉ VIP xem".to_string(), "vip")
+        );
+        assert_eq!(
+            parse_tut_content_and_access("Nội dung mặc định là VIP"),
+            ("Nội dung mặc định là VIP".to_string(), "vip")
+        );
     }
 
     #[test]
