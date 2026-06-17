@@ -30,7 +30,7 @@ use crate::domains::orders::fulfillment::PaymentSource;
 use crate::domains::orders::models::{Order, OrderReservationMode, OrderStatus, OrderWithProduct};
 use crate::domains::orders::{api as orders_api, repo as orders_repo};
 use crate::domains::products::models::Product;
-use crate::domains::products::repo;
+use crate::domains::products::{repo, usage_instructions};
 use crate::domains::wallet::repo as wallet_repo;
 
 use crate::bot::i18n;
@@ -444,7 +444,7 @@ async fn shop_handle_callback(
                         msg.chat().id,
                         product.image_url.as_deref(),
                         text,
-                        quantity_keyboard(&ctx, &lang, false),
+                        quantity_keyboard(&ctx, &lang, false, Some(product_id)),
                     )
                     .await?;
                     return Ok(());
@@ -474,7 +474,7 @@ async fn shop_handle_callback(
                             msg.chat().id,
                             product.image_url.as_deref(),
                             text,
-                            plan_keyboard(&ctx, &lang, &plans),
+                            plan_keyboard(&ctx, &lang, &plans, Some(product_id)),
                         )
                         .await?;
                         return Ok(());
@@ -519,10 +519,17 @@ async fn shop_handle_callback(
                     msg.chat().id,
                     product.image_url.as_deref(),
                     text,
-                    quantity_keyboard(&ctx, &lang, false),
+                    quantity_keyboard(&ctx, &lang, false, Some(product_id)),
                 )
                 .await?;
             }
+        }
+    } else if let Some(product_id) = data
+        .strip_prefix("usage:")
+        .and_then(|raw| raw.parse::<i64>().ok())
+    {
+        if let Some(msg) = &q.message {
+            send_product_usage_instructions(&ctx, msg.chat().id, product_id, &lang, true).await?;
         }
     } else if data.starts_with("qty:") {
         let qty: i64 = data["qty:".len()..].parse().unwrap_or(1);
@@ -1391,6 +1398,11 @@ async fn handle_pay_with_wallet(
     if let Err(e) = orders_api::send_product_file(&ctx, &updated_owp, &delivered_data).await {
         tracing::error!("send_product_file after wallet payment failed: {e}");
     }
+    if let Err(e) =
+        send_product_usage_instructions(&ctx, chat_id, updated_owp.product.id, &lang, false).await
+    {
+        tracing::error!("send usage instructions after wallet payment failed: {e}");
+    }
     if let Err(e) = notify_admins_order_paid(
         &ctx,
         &updated_owp,
@@ -1490,7 +1502,7 @@ async fn handle_qty_message(
                     "Invalid quantity. Enter 1..999.",
                 ),
             )
-            .reply_markup(quantity_keyboard(&ctx, &lang, false))
+            .reply_markup(quantity_keyboard(&ctx, &lang, false, Some(product_id)))
             .await?;
         return Ok(());
     }
@@ -2828,7 +2840,51 @@ fn order_qty_for_delivery_type(
     }
 }
 
-fn quantity_keyboard(ctx: &AppContext, lang: &str, require_input: bool) -> InlineKeyboardMarkup {
+async fn send_product_usage_instructions(
+    ctx: &Arc<AppContext>,
+    chat_id: ChatId,
+    product_id: i64,
+    lang: &str,
+    show_empty_notice: bool,
+) -> Result<()> {
+    let Some(content) = usage_instructions::get_usage_instructions(&ctx.pool, product_id)
+        .await?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        if show_empty_notice {
+            ctx.bot
+                .send_message(
+                    chat_id,
+                    tl(
+                        ctx.as_ref(),
+                        lang,
+                        "product_usage_empty",
+                        "This product does not have usage instructions yet.",
+                    ),
+                )
+                .reply_markup(shop_action_result_keyboard(ctx.as_ref(), lang))
+                .await?;
+        }
+        return Ok(());
+    };
+
+    let product_name = repo::get_product(&ctx.pool, product_id)
+        .await?
+        .map(|product| product.name)
+        .unwrap_or_else(|| format!("#{product_id}"));
+    let text = format!("📘 Hướng dẫn sử dụng\n\nSản phẩm: {product_name}\n\n{content}");
+    ctx.bot.send_message(chat_id, text).await?;
+
+    Ok(())
+}
+
+fn quantity_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    require_input: bool,
+    product_id: Option<i64>,
+) -> InlineKeyboardMarkup {
     let values = if require_input {
         vec![1, 6, 12]
     } else {
@@ -2838,8 +2894,17 @@ fn quantity_keyboard(ctx: &AppContext, lang: &str, require_input: bool) -> Inlin
         .into_iter()
         .map(|v| InlineKeyboardButton::callback(v.to_string(), format!("qty:{v}")))
         .collect::<Vec<_>>();
-    InlineKeyboardMarkup::new(vec![
-        buttons,
+    let mut rows = vec![buttons];
+    if let Some(product_id) = product_id {
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "product_usage_btn",
+            "📘 Hướng dẫn sử dụng",
+            format!("usage:{product_id}"),
+        )]);
+    }
+    rows.extend(vec![
         vec![i18n::inline_button_callback(
             ctx,
             lang,
@@ -2854,13 +2919,15 @@ fn quantity_keyboard(ctx: &AppContext, lang: &str, require_input: bool) -> Inlin
             "⬅️ Back",
             "start:shop",
         )],
-    ])
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
 fn plan_keyboard(
     ctx: &AppContext,
     lang: &str,
     plans: &[crate::domains::products::models::ProductPlan],
+    product_id: Option<i64>,
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     for chunk in plans.chunks(2) {
@@ -2873,6 +2940,15 @@ fn plan_keyboard(
             ));
         }
         rows.push(row);
+    }
+    if let Some(product_id) = product_id {
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "product_usage_btn",
+            "📘 Hướng dẫn sử dụng",
+            format!("usage:{product_id}"),
+        )]);
     }
     rows.push(vec![i18n::inline_button_callback(
         ctx,
@@ -2995,13 +3071,24 @@ mod tests {
     #[tokio::test]
     async fn quantity_keyboard_has_back_button_below_wallet() {
         let ctx = test_ctx();
-        let keyboard = quantity_keyboard(&ctx, "vi", false);
+        let keyboard = quantity_keyboard(&ctx, "vi", false, None);
         let json = serde_json::to_value(&keyboard).unwrap();
         let rows = json["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[1][0]["text"], "💳 Wallet");
         assert_eq!(rows[2][0]["text"], "⬅️ Back");
         assert_eq!(rows[2][0]["callback_data"], "start:shop");
+    }
+
+    #[tokio::test]
+    async fn quantity_keyboard_has_usage_button_for_product() {
+        let ctx = test_ctx();
+        let keyboard = quantity_keyboard(&ctx, "vi", false, Some(42));
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let rows = json["inline_keyboard"].as_array().unwrap();
+
+        assert_eq!(rows[1][0]["callback_data"], "usage:42");
+        assert_eq!(rows[3][0]["callback_data"], "start:shop");
     }
 
     #[tokio::test]
@@ -4425,6 +4512,7 @@ fn is_shop_callback_data(text: &str) -> bool {
         || text == "shop_api_new"
         || text.starts_with("shop_cat:")
         || text.starts_with("buy:")
+        || text.starts_with("usage:")
         || text.starts_with("qty:")
         || text.starts_with("plan:")
         || text.starts_with("cancel:")
