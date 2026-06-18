@@ -47,6 +47,13 @@ pub enum State {
         title: String,
         teaser: String,
     },
+    ViametaCollectingCookie {
+        service: String,
+    },
+    ViametaCollectingImage {
+        service: String,
+        cookie: String,
+    },
 }
 
 pub type BotDialogue = Dialogue<State, SqliteDialogueStorage>;

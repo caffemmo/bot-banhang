@@ -79,7 +79,6 @@ pub async fn fulfill_paid_order(
         .await;
     }
 
-    let mut tx = ctx.pool.begin().await?;
     let mut reserved_ids = order_with_product.order.reserved_item_ids.clone();
 
     let mut plugin_delivered_data = None;
@@ -97,6 +96,7 @@ pub async fn fulfill_paid_order(
         }
     }
 
+    let mut tx = ctx.pool.begin().await?;
     let delivered_data = if let Some(data) = plugin_delivered_data {
         data
     } else if let Some(data) = &order_with_product.order.delivered_data {

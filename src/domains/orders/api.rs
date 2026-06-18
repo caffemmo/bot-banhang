@@ -9,7 +9,7 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use teloxide::payloads::SendDocumentSetters;
+use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
@@ -386,6 +386,23 @@ pub async fn send_product_file(
     let lang = i18n::user_lang_by_id(ctx, owp.order.user_id).await;
     let continue_shopping_btn =
         i18n::t(ctx, &lang, "continue_shopping_btn", "🛒 Continue shopping");
+
+    if owp.product.category.as_deref() == Some("Viameta") {
+        ctx.bot
+            .send_message(ChatId(owp.order.chat_id), delivered_data.to_string())
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![InlineKeyboardButton::callback(
+                    "⚡ Dịch vụ tích xanh",
+                    "viameta:menu",
+                )],
+                vec![InlineKeyboardButton::callback(
+                    continue_shopping_btn,
+                    "start:shop",
+                )],
+            ]))
+            .await?;
+        return Ok(());
+    }
 
     if product_delivery_type(&owp.product) == "uploaded_file" {
         let uploaded_items = parse_uploaded_file_delivery_items(delivered_data)?;

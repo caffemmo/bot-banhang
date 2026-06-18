@@ -277,6 +277,7 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
             ],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu")],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help")],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
@@ -309,6 +310,10 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
                 "wallet:topup_history".to_string(),
             ),
         ],
+        vec![(
+            texts.get_lang("start_btn_viameta", lang, "✅ Dịch vụ tích xanh"),
+            "viameta:menu".to_string(),
+        )],
         vec![(
             texts.get_lang("start_btn_help", lang, "Help"),
             "start:help".to_string(),
@@ -382,6 +387,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
                     json!({"text": "🔌 API integration"}),
                     json!({"text": "Help"}),
                 ],
+                vec![json!({"text": "✅ Dịch vụ tích xanh"})],
                 vec![json!({"text": "🌐 Language"})],
             ]
         })
@@ -395,6 +401,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "start:orders" => "start_btn_purchased",
         "wallet:topup_history" => "start_btn_topup_history",
         "shop_api" => "start_btn_api_integration",
+        "viameta:menu" => "start_btn_viameta",
         "start:help" => "start_btn_help",
         "start:language" => "start_btn_language",
         _ => "start_btn",
@@ -1092,6 +1099,10 @@ mod tests {
                         "start_btn_api_integration".to_string(),
                         "🔌 Tích hợp API".to_string(),
                     ),
+                    (
+                        "start_btn_viameta".to_string(),
+                        "✅ Dịch vụ tích xanh".to_string(),
+                    ),
                     ("start_btn_help".to_string(), "Hướng dẫn".to_string()),
                     ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
                 ]),
@@ -1115,6 +1126,7 @@ mod tests {
                         "wallet:topup_history".to_string()
                     ),
                 ],
+                vec![("✅ Dịch vụ tích xanh".to_string(), "viameta:menu".to_string())],
                 vec![("Hướng dẫn".to_string(), "start:help".to_string())],
                 vec![("🌐 Ngôn ngữ".to_string(), "start:language".to_string())],
             ]
@@ -1145,6 +1157,10 @@ mod tests {
                         "start_btn_api_integration".to_string(),
                         "🔌 Tích hợp API".to_string(),
                     ),
+                    (
+                        "start_btn_viameta".to_string(),
+                        "✅ Dịch vụ tích xanh".to_string(),
+                    ),
                     ("start_btn_help".to_string(), "Hướng dẫn".to_string()),
                     ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
                 ]),
@@ -1159,6 +1175,7 @@ mod tests {
                 vec!["🛒 Xem sản phẩm".to_string()],
                 vec!["💰 Nạp tiền".to_string(), "💳 Ví tiền".to_string()],
                 vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
+                vec!["✅ Dịch vụ tích xanh".to_string()],
                 vec!["Hướng dẫn".to_string()],
                 vec!["🌐 Ngôn ngữ".to_string()],
             ]

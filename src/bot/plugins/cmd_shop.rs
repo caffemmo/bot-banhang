@@ -1383,7 +1383,7 @@ async fn handle_pay_with_wallet(
     }
 
     // Gửi file sản phẩm
-    let updated_owp = OrderWithProduct {
+    let mut updated_owp = OrderWithProduct {
         order: {
             let mut o = owp.order.clone();
             o.status = OrderStatus::Paid;
@@ -1395,7 +1395,34 @@ async fn handle_pay_with_wallet(
         },
         product: owp.product.clone(),
     };
-    if let Err(e) = orders_api::send_product_file(&ctx, &updated_owp, &delivered_data).await {
+    let mut final_delivered_data = delivered_data.clone();
+    for plugin in ctx.plugins.iter() {
+        match plugin
+            .on_order_paid(ctx.clone(), &updated_owp.order, &updated_owp.product)
+            .await
+        {
+            Ok(Some(data)) => {
+                final_delivered_data = data;
+                break;
+            }
+            Ok(None) => {}
+            Err(e) => tracing::error!("wallet paid plugin {} failed: {e}", plugin.name()),
+        }
+    }
+    if final_delivered_data != delivered_data {
+        let mut tx = ctx.pool.begin().await?;
+        orders_repo::update_order_status_with_data(
+            &mut tx,
+            &updated_owp.order.id,
+            OrderStatus::Paid,
+            Some(&final_delivered_data),
+            updated_owp.order.reserved_item_ids.as_deref(),
+        )
+        .await?;
+        tx.commit().await?;
+        updated_owp.order.delivered_data = Some(final_delivered_data.clone());
+    }
+    if let Err(e) = orders_api::send_product_file(&ctx, &updated_owp, &final_delivered_data).await {
         tracing::error!("send_product_file after wallet payment failed: {e}");
     }
     if let Err(e) =
@@ -4484,6 +4511,8 @@ impl AppPlugin for ShopCommandPlugin {
             State::CreatingTutTitle => {}
             State::CreatingTutTeaser { .. } => {}
             State::CreatingTutContent { .. } => {}
+            State::ViametaCollectingCookie { .. } => {}
+            State::ViametaCollectingImage { .. } => {}
         }
 
         Ok(false)

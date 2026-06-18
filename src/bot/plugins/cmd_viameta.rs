@@ -1,0 +1,905 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use anyhow::{Result, anyhow};
+use futures::StreamExt;
+use rand::{Rng, distributions::Alphanumeric};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters, SendPhotoSetters};
+use teloxide::prelude::*;
+use teloxide::requests::Requester;
+use teloxide::types::{
+    BotCommand, CallbackQuery, ChatId, FileId, InlineKeyboardButton, InlineKeyboardMarkup,
+    InputFile, Message, ParseMode,
+};
+use url::Url;
+use uuid::Uuid;
+
+use crate::app::AppContext;
+use crate::bot::i18n;
+use crate::bot::plugins::AppPlugin;
+use crate::bot::{BotDialogue, State};
+use crate::core::qr::vietqr_link;
+use crate::domains::orders::models::{Order, OrderStatus};
+use crate::domains::orders::repo as orders_repo;
+use crate::domains::products::models::Product;
+use crate::domains::wallet::repo as wallet_repo;
+
+const BASE_URL_DEFAULT: &str = "https://viameta.co/bot";
+const CATEGORY: &str = "Viameta";
+const GETLINK_PRODUCT: &str = "VIAMETA - GetLink Facebook";
+const UPTICK_FB_PRODUCT: &str = "VIAMETA - Up Tick Facebook";
+const UPTICK_IG_PRODUCT: &str = "VIAMETA - Up Tick Instagram";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ViametaService {
+    GetlinkFb,
+    UptickFb,
+    UptickIg,
+}
+
+impl ViametaService {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "getlink_fb" => Some(Self::GetlinkFb),
+            "uptick_fb" => Some(Self::UptickFb),
+            "uptick_ig" => Some(Self::UptickIg),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "getlink_fb",
+            Self::UptickFb => "uptick_fb",
+            Self::UptickIg => "uptick_ig",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "Get link Facebook",
+            Self::UptickFb => "Up tích Facebook",
+            Self::UptickIg => "Up tích Instagram",
+        }
+    }
+
+    fn product_name(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => GETLINK_PRODUCT,
+            Self::UptickFb => UPTICK_FB_PRODUCT,
+            Self::UptickIg => UPTICK_IG_PRODUCT,
+        }
+    }
+
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "/ajax/getlink.php",
+            Self::UptickFb => "/ajax/uptick_fb.php",
+            Self::UptickIg => "/ajax/uptick_ig.php",
+        }
+    }
+
+    fn image_field(self) -> Option<&'static str> {
+        match self {
+            Self::GetlinkFb => None,
+            Self::UptickFb => Some("image"),
+            Self::UptickIg => Some("id_image"),
+        }
+    }
+
+    fn price_key(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "viameta_getlink_fb_price",
+            Self::UptickFb => "viameta_uptick_fb_price",
+            Self::UptickIg => "viameta_uptick_ig_price",
+        }
+    }
+
+    fn default_price(self) -> i64 {
+        match self {
+            Self::GetlinkFb => 15_000,
+            Self::UptickFb => 20_000,
+            Self::UptickIg => 40_000,
+        }
+    }
+
+    fn cookie_hint(self) -> &'static str {
+        match self {
+            Self::GetlinkFb | Self::UptickFb => "Cookie Facebook phải có c_user.",
+            Self::UptickIg => "Cookie Instagram phải có ds_user_id và sessionid.",
+        }
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct ViametaRequest {
+    order_id: String,
+    service: String,
+    cookie: String,
+    uid: Option<String>,
+    image_path: Option<String>,
+}
+
+pub struct ViametaCommandPlugin;
+
+#[async_trait::async_trait]
+impl AppPlugin for ViametaCommandPlugin {
+    fn name(&self) -> &'static str {
+        "CmdViameta"
+    }
+
+    async fn on_init(&self, pool: &crate::db::DbPool) -> Result<(), anyhow::Error> {
+        ensure_viameta_schema(pool).await?;
+        ensure_service_products(pool).await?;
+        Ok(())
+    }
+
+    fn commands(&self) -> Vec<BotCommand> {
+        vec![BotCommand {
+            command: "viameta".to_string(),
+            description: "Dịch vụ tích xanh".to_string(),
+        }]
+    }
+
+    async fn handle_message(
+        &self,
+        ctx: Arc<AppContext>,
+        msg: Message,
+        dialogue: BotDialogue,
+    ) -> Result<bool, anyhow::Error> {
+        let lang = if let Some(user) = msg.from() {
+            i18n::user_lang(&ctx, user.id.0 as i64, user.language_code.as_deref()).await
+        } else {
+            ctx.normalize_language_code(None)
+        };
+        let text = msg.text().unwrap_or("").trim();
+        if text == "/viameta" || text.eq_ignore_ascii_case("✅ Dịch vụ tích xanh") {
+            send_viameta_menu(&ctx, msg.chat.id, &lang).await?;
+            dialogue.update(State::Idle).await?;
+            return Ok(true);
+        }
+
+        let Some(state) = dialogue.get().await? else {
+            return Ok(false);
+        };
+        match state {
+            State::ViametaCollectingCookie { service } => {
+                let Some(service) = ViametaService::from_str(&service) else {
+                    dialogue.update(State::Idle).await?;
+                    return Ok(false);
+                };
+                if text.is_empty() {
+                    prompt_cookie(&ctx, msg.chat.id, service).await?;
+                    return Ok(true);
+                }
+                if let Some(reason) = validate_cookie(service, text) {
+                    ctx.bot
+                        .send_message(msg.chat.id, format!("❌ Cookie chưa đúng.\n{reason}"))
+                        .await?;
+                    return Ok(true);
+                }
+                if service.image_field().is_some() {
+                    dialogue
+                        .update(State::ViametaCollectingImage {
+                            service: service.as_str().to_string(),
+                            cookie: text.to_string(),
+                        })
+                        .await?;
+                    ctx.bot
+                        .send_message(
+                            msg.chat.id,
+                            "📎 Gửi ảnh giấy tờ JPG/PNG để tiếp tục.\nẢnh nên rõ, đủ thông tin và dưới 5MB.",
+                        )
+                        .await?;
+                } else {
+                    create_viameta_order_and_payment(
+                        ctx.clone(),
+                        msg.chat.id,
+                        msg.from().map(|u| u.id.0 as i64).unwrap_or(msg.chat.id.0),
+                        service,
+                        text.to_string(),
+                        None,
+                    )
+                    .await?;
+                    dialogue.update(State::Idle).await?;
+                }
+                Ok(true)
+            }
+            State::ViametaCollectingImage { service, cookie } => {
+                let Some(service) = ViametaService::from_str(&service) else {
+                    dialogue.update(State::Idle).await?;
+                    return Ok(false);
+                };
+                let Some((file_id, ext)) = viameta_image_file(&msg) else {
+                    ctx.bot
+                        .send_message(msg.chat.id, "❌ Vui lòng gửi ảnh giấy tờ dạng JPG hoặc PNG.")
+                        .await?;
+                    return Ok(true);
+                };
+                let image_path = download_telegram_file(&ctx, file_id, ext).await?;
+                create_viameta_order_and_payment(
+                    ctx.clone(),
+                    msg.chat.id,
+                    msg.from().map(|u| u.id.0 as i64).unwrap_or(msg.chat.id.0),
+                    service,
+                    cookie,
+                    Some(image_path),
+                )
+                .await?;
+                dialogue.update(State::Idle).await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn handle_callback(
+        &self,
+        ctx: Arc<AppContext>,
+        q: CallbackQuery,
+        dialogue: BotDialogue,
+    ) -> Result<bool, anyhow::Error> {
+        let Some(data) = q.data.clone() else {
+            return Ok(false);
+        };
+        if data == "viameta:menu" {
+            let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                send_viameta_menu(&ctx, msg.chat().id, &lang).await?;
+            }
+            dialogue.update(State::Idle).await?;
+            return Ok(true);
+        }
+        if let Some(raw) = data.strip_prefix("viameta:service:") {
+            let Some(service) = ViametaService::from_str(raw) else {
+                return Ok(false);
+            };
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+            if let Some(msg) = &q.message {
+                let price = service_price(&ctx, service);
+                ctx.bot
+                    .send_message(
+                        msg.chat().id,
+                        format!(
+                            "{}\n\nGiá: {}\n{}\n\nVui lòng gửi cookie để tạo đơn.",
+                            service.label(),
+                            format_vnd(price),
+                            service.cookie_hint()
+                        ),
+                    )
+                    .reply_markup(viameta_back_keyboard())
+                    .await?;
+                dialogue
+                    .update(State::ViametaCollectingCookie {
+                        service: service.as_str().to_string(),
+                    })
+                    .await?;
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn on_order_paid(
+        &self,
+        ctx: Arc<AppContext>,
+        order: &Order,
+        product: &Product,
+    ) -> Result<Option<String>, anyhow::Error> {
+        if product.category.as_deref() != Some(CATEGORY) {
+            return Ok(None);
+        }
+        let Some(request) = load_request(&ctx.pool, &order.id).await? else {
+            return Ok(Some("Không tìm thấy dữ liệu yêu cầu Viameta. Admin cần kiểm tra thủ công.".to_string()));
+        };
+        let result = run_viameta_request(&ctx, &request).await;
+        let (status, response, error, delivered) = match result {
+            Ok(text) => ("done", Some(text.clone()), None, text),
+            Err(err) => {
+                let text = format!(
+                    "❌ Dịch vụ Viameta lỗi\n\nĐơn: {}\nDịch vụ: {}\nLý do: {}\n\nAdmin sẽ kiểm tra và xử lý thủ công.",
+                    order.bank_memo,
+                    service_label_from_raw(&request.service),
+                    err
+                );
+                ("error", None, Some(err.to_string()), text)
+            }
+        };
+        if let Err(err) =
+            update_request_result(&ctx.pool, &order.id, status, response.as_deref(), error.as_deref()).await
+        {
+            tracing::error!("update Viameta request result failed for order {}: {err}", order.id);
+        }
+        Ok(Some(delivered))
+    }
+}
+
+async fn ensure_viameta_schema(pool: &crate::db::DbPool) -> Result<()> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS viameta_requests (
+            order_id TEXT PRIMARY KEY NOT NULL,
+            service TEXT NOT NULL,
+            cookie TEXT NOT NULL,
+            uid TEXT,
+            image_path TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            response TEXT,
+            error TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+        )"#,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn ensure_service_products(pool: &crate::db::DbPool) -> Result<()> {
+    for service in [
+        ViametaService::GetlinkFb,
+        ViametaService::UptickFb,
+        ViametaService::UptickIg,
+    ] {
+        let existing = product_id_by_name(pool, service.product_name()).await?;
+        if let Some(id) = existing {
+            sqlx::query(
+                r#"UPDATE products
+                SET price = ?, is_active = 0, requires_input = 1, input_prompt = ?,
+                    description = ?, delivery_type = 'manual_input', category = ?
+                WHERE id = ?"#,
+            )
+            .bind(service.default_price())
+            .bind(format!("Nhập cookie cho {}", service.label()))
+            .bind("Sản phẩm ẩn dùng cho nút Viameta ngoài /shop")
+            .bind(CATEGORY)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"INSERT INTO products
+                (name, price, is_active, requires_input, input_prompt, description, delivery_type, category)
+                VALUES (?, ?, 0, 1, ?, ?, 'manual_input', ?)"#,
+            )
+            .bind(service.product_name())
+            .bind(service.default_price())
+            .bind(format!("Nhập cookie cho {}", service.label()))
+            .bind("Sản phẩm ẩn dùng cho nút Viameta ngoài /shop")
+            .bind(CATEGORY)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn product_id_by_name(pool: &crate::db::DbPool, name: &str) -> Result<Option<i64>> {
+    Ok(sqlx::query_scalar::<_, i64>("SELECT id FROM products WHERE name = ? LIMIT 1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await?)
+}
+
+async fn product_for_service(pool: &crate::db::DbPool, service: ViametaService) -> Result<Product> {
+    sqlx::query_as::<_, Product>(
+        r#"SELECT
+            p.id,
+            p.name,
+            p.price,
+            p.is_active,
+            p.requires_input,
+            p.input_prompt,
+            p.description,
+            p.image_url,
+            p.delivery_type,
+            p.file_path,
+            p.file_name,
+            p.file_mime,
+            p.category_id,
+            COALESCE(pc.name, p.category) AS category,
+            pc.emoji AS category_emoji,
+            pc.custom_emoji_id AS category_custom_emoji_id,
+            p.button_emoji,
+            p.button_custom_emoji_id,
+            p.created_at,
+            p.sort_order,
+            p.show_sold_count
+        FROM products p
+        LEFT JOIN product_categories pc ON pc.id = p.category_id
+        WHERE p.name = ?
+        LIMIT 1"#,
+    )
+    .bind(service.product_name())
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| anyhow!("missing Viameta product {}", service.product_name()))
+}
+
+fn send_menu_text() -> &'static str {
+    "⚡ Dịch vụ tích xanh\n\nChọn dịch vụ bạn muốn dùng:"
+}
+
+async fn send_viameta_menu(ctx: &AppContext, chat_id: ChatId, _lang: &str) -> Result<()> {
+    ctx.bot
+        .send_message(chat_id, send_menu_text())
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback(
+                "🔗 Get link Facebook",
+                "viameta:service:getlink_fb",
+            )],
+            vec![InlineKeyboardButton::callback(
+                "🔵 Up tích Facebook",
+                "viameta:service:uptick_fb",
+            )],
+            vec![InlineKeyboardButton::callback(
+                "🟣 Up tích Instagram",
+                "viameta:service:uptick_ig",
+            )],
+            vec![InlineKeyboardButton::callback("⬅️ Quay lại", "start:menu")],
+        ]))
+        .await?;
+    Ok(())
+}
+
+fn viameta_back_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "⬅️ Quay lại",
+        "viameta:menu",
+    )]])
+}
+
+async fn prompt_cookie(ctx: &AppContext, chat_id: ChatId, service: ViametaService) -> Result<()> {
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!("Vui lòng gửi cookie.\n{}", service.cookie_hint()),
+        )
+        .reply_markup(viameta_back_keyboard())
+        .await?;
+    Ok(())
+}
+
+fn validate_cookie(service: ViametaService, cookie: &str) -> Option<&'static str> {
+    let lower = cookie.to_ascii_lowercase();
+    match service {
+        ViametaService::GetlinkFb | ViametaService::UptickFb => {
+            (!lower.contains("c_user=")).then_some("Cookie Facebook cần có c_user.")
+        }
+        ViametaService::UptickIg => {
+            (!(lower.contains("ds_user_id=") && lower.contains("sessionid=")))
+                .then_some("Cookie Instagram cần có ds_user_id và sessionid.")
+        }
+    }
+}
+
+fn service_price(ctx: &AppContext, service: ViametaService) -> i64 {
+    ctx.get_text(service.price_key(), &service.default_price().to_string())
+        .trim()
+        .parse::<i64>()
+        .unwrap_or_else(|_| service.default_price())
+}
+
+fn viameta_api_key(ctx: &AppContext) -> Option<String> {
+    let configured = ctx.get_text("viameta_api_key", "");
+    if !configured.trim().is_empty() {
+        return Some(configured.trim().to_string());
+    }
+    std::env::var("VIAMETA_API_KEY")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn viameta_base_url(ctx: &AppContext) -> String {
+    ctx.get_text("viameta_base_url", BASE_URL_DEFAULT)
+        .trim()
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn viameta_image_file(msg: &Message) -> Option<(FileId, &'static str)> {
+    if let Some(photo) = msg.photo().and_then(|photos| photos.last()) {
+        return Some((photo.file.id.clone(), "jpg"));
+    }
+    let doc = msg.document()?;
+    let file_name = doc.file_name.as_deref().unwrap_or("");
+    let ext = extension_from_name(file_name)?;
+    Some((doc.file.id.clone(), ext))
+}
+
+fn extension_from_name(file_name: &str) -> Option<&'static str> {
+    let lower = file_name.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        Some("png")
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        Some("jpg")
+    } else {
+        None
+    }
+}
+
+async fn download_telegram_file(
+    ctx: &AppContext,
+    file_id: FileId,
+    extension: &str,
+) -> Result<String> {
+    let file = ctx.bot.get_file(file_id).await?;
+    let url = format!(
+        "https://api.telegram.org/file/bot{}/{}",
+        ctx.config.telegram_token, file.path
+    );
+    let bytes = reqwest::Client::new()
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err(anyhow!("Ảnh giấy tờ vượt quá 5MB"));
+    }
+    let dir = Path::new("storage").join("viameta");
+    tokio::fs::create_dir_all(&dir).await?;
+    let path = dir.join(format!("{}.{}", Uuid::new_v4(), extension));
+    tokio::fs::write(&path, bytes).await?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+async fn create_viameta_order_and_payment(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    user_id: i64,
+    service: ViametaService,
+    cookie: String,
+    image_path: Option<String>,
+) -> Result<()> {
+    ensure_service_products(&ctx.pool).await?;
+    let mut product = product_for_service(&ctx.pool, service).await?;
+    product.price = service_price(&ctx, service);
+    let amount = product.price;
+    let memo = generate_memo(&ctx).await?;
+    let mut order = Order::new(
+        user_id,
+        chat_id.0,
+        product.id,
+        1,
+        amount,
+        memo.clone(),
+        Some(format!("viameta:{}", service.as_str())),
+        None,
+        None,
+        None,
+        None,
+    );
+    order.delivered_data = Some(format!(
+        "Đã nhận yêu cầu {}. Hệ thống sẽ xử lý sau khi thanh toán.",
+        service.label()
+    ));
+
+    let mut tx = ctx.pool.begin().await?;
+    orders_repo::insert_order_tx(&mut tx, &order).await?;
+    sqlx::query(
+        r#"INSERT INTO viameta_requests
+        (order_id, service, cookie, uid, image_path, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'))"#,
+    )
+    .bind(&order.id)
+    .bind(service.as_str())
+    .bind(cookie)
+    .bind(Option::<String>::None)
+    .bind(image_path)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    send_checkout(ctx, chat_id, user_id, &order, &product).await
+}
+
+async fn send_checkout(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    user_id: i64,
+    order: &Order,
+    product: &Product,
+) -> Result<()> {
+    let amount = order.amount;
+    let confirm_text = format!(
+        "🧾 XÁC NHẬN ĐƠN\n\nDịch vụ: {}\nMã đơn: {}\nTổng tiền: {}\n\nVui lòng thanh toán để hệ thống bắt đầu xử lý.",
+        display_product_name(&product.name),
+        order.bank_memo,
+        format_vnd(amount)
+    );
+    ctx.bot.send_message(chat_id, confirm_text).await?;
+
+    let bank_line = if let Some(name) = &ctx.bank_account_name() {
+        format!("{} - {}", html_escape(&ctx.bank_name()), html_escape(name))
+    } else {
+        html_escape(&ctx.bank_name())
+    };
+    let pay_text = format!(
+        "💰 Amount: {}\n🏦 Bank: {}\n📱 Account: <code>{}</code>\n📝 Transfer memo: <code>{}</code>\n\n⚠️ Chuyển đúng nội dung để bot tự xử lý.",
+        format_vnd(amount),
+        bank_line,
+        html_escape(&ctx.bank_account()),
+        html_escape(&order.bank_memo)
+    );
+    let qr_url: Url =
+        vietqr_link(&ctx.bank_name(), &ctx.bank_account(), amount, &order.bank_memo).parse()?;
+    let wallet_balance = wallet_repo::get_or_create_wallet(&ctx.pool, user_id)
+        .await
+        .map(|w| w.balance)
+        .unwrap_or(0);
+    ctx.bot
+        .send_photo(chat_id, InputFile::url(qr_url))
+        .caption(pay_text)
+        .parse_mode(ParseMode::Html)
+        .reply_markup(viameta_checkout_keyboard(wallet_balance, amount, &order.id))
+        .await?;
+    Ok(())
+}
+
+fn viameta_checkout_keyboard(
+    wallet_balance: i64,
+    amount: i64,
+    order_id: &str,
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if wallet_balance >= amount {
+        rows.push(vec![InlineKeyboardButton::callback(
+            format!("💳 Thanh toán ví ({})", format_vnd(wallet_balance)),
+            format!("paywallet:{order_id}"),
+        )]);
+    }
+    rows.push(vec![InlineKeyboardButton::callback(
+        "⬅️ Dịch vụ tích xanh",
+        "viameta:menu",
+    )]);
+    rows.push(vec![InlineKeyboardButton::callback("💳 Ví tiền", "start:wallet")]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+async fn load_request(
+    pool: &crate::db::DbPool,
+    order_id: &str,
+) -> Result<Option<ViametaRequest>> {
+    Ok(sqlx::query_as::<_, ViametaRequest>(
+        r#"SELECT order_id, service, cookie, uid, image_path
+        FROM viameta_requests
+        WHERE order_id = ?"#,
+    )
+    .bind(order_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+async fn update_request_result(
+    pool: &crate::db::DbPool,
+    order_id: &str,
+    status: &str,
+    response: Option<&str>,
+    error: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        r#"UPDATE viameta_requests
+        SET status = ?, response = ?, error = ?, updated_at = datetime('now')
+        WHERE order_id = ?"#,
+    )
+    .bind(status)
+    .bind(response)
+    .bind(error)
+    .bind(order_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn run_viameta_request(ctx: &AppContext, request: &ViametaRequest) -> Result<String> {
+    let service = ViametaService::from_str(&request.service)
+        .ok_or_else(|| anyhow!("unknown Viameta service {}", request.service))?;
+    match service {
+        ViametaService::GetlinkFb => run_getlink(ctx, request).await,
+        ViametaService::UptickFb | ViametaService::UptickIg => run_uptick(ctx, request, service).await,
+    }
+}
+
+async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<String> {
+    let api_key = viameta_api_key(ctx).ok_or_else(|| anyhow!("missing viameta_api_key"))?;
+    let url = format!("{}{}", viameta_base_url(ctx), ViametaService::GetlinkFb.endpoint());
+    let mut payload = json!({
+        "cookie": request.cookie,
+        "confirm": true,
+    });
+    if let Some(uid) = request.uid.as_deref().filter(|v| !v.trim().is_empty()) {
+        payload["uid"] = Value::String(uid.to_string());
+    }
+    let value: Value = reqwest::Client::new()
+        .post(url)
+        .header("X-Api-Key", api_key)
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let success = value
+        .get("success")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            value
+                .get("status")
+                .and_then(Value::as_str)
+                .map(|status| status.eq_ignore_ascii_case("success"))
+        })
+        .unwrap_or(false);
+    if !success {
+        return Err(anyhow!(api_error_message(&value)));
+    }
+    let uid = value.get("uid").and_then(Value::as_str).unwrap_or("-");
+    let link = value.get("link").and_then(Value::as_str).unwrap_or("-");
+    let deducted = value
+        .get("balance_deducted")
+        .and_then(Value::as_i64)
+        .map(format_vnd)
+        .unwrap_or_else(|| "-".to_string());
+    Ok(format!(
+        "✅ Get link Facebook thành công\n\nUID: {uid}\nLink: {link}\nPhí Viameta trừ: {deducted}"
+    ))
+}
+
+async fn run_uptick(
+    ctx: &AppContext,
+    request: &ViametaRequest,
+    service: ViametaService,
+) -> Result<String> {
+    let api_key = viameta_api_key(ctx).ok_or_else(|| anyhow!("missing viameta_api_key"))?;
+    let image_path = request
+        .image_path
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| anyhow!("missing image_path"))?;
+    let image_bytes = tokio::fs::read(image_path).await?;
+    let file_name = Path::new(image_path)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("document.jpg")
+        .to_string();
+    let field = service.image_field().ok_or_else(|| anyhow!("service has no image field"))?;
+    let form = reqwest::multipart::Form::new()
+        .text("cookie", request.cookie.clone())
+        .text("confirm", "true")
+        .part(field.to_string(), reqwest::multipart::Part::bytes(image_bytes).file_name(file_name));
+    let url = format!("{}{}", viameta_base_url(ctx), service.endpoint());
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("X-Api-Key", api_key)
+        .multipart(form)
+        .send()
+        .await?
+        .error_for_status()?;
+    parse_sse_response(response, service).await
+}
+
+async fn parse_sse_response(response: reqwest::Response, service: ViametaService) -> Result<String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut last_logs = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(pos) = buffer.find('\n') {
+            let line = buffer[..pos].trim().to_string();
+            buffer = buffer[pos + 1..].to_string();
+            if !line.starts_with("data:") {
+                continue;
+            }
+            let raw = line.trim_start_matches("data:").trim();
+            let event: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
+            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
+            let message = event
+                .get("payload")
+                .and_then(|payload| payload.get("message").or_else(|| payload.get("msg")))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if event_type == "log" && !message.is_empty() {
+                last_logs.push(message);
+                if last_logs.len() > 5 {
+                    last_logs.remove(0);
+                }
+            } else if event_type == "done" {
+                let final_message = if message.is_empty() {
+                    "HOÀN TẤT XÁC MINH".to_string()
+                } else {
+                    message
+                };
+                return Ok(format!("✅ {} thành công\n\n{}", service.label(), final_message));
+            } else if event_type == "error" {
+                let final_message = if message.is_empty() {
+                    "Viameta trả lỗi không rõ nội dung".to_string()
+                } else {
+                    message
+                };
+                return Err(anyhow!(final_message));
+            }
+        }
+    }
+    Err(anyhow!(
+        "Viameta stream kết thúc nhưng chưa có done/error. Log cuối: {}",
+        last_logs.join(" | ")
+    ))
+}
+
+fn api_error_message(value: &Value) -> String {
+    value
+        .get("message")
+        .or_else(|| value.get("error"))
+        .and_then(Value::as_str)
+        .unwrap_or("Viameta API trả lỗi không rõ nội dung")
+        .to_string()
+}
+
+fn service_label_from_raw(raw: &str) -> &'static str {
+    ViametaService::from_str(raw)
+        .map(ViametaService::label)
+        .unwrap_or("Viameta")
+}
+
+fn display_product_name(name: &str) -> String {
+    name.strip_prefix("VIAMETA - ")
+        .unwrap_or(name)
+        .to_string()
+}
+
+async fn generate_memo(ctx: &AppContext) -> Result<String> {
+    let prefix = ctx.order_memo_prefix();
+    let random_len = ctx.order_memo_length();
+    for _ in 0..5 {
+        let suffix: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(char::from)
+            .take(random_len)
+            .collect::<String>()
+            .to_uppercase();
+        let memo = format!("{prefix}{suffix}");
+        let exists =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM orders WHERE bank_memo = ?")
+                .bind(&memo)
+                .fetch_one(&ctx.pool)
+                .await
+                .unwrap_or(0);
+        if exists == 0 {
+            return Ok(memo);
+        }
+    }
+    Err(anyhow!("Không tạo được memo unique"))
+}
+
+fn format_vnd(amount: i64) -> String {
+    let s = amount.abs().to_string();
+    let mut with_sep = String::new();
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            with_sep.push('.');
+        }
+        with_sep.push(ch);
+    }
+    let formatted: String = with_sep.chars().rev().collect();
+    if amount < 0 {
+        format!("-{}đ", formatted)
+    } else {
+        format!("{}đ", formatted)
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
