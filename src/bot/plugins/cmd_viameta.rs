@@ -6,7 +6,9 @@ use futures::StreamExt;
 use rand::{Rng, distributions::Alphanumeric};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters, SendPhotoSetters};
+use teloxide::payloads::{
+    AnswerCallbackQuerySetters, SendDocumentSetters, SendMessageSetters, SendPhotoSetters,
+};
 use teloxide::prelude::*;
 use teloxide::requests::Requester;
 use teloxide::types::{
@@ -121,6 +123,15 @@ struct ViametaRequest {
     cookie: String,
     uid: Option<String>,
     image_path: Option<String>,
+}
+
+enum ViametaDelivery {
+    Text(String),
+    GetlinkFb {
+        uid: String,
+        link: String,
+        deducted: Option<i64>,
+    },
 }
 
 pub struct ViametaCommandPlugin;
@@ -294,17 +305,41 @@ impl AppPlugin for ViametaCommandPlugin {
             return Ok(None);
         }
         let Some(request) = load_request(&ctx.pool, &order.id).await? else {
-            return Ok(Some("Không tìm thấy dữ liệu yêu cầu Viameta. Admin cần kiểm tra thủ công.".to_string()));
+            return Ok(Some(
+                "Không tìm thấy dữ liệu yêu cầu. Admin cần kiểm tra thủ công.".to_string(),
+            ));
         };
+
         let result = run_viameta_request(&ctx, &request).await;
         let (status, response, error, delivered) = match result {
-            Ok(text) => ("done", Some(text.clone()), None, text),
+            Ok(ViametaDelivery::Text(text)) => ("done", Some(text.clone()), None, text),
+            Ok(ViametaDelivery::GetlinkFb { uid, link, deducted }) => {
+                let delivered = send_getlink_delivery(&ctx, order, &uid, &link, deducted).await?;
+                ("done", Some(link), None, delivered)
+            }
             Err(err) => {
+                let refund = refund_viameta_order(&ctx, order, &err.to_string()).await;
+                let refund_line = match refund {
+                    Ok(Some(balance_after)) => format!(
+                        "✅ Đã hoàn {} về ví của bạn.\nSố dư hiện tại: {}",
+                        format_vnd(order.amount),
+                        format_vnd(balance_after)
+                    ),
+                    Ok(None) => "✅ Đơn này đã được hoàn tiền trước đó.".to_string(),
+                    Err(refund_err) => {
+                        tracing::error!(
+                            "refund viameta order {} failed after service error: {refund_err}",
+                            order.id
+                        );
+                        "Admin sẽ kiểm tra và hoàn tiền thủ công nếu cần.".to_string()
+                    }
+                };
                 let text = format!(
-                    "❌ Dịch vụ Viameta lỗi\n\nĐơn: {}\nDịch vụ: {}\nLý do: {}\n\nAdmin sẽ kiểm tra và xử lý thủ công.",
+                    "❌ Dịch vụ tích xanh chưa xử lý được\n\nĐơn: {}\nDịch vụ: {}\nLý do: {}\n\n{}",
                     order.bank_memo,
                     service_label_from_raw(&request.service),
-                    err
+                    friendly_error(&err.to_string()),
+                    refund_line
                 );
                 ("error", None, Some(err.to_string()), text)
             }
@@ -355,7 +390,7 @@ async fn ensure_service_products(pool: &crate::db::DbPool) -> Result<()> {
             )
             .bind(service.default_price())
             .bind(format!("Nhập cookie cho {}", service.label()))
-            .bind("Sản phẩm ẩn dùng cho nút Viameta ngoài /shop")
+            .bind("Sản phẩm ẩn dùng cho nút Dịch vụ tích xanh ngoài /shop")
             .bind(CATEGORY)
             .bind(id)
             .execute(pool)
@@ -369,7 +404,7 @@ async fn ensure_service_products(pool: &crate::db::DbPool) -> Result<()> {
             .bind(service.product_name())
             .bind(service.default_price())
             .bind(format!("Nhập cookie cho {}", service.label()))
-            .bind("Sản phẩm ẩn dùng cho nút Viameta ngoài /shop")
+            .bind("Sản phẩm ẩn dùng cho nút Dịch vụ tích xanh ngoài /shop")
             .bind(CATEGORY)
             .execute(pool)
             .await?;
@@ -698,7 +733,7 @@ async fn update_request_result(
     Ok(())
 }
 
-async fn run_viameta_request(ctx: &AppContext, request: &ViametaRequest) -> Result<String> {
+async fn run_viameta_request(ctx: &AppContext, request: &ViametaRequest) -> Result<ViametaDelivery> {
     let service = ViametaService::from_str(&request.service)
         .ok_or_else(|| anyhow!("unknown Viameta service {}", request.service))?;
     match service {
@@ -707,7 +742,7 @@ async fn run_viameta_request(ctx: &AppContext, request: &ViametaRequest) -> Resu
     }
 }
 
-async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<String> {
+async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<ViametaDelivery> {
     let api_key = viameta_api_key(ctx).ok_or_else(|| anyhow!("missing viameta_api_key"))?;
     let url = format!("{}{}", viameta_base_url(ctx), ViametaService::GetlinkFb.endpoint());
     let mut payload = json!({
@@ -739,23 +774,25 @@ async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<Strin
     if !success {
         return Err(anyhow!(api_error_message(&value)));
     }
-    let uid = value.get("uid").and_then(Value::as_str).unwrap_or("-");
-    let link = value.get("link").and_then(Value::as_str).unwrap_or("-");
+
+    let uid = json_string(&value, "uid").unwrap_or("-").to_string();
+    let link = json_string(&value, "link")
+        .filter(|v| !v.trim().is_empty() && *v != "-")
+        .ok_or_else(|| anyhow!("Không nhận được link kết quả"))?
+        .to_string();
     let deducted = value
         .get("balance_deducted")
-        .and_then(Value::as_i64)
-        .map(format_vnd)
-        .unwrap_or_else(|| "-".to_string());
-    Ok(format!(
-        "✅ Get link Facebook thành công\n\nUID: {uid}\nLink: {link}\nPhí Viameta trừ: {deducted}"
-    ))
+        .or_else(|| value.get("data").and_then(|data| data.get("balance_deducted")))
+        .and_then(Value::as_i64);
+
+    Ok(ViametaDelivery::GetlinkFb { uid, link, deducted })
 }
 
 async fn run_uptick(
     ctx: &AppContext,
     request: &ViametaRequest,
     service: ViametaService,
-) -> Result<String> {
+) -> Result<ViametaDelivery> {
     let api_key = viameta_api_key(ctx).ok_or_else(|| anyhow!("missing viameta_api_key"))?;
     let image_path = request
         .image_path
@@ -781,7 +818,7 @@ async fn run_uptick(
         .send()
         .await?
         .error_for_status()?;
-    parse_sse_response(response, service).await
+    parse_sse_response(response, service).await.map(ViametaDelivery::Text)
 }
 
 async fn parse_sse_response(response: reqwest::Response, service: ViametaService) -> Result<String> {
@@ -820,7 +857,7 @@ async fn parse_sse_response(response: reqwest::Response, service: ViametaService
                 return Ok(format!("✅ {} thành công\n\n{}", service.label(), final_message));
             } else if event_type == "error" {
                 let final_message = if message.is_empty() {
-                    "Viameta trả lỗi không rõ nội dung".to_string()
+                    "Dịch vụ trả lỗi không rõ nội dung".to_string()
                 } else {
                     message
                 };
@@ -829,24 +866,123 @@ async fn parse_sse_response(response: reqwest::Response, service: ViametaService
         }
     }
     Err(anyhow!(
-        "Viameta stream kết thúc nhưng chưa có done/error. Log cuối: {}",
+        "Dịch vụ kết thúc nhưng chưa có kết quả. Log cuối: {}",
         last_logs.join(" | ")
     ))
+}
+
+async fn send_getlink_delivery(
+    ctx: &AppContext,
+    order: &Order,
+    uid: &str,
+    link: &str,
+    deducted: Option<i64>,
+) -> Result<String> {
+    let chat_id = ChatId(order.chat_id);
+    let text = "✅ Get link Facebook thành công\n\nKết quả đã được gửi trong file đính kèm.";
+    let mut sent = false;
+    if let Ok(url) = Url::parse(link) {
+        if ctx
+            .bot
+            .send_message(chat_id, text)
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
+                "🔗 Mở link Facebook",
+                url,
+            )]]))
+            .await
+            .is_ok()
+        {
+            sent = true;
+        }
+    }
+    if !sent {
+        ctx.bot.send_message(chat_id, text).await?;
+    }
+
+    let deducted_line = deducted
+        .map(|amount| format!("Phí xử lý: {}\n", format_vnd(amount)))
+        .unwrap_or_default();
+    let file_content = format!(
+        "GET LINK FACEBOOK THÀNH CÔNG\n\nMã đơn: {}\nUID: {}\n{}\nLink:\n{}\n",
+        order.bank_memo, uid, deducted_line, link
+    );
+    ctx.bot
+        .send_document(
+            chat_id,
+            InputFile::memory(file_content.into_bytes())
+                .file_name(format!("getlink_{}.txt", order.bank_memo)),
+        )
+        .caption("📄 File link Facebook của bạn")
+        .await?;
+
+    Ok(format!(
+        "✅ Get link Facebook thành công\n\nUID: {}\nKết quả đã gửi bằng file getlink_{}.txt",
+        uid, order.bank_memo
+    ))
+}
+
+async fn refund_viameta_order(
+    ctx: &AppContext,
+    order: &Order,
+    reason: &str,
+) -> Result<Option<i64>> {
+    let already_refunded = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM wallet_transactions WHERE order_id = ? AND type = 'refund'",
+    )
+    .bind(&order.id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap_or(0);
+    if already_refunded > 0 {
+        return Ok(None);
+    }
+
+    let mut tx = ctx.pool.begin().await?;
+    let note = format!("Hoàn tiền dịch vụ tích xanh: {}", friendly_error(reason));
+    let balance_after = wallet_repo::credit_wallet(
+        &mut tx,
+        order.user_id,
+        order.amount,
+        "refund",
+        Some(&order.id),
+        None,
+        Some(&note),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Some(balance_after))
+}
+
+fn json_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .or_else(|| value.get("data").and_then(|data| data.get(key)).and_then(Value::as_str))
 }
 
 fn api_error_message(value: &Value) -> String {
     value
         .get("message")
         .or_else(|| value.get("error"))
+        .or_else(|| value.get("data").and_then(|data| data.get("message")))
+        .or_else(|| value.get("data").and_then(|data| data.get("error")))
         .and_then(Value::as_str)
-        .unwrap_or("Viameta API trả lỗi không rõ nội dung")
+        .unwrap_or("Dịch vụ trả lỗi không rõ nội dung")
         .to_string()
+}
+
+fn friendly_error(value: &str) -> String {
+    value
+        .replace("Viameta API", "Dịch vụ")
+        .replace("Viameta", "Dịch vụ")
+        .replace("viameta", "dịch vụ")
+        .replace("API", "dịch vụ")
 }
 
 fn service_label_from_raw(raw: &str) -> &'static str {
     ViametaService::from_str(raw)
         .map(ViametaService::label)
-        .unwrap_or("Viameta")
+        .unwrap_or("Dịch vụ tích xanh")
 }
 
 fn display_product_name(name: &str) -> String {
