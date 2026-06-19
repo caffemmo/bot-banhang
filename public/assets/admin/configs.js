@@ -42,8 +42,8 @@
         fields: [
           { key: 'viameta_base_url', label: 'Base URL Viameta', value: 'https://viameta.co/bot' },
           { key: 'viameta_api_key', label: 'API key Viameta', value: '' },
-          { key: 'viameta_menu_title', label: 'Tiêu đề menu dịch vụ', value: '⚡ Dịch vụ tích xanh' },
-          { key: 'viameta_menu_description', label: 'Mô tả menu dịch vụ', value: 'Chọn dịch vụ bạn muốn dùng:' },
+          { key: 'viameta_menu_title', label: 'Nội dung tiêu đề menu dịch vụ', value: '⚡ Dịch vụ tích xanh' },
+          { key: 'viameta_menu_description', label: 'Nội dung mô tả menu dịch vụ', value: 'Chọn dịch vụ bạn muốn dùng:' },
           { key: 'viameta_maintenance_message', label: 'Thông báo khi dịch vụ tắt', value: 'Dịch vụ này đang bảo trì, vui lòng quay lại sau.' },
           { key: 'viameta_getlink_fb_enabled', label: 'Bật Get link Facebook', value: '1' },
           { key: 'viameta_getlink_fb_price', label: 'Giá Get link Facebook', value: '15000' },
@@ -163,12 +163,24 @@
 
     function buildConfigInput(key, label, value) {
       const inputHtml = buildConfigFieldHtml(key, value);
+      const colClass = isWideConfigField(key) ? 'col-12' : 'col-md-6 col-12';
       return `
-      <div class="col-md-6 col-12">
+      <div class="${colClass}">
         <label class="form-label small mb-1">${escapeHtml(label)} <span class="font-monospace text-muted" style="font-size: 10px;">(${escapeHtml(key)})</span></label>
         ${inputHtml}
       </div>
     `;
+    }
+
+    function isWideConfigField(key) {
+      return new Set([
+        'viameta_menu_title',
+        'viameta_menu_description',
+        'viameta_maintenance_message',
+        'viameta_getlink_fb_description',
+        'viameta_uptick_fb_description',
+        'viameta_uptick_ig_description',
+      ]).has(key);
     }
 
     function buildConfigFieldHtml(key, value) {
@@ -230,9 +242,11 @@
         'viameta_uptick_ig_description',
       ]);
       const isTextarea = multilineKeys.has(key) || key.endsWith('_description') || value.includes('\n') || value.length > 70;
-      return isTextarea
-        ? `<textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="4">${escapeHtml(value)}</textarea>`
-        : `<input type="text" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}">`;
+      if (isTextarea) {
+        const rows = multilineKeys.has(key) ? 5 : 4;
+        return `<textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="${rows}" placeholder="Có thể nhập nhiều dòng">${escapeHtml(value)}</textarea>`;
+      }
+      return `<input type="text" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}">`;
     }
 
     async function saveConfigs() {
