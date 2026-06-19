@@ -221,9 +221,17 @@
       if (numericKeys.has(key)) {
         return `<input type="number" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" min="0" step="1000">`;
       }
-      const isTextarea = key.endsWith('_description') || key === 'viameta_maintenance_message' || value.includes('\n') || value.length > 70;
+      const multilineKeys = new Set([
+        'viameta_menu_title',
+        'viameta_menu_description',
+        'viameta_maintenance_message',
+        'viameta_getlink_fb_description',
+        'viameta_uptick_fb_description',
+        'viameta_uptick_ig_description',
+      ]);
+      const isTextarea = multilineKeys.has(key) || key.endsWith('_description') || value.includes('\n') || value.length > 70;
       return isTextarea
-        ? `<textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="3">${escapeHtml(value)}</textarea>`
+        ? `<textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="4">${escapeHtml(value)}</textarea>`
         : `<input type="text" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}">`;
     }
 
