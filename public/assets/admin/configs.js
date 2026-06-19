@@ -42,6 +42,8 @@
         fields: [
           { key: 'viameta_base_url', label: 'Base URL Viameta', value: 'https://viameta.co/bot' },
           { key: 'viameta_api_key', label: 'API key Viameta', value: '' },
+          { key: 'viameta_menu_title', label: 'Tiêu đề menu dịch vụ', value: '⚡ Dịch vụ tích xanh' },
+          { key: 'viameta_menu_description', label: 'Mô tả menu dịch vụ', value: 'Chọn dịch vụ bạn muốn dùng:' },
           { key: 'viameta_maintenance_message', label: 'Thông báo khi dịch vụ tắt', value: 'Dịch vụ này đang bảo trì, vui lòng quay lại sau.' },
           { key: 'viameta_getlink_fb_enabled', label: 'Bật Get link Facebook', value: '1' },
           { key: 'viameta_getlink_fb_price', label: 'Giá Get link Facebook', value: '15000' },
