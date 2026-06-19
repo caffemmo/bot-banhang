@@ -494,13 +494,26 @@ async fn product_for_service(pool: &crate::db::DbPool, service: ViametaService) 
     .ok_or_else(|| anyhow!("missing Viameta product {}", service.product_name()))
 }
 
-fn send_menu_text() -> &'static str {
-    "⚡ Dịch vụ tích xanh\n\nChọn dịch vụ bạn muốn dùng:"
+fn viameta_menu_text(ctx: &AppContext) -> String {
+    let title = ctx
+        .get_text("viameta_menu_title", "⚡ Dịch vụ tích xanh")
+        .trim()
+        .to_string();
+    let description = ctx
+        .get_text("viameta_menu_description", "Chọn dịch vụ bạn muốn dùng:")
+        .trim()
+        .to_string();
+
+    if description.is_empty() {
+        title
+    } else {
+        format!("{title}\n\n{description}")
+    }
 }
 
 async fn send_viameta_menu(ctx: &AppContext, chat_id: ChatId, _lang: &str) -> Result<()> {
     ctx.bot
-        .send_message(chat_id, send_menu_text())
+        .send_message(chat_id, viameta_menu_text(ctx))
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![InlineKeyboardButton::callback(
                 "🔗 Get link Facebook",
