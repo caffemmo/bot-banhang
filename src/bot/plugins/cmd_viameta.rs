@@ -100,6 +100,22 @@ impl ViametaService {
         }
     }
 
+    fn enabled_key(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "viameta_getlink_fb_enabled",
+            Self::UptickFb => "viameta_uptick_fb_enabled",
+            Self::UptickIg => "viameta_uptick_ig_enabled",
+        }
+    }
+
+    fn description_key(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "viameta_getlink_fb_description",
+            Self::UptickFb => "viameta_uptick_fb_description",
+            Self::UptickIg => "viameta_uptick_ig_description",
+        }
+    }
+
     fn default_price(self) -> i64 {
         match self {
             Self::GetlinkFb => 15_000,
@@ -112,6 +128,14 @@ impl ViametaService {
         match self {
             Self::GetlinkFb | Self::UptickFb => "Cookie Facebook phải có c_user.",
             Self::UptickIg => "Cookie Instagram phải có ds_user_id và sessionid.",
+        }
+    }
+
+    fn default_description(self) -> &'static str {
+        match self {
+            Self::GetlinkFb => "Gửi cookie Facebook có c_user để hệ thống lấy link xác minh.",
+            Self::UptickFb => "Gửi cookie Facebook có c_user, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.",
+            Self::UptickIg => "Gửi cookie Instagram có ds_user_id và sessionid, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.",
         }
     }
 }
@@ -182,6 +206,11 @@ impl AppPlugin for ViametaCommandPlugin {
                     dialogue.update(State::Idle).await?;
                     return Ok(false);
                 };
+                if !service_enabled(&ctx, service) {
+                    send_service_maintenance(&ctx, msg.chat.id).await?;
+                    dialogue.update(State::Idle).await?;
+                    return Ok(true);
+                }
                 if text.is_empty() {
                     prompt_cookie(&ctx, msg.chat.id, service).await?;
                     return Ok(true);
@@ -224,6 +253,11 @@ impl AppPlugin for ViametaCommandPlugin {
                     dialogue.update(State::Idle).await?;
                     return Ok(false);
                 };
+                if !service_enabled(&ctx, service) {
+                    send_service_maintenance(&ctx, msg.chat.id).await?;
+                    dialogue.update(State::Idle).await?;
+                    return Ok(true);
+                }
                 let Some((file_id, ext)) = viameta_image_file(&msg) else {
                     ctx.bot
                         .send_message(msg.chat.id, "❌ Vui lòng gửi ảnh giấy tờ dạng JPG hoặc PNG.")
@@ -271,6 +305,11 @@ impl AppPlugin for ViametaCommandPlugin {
             };
             let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
+                if !service_enabled(&ctx, service) {
+                    send_service_maintenance(&ctx, msg.chat().id).await?;
+                    dialogue.update(State::Idle).await?;
+                    return Ok(true);
+                }
                 let price = service_price(&ctx, service);
                 ctx.bot
                     .send_message(
@@ -279,7 +318,7 @@ impl AppPlugin for ViametaCommandPlugin {
                             "{}\n\nGiá: {}\n{}\n\nVui lòng gửi cookie để tạo đơn.",
                             service.label(),
                             format_vnd(price),
-                            service.cookie_hint()
+                            service_description(&ctx, service)
                         ),
                     )
                     .reply_markup(viameta_back_keyboard())
@@ -492,8 +531,16 @@ async fn prompt_cookie(ctx: &AppContext, chat_id: ChatId, service: ViametaServic
     ctx.bot
         .send_message(
             chat_id,
-            format!("Vui lòng gửi cookie.\n{}", service.cookie_hint()),
+            format!("Vui lòng gửi cookie.\n{}", service_description(ctx, service)),
         )
+        .reply_markup(viameta_back_keyboard())
+        .await?;
+    Ok(())
+}
+
+async fn send_service_maintenance(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    ctx.bot
+        .send_message(chat_id, format!("🛠 {}", maintenance_message(ctx)))
         .reply_markup(viameta_back_keyboard())
         .await?;
     Ok(())
@@ -517,6 +564,36 @@ fn service_price(ctx: &AppContext, service: ViametaService) -> i64 {
         .trim()
         .parse::<i64>()
         .unwrap_or_else(|_| service.default_price())
+}
+
+fn service_description(ctx: &AppContext, service: ViametaService) -> String {
+    ctx.get_text(service.description_key(), service.default_description())
+        .trim()
+        .to_string()
+}
+
+fn service_enabled(ctx: &AppContext, service: ViametaService) -> bool {
+    config_bool(ctx, service.enabled_key(), true)
+}
+
+fn maintenance_message(ctx: &AppContext) -> String {
+    ctx.get_text(
+        "viameta_maintenance_message",
+        "Dịch vụ này đang bảo trì, vui lòng quay lại sau.",
+    )
+    .trim()
+    .to_string()
+}
+
+fn config_bool(ctx: &AppContext, key: &str, default: bool) -> bool {
+    let default_value = if default { "1" } else { "0" };
+    let value = ctx.get_text(key, default_value);
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "1" | "true" | "on" | "yes" | "enabled" | "enable" | "bat" | "bật" => true,
+        "0" | "false" | "off" | "no" | "disabled" | "disable" | "tat" | "tắt" => false,
+        _ => default,
+    }
 }
 
 fn viameta_api_key(ctx: &AppContext) -> Option<String> {
@@ -736,6 +813,9 @@ async fn update_request_result(
 async fn run_viameta_request(ctx: &AppContext, request: &ViametaRequest) -> Result<ViametaDelivery> {
     let service = ViametaService::from_str(&request.service)
         .ok_or_else(|| anyhow!("unknown Viameta service {}", request.service))?;
+    if !service_enabled(ctx, service) {
+        return Err(anyhow!(maintenance_message(ctx)));
+    }
     match service {
         ViametaService::GetlinkFb => run_getlink(ctx, request).await,
         ViametaService::UptickFb | ViametaService::UptickIg => run_uptick(ctx, request, service).await,
