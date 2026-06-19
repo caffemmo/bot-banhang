@@ -37,6 +37,24 @@
         ]
       },
       {
+        title: 'Dịch vụ tích xanh',
+        icon: '⚡',
+        fields: [
+          { key: 'viameta_base_url', label: 'Base URL Viameta', value: 'https://viameta.co/bot' },
+          { key: 'viameta_api_key', label: 'API key Viameta', value: '' },
+          { key: 'viameta_maintenance_message', label: 'Thông báo khi dịch vụ tắt', value: 'Dịch vụ này đang bảo trì, vui lòng quay lại sau.' },
+          { key: 'viameta_getlink_fb_enabled', label: 'Bật Get link Facebook', value: '1' },
+          { key: 'viameta_getlink_fb_price', label: 'Giá Get link Facebook', value: '15000' },
+          { key: 'viameta_getlink_fb_description', label: 'Mô tả Get link Facebook', value: 'Gửi cookie Facebook có c_user để hệ thống lấy link xác minh.' },
+          { key: 'viameta_uptick_fb_enabled', label: 'Bật Up tích Facebook', value: '1' },
+          { key: 'viameta_uptick_fb_price', label: 'Giá Up tích Facebook', value: '20000' },
+          { key: 'viameta_uptick_fb_description', label: 'Mô tả Up tích Facebook', value: 'Gửi cookie Facebook có c_user, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.' },
+          { key: 'viameta_uptick_ig_enabled', label: 'Bật Up tích Instagram', value: '1' },
+          { key: 'viameta_uptick_ig_price', label: 'Giá Up tích Instagram', value: '40000' },
+          { key: 'viameta_uptick_ig_description', label: 'Mô tả Up tích Instagram', value: 'Gửi cookie Instagram có ds_user_id và sessionid, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.' },
+        ]
+      },
+      {
         title: 'Admin Telegram',
         icon: '🧩',
         fields: [
@@ -153,9 +171,18 @@
 
     function buildConfigFieldHtml(key, value) {
       value = value == null ? '' : String(value);
-      if (key === 'required_channel_enabled' || key === 'telegram_i18n_emojis_enabled' || key === 'stock_auto_broadcast_enabled' || key === 'order_notifications_enabled') {
-        const isSelected1 = value === '1' ? 'selected' : '';
-        const isSelected0 = value === '0' ? 'selected' : '';
+      const toggleKeys = new Set([
+        'required_channel_enabled',
+        'telegram_i18n_emojis_enabled',
+        'stock_auto_broadcast_enabled',
+        'order_notifications_enabled',
+        'viameta_getlink_fb_enabled',
+        'viameta_uptick_fb_enabled',
+        'viameta_uptick_ig_enabled',
+      ]);
+      if (toggleKeys.has(key)) {
+        const isSelected1 = value === '1' || value.toLowerCase() === 'true' ? 'selected' : '';
+        const isSelected0 = !isSelected1 ? 'selected' : '';
         return `
           <select class="form-select config-input" data-key="${escapeAttr(key)}">
             <option value="1" ${isSelected1}>Bật</option>
@@ -184,7 +211,15 @@
           <div class="form-text">Độ dài phần random sau prefix, từ 10 đến 16 ký tự.</div>
         `;
       }
-      const isTextarea = value.includes('\n') || value.length > 70;
+      const numericKeys = new Set([
+        'viameta_getlink_fb_price',
+        'viameta_uptick_fb_price',
+        'viameta_uptick_ig_price',
+      ]);
+      if (numericKeys.has(key)) {
+        return `<input type="number" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" min="0" step="1000">`;
+      }
+      const isTextarea = key.endsWith('_description') || key === 'viameta_maintenance_message' || value.includes('\n') || value.length > 70;
       return isTextarea
         ? `<textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="3">${escapeHtml(value)}</textarea>`
         : `<input type="text" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}">`;
@@ -228,6 +263,15 @@
           return 'Số ký tự random mã CK đơn hàng phải nằm trong khoảng 10 đến 16.';
         }
         payload.order_memo_length = String(length);
+      }
+
+      for (const key of ['viameta_getlink_fb_price', 'viameta_uptick_fb_price', 'viameta_uptick_ig_price']) {
+        if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+        const value = Number(String(payload[key] || '').trim());
+        if (!Number.isInteger(value) || value < 0) {
+          return 'Giá dịch vụ tích xanh phải là số nguyên từ 0 trở lên.';
+        }
+        payload[key] = String(value);
       }
 
       return null;
