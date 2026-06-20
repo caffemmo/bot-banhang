@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/codex-patch-tut-public-menu.yml
+      - .github/codex-trigger-tut-public-menu.txt
   workflow_dispatch:
 
 permissions:
@@ -17,37 +18,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Patch TUT public menu
+
+      - name: Patch start menu and public TUT menu
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'Cannot find {label}')
+              return text.replace(old, new, 1)
+
           start = Path('src/bot/plugins/cmd_start_affiliate.rs')
           s = start.read_text(encoding='utf-8')
-          viameta_row = '            [i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu")],\n'
-          tut_row = '            [i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home")],\n'
-          if tut_row not in s:
-              if viameta_row not in s:
-                  raise SystemExit('Cannot find Viameta row in start menu')
-              s = s.replace(viameta_row, viameta_row + tut_row, 1)
-          start.write_text(s, encoding='utf-8')
+          if '"start_btn_tut"' not in s:
+              viameta_row = '            [i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu")],\n'
+              tut_row = '            [i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home")],\n'
+              s = replace_once(s, viameta_row, viameta_row + tut_row, 'Viameta row')
+              start.write_text(s, encoding='utf-8')
 
           tut = Path('src/bot/plugins/cmd_tut.rs')
           s = tut.read_text(encoding='utf-8')
 
-          constants_old = 'const TUT_MYVIP: &str = "tut:myvip";\n'
-          constants_new = '''const TUT_MYVIP: &str = "tut:myvip";
-const TUT_PUBLIC_HOME: &str = "tut:user_home";
-const TUT_PUBLIC_FREE: &str = "tut:free";
-const TUT_PUBLIC_VIP: &str = "tut:vip";
-const TUT_PUBLIC_ALL: &str = "tut:all";
-'''
           if 'const TUT_PUBLIC_HOME' not in s:
-              if constants_old not in s:
-                  raise SystemExit('Cannot find TUT constants')
-              s = s.replace(constants_old, constants_new, 1)
+              s = replace_once(
+                  s,
+                  'const TUT_MYVIP: &str = "tut:myvip";\n',
+                  'const TUT_MYVIP: &str = "tut:myvip";\n'
+                  'const TUT_PUBLIC_HOME: &str = "tut:user_home";\n'
+                  'const TUT_PUBLIC_FREE: &str = "tut:free";\n'
+                  'const TUT_PUBLIC_VIP: &str = "tut:vip";\n'
+                  'const TUT_PUBLIC_ALL: &str = "tut:all";\n',
+                  'TUT constants',
+              )
 
-          cmd_old = '''        if is_command(text, "/tut") {
+          old_tut_cmd = '''        if is_command(text, "/tut") {
             if !is_tut_admin(&ctx, user_id) {
                 ctx.bot.send_message(msg.chat.id, "Bạn không có quyền admin TUT.").await?;
                 return Ok(true);
@@ -56,7 +61,7 @@ const TUT_PUBLIC_ALL: &str = "tut:all";
             return Ok(true);
         }
 '''
-          cmd_new = '''        if is_command(text, "/tut") {
+          new_tut_cmd = '''        if is_command(text, "/tut") {
             if is_tut_admin(&ctx, user_id) {
                 send_tut_admin_menu(&ctx, msg.chat.id).await?;
             } else {
@@ -65,10 +70,10 @@ const TUT_PUBLIC_ALL: &str = "tut:all";
             return Ok(true);
         }
 '''
-          if cmd_old in s:
-              s = s.replace(cmd_old, cmd_new, 1)
+          if old_tut_cmd in s:
+              s = s.replace(old_tut_cmd, new_tut_cmd, 1)
 
-          home_old = '''            TUT_HOME => {
+          old_home = '''            TUT_HOME => {
                 if let Some(chat_id) = chat_id {
                     if is_tut_admin(&ctx, user_id) {
                         send_tut_admin_menu(&ctx, chat_id).await?;
@@ -77,7 +82,7 @@ const TUT_PUBLIC_ALL: &str = "tut:all";
                 return Ok(true);
             }
 '''
-          home_new = '''            TUT_HOME => {
+          new_home = '''            TUT_HOME => {
                 if let Some(chat_id) = chat_id {
                     if is_tut_admin(&ctx, user_id) {
                         send_tut_admin_menu(&ctx, chat_id).await?;
@@ -113,17 +118,15 @@ const TUT_PUBLIC_ALL: &str = "tut:all";
             }
 '''
           if 'TUT_PUBLIC_FREE =>' not in s:
-              if home_old not in s:
-                  raise SystemExit('Cannot find TUT_HOME callback block')
-              s = s.replace(home_old, home_new, 1)
+              s = replace_once(s, old_home, new_home, 'TUT_HOME callback')
 
-          anchor = 'async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {'
           public_funcs = '''async fn send_tut_public_home(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     let text = format!(
         "📚 KHO TUT MMO\n\nChọn mục bạn muốn xem:\n\n🆓 TUT miễn phí: xem được ngay.\n👑 TUT VIP: cần VIP còn hạn.\n\nGói VIP TUT: {} / {} ngày",
         format_vnd(vip_price(ctx)),
         vip_days(ctx),
     );
+
     ctx.bot
         .send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(vec![
@@ -186,11 +189,9 @@ async fn send_public_tut_list(
 
 '''
           if 'async fn send_tut_public_home' not in s:
-              if anchor not in s:
-                  raise SystemExit('Cannot find send_tut_list anchor')
-              s = s.replace(anchor, public_funcs + anchor, 1)
+              anchor = 'async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {'
+              s = replace_once(s, anchor, public_funcs + anchor, 'send_tut_list anchor')
 
-          list_anchor = 'async fn list_tuts(pool: &SqlitePool, limit: i64) -> Result<Vec<VipTut>> {'
           list_public = '''async fn list_public_tuts(
     pool: &SqlitePool,
     access_type: Option<&str>,
@@ -232,14 +233,12 @@ async fn send_public_tut_list(
 
 '''
           if 'async fn list_public_tuts' not in s:
-              if list_anchor not in s:
-                  raise SystemExit('Cannot find list_tuts anchor')
-              s = s.replace(list_anchor, list_public + list_anchor, 1)
+              anchor = 'async fn list_tuts(pool: &SqlitePool, limit: i64) -> Result<Vec<VipTut>> {'
+              s = replace_once(s, anchor, list_public + anchor, 'list_tuts anchor')
 
           tut.write_text(s, encoding='utf-8')
           PY
-      - name: Remove temporary workflow
-        run: rm -f .github/workflows/codex-patch-tut-public-menu.yml
+
       - name: Commit patch
         run: |
           git config user.name "Codex"
@@ -248,6 +247,6 @@ async fn send_public_tut_list(
             echo "No changes to commit"
             exit 0
           fi
-          git add src/bot/plugins/cmd_start_affiliate.rs src/bot/plugins/cmd_tut.rs .github/workflows/codex-patch-tut-public-menu.yml
-          git commit -m "Add public TUT menu to start"
+          git add src/bot/plugins/cmd_start_affiliate.rs src/bot/plugins/cmd_tut.rs
+          git commit -m "Add public TUT entry to start menu"
           git push
