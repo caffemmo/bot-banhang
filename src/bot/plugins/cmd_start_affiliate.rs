@@ -151,6 +151,7 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
             ],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu")],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home")],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", AFFILIATE_REGISTER_CALLBACK)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", CHILD_BOT_GUIDE_CALLBACK)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
