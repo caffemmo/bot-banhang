@@ -1,0 +1,248 @@
+name: Codex run public TUT menu patch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(s, old, new, label):
+              if old not in s:
+                  raise SystemExit(f'Missing anchor: {label}')
+              return s.replace(old, new, 1)
+
+          start = Path('src/bot/plugins/cmd_start_affiliate.rs')
+          s = start.read_text(encoding='utf-8')
+          viameta = '            [i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu")],\n'
+          tut_button = '            [i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home")],\n'
+          if tut_button not in s:
+              s = replace_once(s, viameta, viameta + tut_button, 'start viameta row')
+          start.write_text(s, encoding='utf-8')
+
+          tut = Path('src/bot/plugins/cmd_tut.rs')
+          s = tut.read_text(encoding='utf-8')
+
+          if 'const TUT_PUBLIC_HOME' not in s:
+              s = replace_once(
+                  s,
+                  'const TUT_MYVIP: &str = "tut:myvip";\n',
+                  'const TUT_MYVIP: &str = "tut:myvip";\n'
+                  'const TUT_PUBLIC_HOME: &str = "tut:user_home";\n'
+                  'const TUT_PUBLIC_FREE: &str = "tut:free";\n'
+                  'const TUT_PUBLIC_VIP: &str = "tut:vip";\n'
+                  'const TUT_PUBLIC_ALL: &str = "tut:all";\n',
+                  'tut constants',
+              )
+
+          old_cmd = '''        if is_command(text, "/tut") {
+            if !is_tut_admin(&ctx, user_id) {
+                ctx.bot.send_message(msg.chat.id, "Bạn không có quyền admin TUT.").await?;
+                return Ok(true);
+            }
+            send_tut_admin_menu(&ctx, msg.chat.id).await?;
+            return Ok(true);
+        }
+'''
+          new_cmd = '''        if is_command(text, "/tut") {
+            if is_tut_admin(&ctx, user_id) {
+                send_tut_admin_menu(&ctx, msg.chat.id).await?;
+            } else {
+                send_tut_public_home(&ctx, msg.chat.id).await?;
+            }
+            return Ok(true);
+        }
+'''
+          if old_cmd in s:
+              s = s.replace(old_cmd, new_cmd, 1)
+
+          old_home = '''            TUT_HOME => {
+                if let Some(chat_id) = chat_id {
+                    if is_tut_admin(&ctx, user_id) {
+                        send_tut_admin_menu(&ctx, chat_id).await?;
+                    }
+                }
+                return Ok(true);
+            }
+'''
+          new_home = '''            TUT_HOME => {
+                if let Some(chat_id) = chat_id {
+                    if is_tut_admin(&ctx, user_id) {
+                        send_tut_admin_menu(&ctx, chat_id).await?;
+                    } else {
+                        send_tut_public_home(&ctx, chat_id).await?;
+                    }
+                }
+                return Ok(true);
+            }
+            TUT_PUBLIC_HOME => {
+                if let Some(chat_id) = chat_id {
+                    send_tut_public_home(&ctx, chat_id).await?;
+                }
+                return Ok(true);
+            }
+            TUT_PUBLIC_FREE => {
+                if let Some(chat_id) = chat_id {
+                    send_public_tut_list(&ctx, chat_id, Some("free")).await?;
+                }
+                return Ok(true);
+            }
+            TUT_PUBLIC_VIP => {
+                if let Some(chat_id) = chat_id {
+                    send_public_tut_list(&ctx, chat_id, Some("vip")).await?;
+                }
+                return Ok(true);
+            }
+            TUT_PUBLIC_ALL => {
+                if let Some(chat_id) = chat_id {
+                    send_public_tut_list(&ctx, chat_id, None).await?;
+                }
+                return Ok(true);
+            }
+'''
+          if 'TUT_PUBLIC_FREE =>' not in s:
+              s = replace_once(s, old_home, new_home, 'tut home callback')
+
+          public_funcs = '''async fn send_tut_public_home(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let text = format!(
+        "📚 KHO TUT MMO\n\nChọn mục bạn muốn xem:\n\n🆓 TUT miễn phí: xem được ngay.\n👑 TUT VIP: cần VIP còn hạn.\n\nGói VIP TUT: {} / {} ngày",
+        format_vnd(vip_price(ctx)),
+        vip_days(ctx),
+    );
+    ctx.bot
+        .send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton::callback("🆓 TUT miễn phí", TUT_PUBLIC_FREE),
+                InlineKeyboardButton::callback("👑 TUT VIP", TUT_PUBLIC_VIP),
+            ],
+            vec![InlineKeyboardButton::callback("📚 Tất cả TUT", TUT_PUBLIC_ALL)],
+            vec![
+                InlineKeyboardButton::callback("💎 Mua VIP TUT", "tut:buyvip"),
+                InlineKeyboardButton::callback("🔎 Kiểm tra VIP", TUT_MYVIP),
+            ],
+        ]))
+        .await?;
+    Ok(())
+}
+
+async fn send_public_tut_list(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    access_type: Option<&str>,
+) -> Result<()> {
+    let rows = list_public_tuts(&ctx.pool, access_type, 20).await?;
+    let (title, empty_text) = match access_type {
+        Some("free") => ("🆓 TUT MIỄN PHÍ", "Chưa có TUT miễn phí nào."),
+        Some("vip") => ("👑 TUT VIP", "Chưa có TUT VIP nào."),
+        _ => ("📚 TẤT CẢ TUT", "Chưa có TUT nào."),
+    };
+
+    if rows.is_empty() {
+        ctx.bot
+            .send_message(chat_id, empty_text)
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+                "⬅️ Kho TUT",
+                TUT_PUBLIC_HOME,
+            )]]))
+            .await?;
+        return Ok(());
+    }
+
+    let mut buttons = Vec::new();
+    for tut in rows.into_iter().take(15) {
+        let badge = if tut_is_free(&tut) { "🆓" } else { "👑" };
+        buttons.push(vec![InlineKeyboardButton::callback(
+            format!("{} #{} {}", badge, tut.id, short_label(&tut.title, 32)),
+            format!("tut:view:{}", tut.id),
+        )]);
+    }
+    if access_type != Some("free") {
+        buttons.push(vec![InlineKeyboardButton::callback("💎 Mua VIP TUT", "tut:buyvip")]);
+    }
+    buttons.push(vec![InlineKeyboardButton::callback("⬅️ Kho TUT", TUT_PUBLIC_HOME)]);
+
+    ctx.bot
+        .send_message(chat_id, format!("{}\n\nChọn bài bạn muốn xem:", title))
+        .reply_markup(InlineKeyboardMarkup::new(buttons))
+        .await?;
+    Ok(())
+}
+
+'''
+          if 'async fn send_tut_public_home' not in s:
+              s = replace_once(s, 'async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {', public_funcs + 'async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {', 'send_tut_list anchor')
+
+          public_query = '''async fn list_public_tuts(
+    pool: &SqlitePool,
+    access_type: Option<&str>,
+    limit: i64,
+) -> Result<Vec<VipTut>> {
+    if let Some(access_type) = access_type {
+        sqlx::query_as::<_, VipTut>(
+            r#"
+            SELECT id, title, teaser, content, access_type, is_active, view_count, created_by, created_at, updated_at,
+                   posted_at, posted_chat_id, posted_message_id
+            FROM vip_tuts
+            WHERE is_active = 1 AND lower(access_type) = lower(?)
+            ORDER BY id DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(access_type)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
+    } else {
+        sqlx::query_as::<_, VipTut>(
+            r#"
+            SELECT id, title, teaser, content, access_type, is_active, view_count, created_by, created_at, updated_at,
+                   posted_at, posted_chat_id, posted_message_id
+            FROM vip_tuts
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
+    }
+}
+
+'''
+          if 'async fn list_public_tuts' not in s:
+              s = replace_once(s, 'async fn list_tuts(pool: &SqlitePool, limit: i64) -> Result<Vec<VipTut>> {', public_query + 'async fn list_tuts(pool: &SqlitePool, limit: i64) -> Result<Vec<VipTut>> {', 'list_tuts anchor')
+
+          tut.write_text(s, encoding='utf-8')
+          PY
+      - name: Remove temporary workflows
+        run: |
+          rm -f .github/workflows/codex-patch-tut-public-menu.yml
+          rm -f .github/workflows/codex-run-patch-tut-public-menu.yml
+      - name: Commit and push
+        run: |
+          git config user.name "Codex"
+          git config user.email "codex@openai.com"
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git add src/bot/plugins/cmd_start_affiliate.rs src/bot/plugins/cmd_tut.rs .github/workflows/codex-patch-tut-public-menu.yml .github/workflows/codex-run-patch-tut-public-menu.yml
+          git commit -m "Add public TUT menu to start"
+          git push
