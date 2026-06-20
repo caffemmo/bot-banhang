@@ -1,1 +1,2 @@
 trigger public TUT menu workflow
+run: 2026-06-20 public tut menu
