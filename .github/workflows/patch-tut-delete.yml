@@ -1,0 +1,273 @@
+name: Patch TUT delete controls
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-tut-delete.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch cmd_tut.rs
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/bot/plugins/cmd_tut.rs")
+          s = path.read_text(encoding="utf-8")
+          original = s
+
+          def ensure_after(anchor, insert):
+              global s
+              if insert.strip() in s:
+                  return
+              if anchor not in s:
+                  raise SystemExit(f"Anchor not found: {anchor!r}")
+              s = s.replace(anchor, anchor + insert, 1)
+
+          def replace_once(old, new):
+              global s
+              if new in s:
+                  return
+              if old not in s:
+                  raise SystemExit(f"Pattern not found: {old[:120]!r}")
+              s = s.replace(old, new, 1)
+
+          ensure_after(
+              'const TUT_MYVIP: &str = "tut:myvip";\n',
+              'const TUT_DELETE_PREFIX: &str = "tut:delete:";\nconst TUT_DELETE_CONFIRM_PREFIX: &str = "tut:delete_confirm:";\n',
+          )
+
+          ensure_after(
+              '''            BotCommand {
+                command: "tutpost".to_string(),
+                description: "Admin: post TUT teaser".to_string(),
+            },
+''',
+              '''            BotCommand {
+                command: "tutdel".to_string(),
+                description: "Admin: delete TUT".to_string(),
+            },
+''',
+          )
+
+          ensure_after(
+              '''        if is_command(text, "/tutpost") {
+            if !is_tut_admin(&ctx, user_id) {
+                ctx.bot.send_message(msg.chat.id, "Bạn không có quyền đăng TUT.").await?;
+                return Ok(true);
+            }
+            handle_tutpost_command(&ctx, msg.chat.id, text).await?;
+            return Ok(true);
+        }
+''',
+              '''
+        if is_command(text, "/tutdel") || is_command(text, "/tutdelete") {
+            if !is_tut_admin(&ctx, user_id) {
+                ctx.bot.send_message(msg.chat.id, "Bạn không có quyền xóa TUT.").await?;
+                return Ok(true);
+            }
+            handle_tutdelete_command(&ctx, msg.chat.id, text).await?;
+            return Ok(true);
+        }
+''',
+          )
+
+          ensure_after(
+              '''        if let Some(id) = data.strip_prefix("tut:post:").and_then(|v| v.parse::<i64>().ok()) {
+            if let Some(chat_id) = chat_id {
+                if is_tut_admin(&ctx, user_id) {
+                    post_tut_to_configured_channel(&ctx, chat_id, id).await?;
+                }
+            }
+            return Ok(true);
+        }
+''',
+              '''
+        if let Some(id) = data
+            .strip_prefix(TUT_DELETE_PREFIX)
+            .and_then(|v| v.parse::<i64>().ok())
+        {
+            if let Some(chat_id) = chat_id {
+                if is_tut_admin(&ctx, user_id) {
+                    confirm_delete_tut(&ctx, chat_id, id).await?;
+                }
+            }
+            return Ok(true);
+        }
+
+        if let Some(id) = data
+            .strip_prefix(TUT_DELETE_CONFIRM_PREFIX)
+            .and_then(|v| v.parse::<i64>().ok())
+        {
+            if let Some(chat_id) = chat_id {
+                if is_tut_admin(&ctx, user_id) {
+                    delete_tut_and_refresh(&ctx, chat_id, id).await?;
+                }
+            }
+            return Ok(true);
+        }
+''',
+          )
+
+          ensure_after(
+              '        /tutpost <id> - đăng teaser lên kênh cấu hình\\n\\\n',
+              '        /tutdel <id> - xóa/ẩn TUT khỏi danh sách\\n\\\n',
+          )
+
+          replace_once(
+              '''            vec![
+                InlineKeyboardButton::callback(
+                    format!("👀 #{} {}", tut.id, short_label(&tut.title, 22)),
+                    format!("tut:view:{}", tut.id),
+                ),
+                InlineKeyboardButton::callback("📤 Đăng", format!("tut:post:{}", tut.id)),
+            ]
+''',
+              '''            vec![
+                InlineKeyboardButton::callback(
+                    format!("👀 #{} {}", tut.id, short_label(&tut.title, 22)),
+                    format!("tut:view:{}", tut.id),
+                ),
+                InlineKeyboardButton::callback("📤 Đăng", format!("tut:post:{}", tut.id)),
+                InlineKeyboardButton::callback("🗑 Xóa", format!("{}{}", TUT_DELETE_PREFIX, tut.id)),
+            ]
+''',
+          )
+
+          ensure_after(
+              '''async fn handle_tutpost_command(ctx: &AppContext, chat_id: ChatId, text: &str) -> Result<()> {
+    let mut parts = text.split_whitespace();
+    let _ = parts.next();
+    let Some(id) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+        ctx.bot
+            .send_message(chat_id, "Cách dùng: /tutpost <id>\nVí dụ: /tutpost 12")
+            .await?;
+        return Ok(());
+    };
+    post_tut_to_configured_channel(ctx, chat_id, id).await
+}
+''',
+              '''
+async fn handle_tutdelete_command(ctx: &AppContext, chat_id: ChatId, text: &str) -> Result<()> {
+    let mut parts = text.split_whitespace();
+    let _ = parts.next();
+    let Some(id) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+        ctx.bot
+            .send_message(chat_id, "Cách dùng: /tutdel <id>\nVí dụ: /tutdel 12")
+            .await?;
+        return Ok(());
+    };
+    confirm_delete_tut(ctx, chat_id, id).await
+}
+
+async fn confirm_delete_tut(ctx: &AppContext, chat_id: ChatId, id: i64) -> Result<()> {
+    let Some(tut) = get_tut(&ctx.pool, id).await? else {
+        ctx.bot
+            .send_message(chat_id, "Không tìm thấy TUT hoặc TUT đã bị xóa.")
+            .await?;
+        return Ok(());
+    };
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "⚠️ Xác nhận xóa TUT #{}\n\n{}\n\nSau khi xóa, user sẽ không xem được TUT này nữa.",
+                tut.id, tut.title
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback(
+                "✅ Xóa thật",
+                format!("{}{}", TUT_DELETE_CONFIRM_PREFIX, tut.id),
+            )],
+            vec![InlineKeyboardButton::callback("⬅️ Hủy", TUT_LIST)],
+        ]))
+        .await?;
+    Ok(())
+}
+
+async fn delete_tut_and_refresh(ctx: &AppContext, chat_id: ChatId, id: i64) -> Result<()> {
+    let deleted = soft_delete_tut(&ctx.pool, id).await?;
+    if deleted == 0 {
+        ctx.bot
+            .send_message(chat_id, "TUT này đã bị xóa hoặc không tồn tại.")
+            .await?;
+        return Ok(());
+    }
+
+    ctx.bot
+        .send_message(chat_id, format!("✅ Đã xóa TUT #{} khỏi danh sách.", id))
+        .await?;
+    send_tut_list(ctx, chat_id).await
+}
+''',
+          )
+
+          replace_once(
+              '''        FROM vip_tuts
+        ORDER BY id DESC
+        LIMIT ?
+''',
+              '''        FROM vip_tuts
+        WHERE is_active = 1
+        ORDER BY id DESC
+        LIMIT ?
+''',
+          )
+
+          ensure_after(
+              '''async fn list_tuts(pool: &SqlitePool, limit: i64) -> Result<Vec<VipTut>> {
+    sqlx::query_as::<_, VipTut>(
+        r#"
+        SELECT id, title, teaser, content, access_type, is_active, view_count, created_by, created_at, updated_at,
+               posted_at, posted_chat_id, posted_message_id
+        FROM vip_tuts
+        WHERE is_active = 1
+        ORDER BY id DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+''',
+              '''
+async fn soft_delete_tut(pool: &SqlitePool, id: i64) -> Result<u64> {
+    let result = sqlx::query("UPDATE vip_tuts SET is_active = 0, updated_at = ? WHERE id = ? AND is_active = 1")
+        .bind(Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+''',
+          )
+
+          if s == original:
+              print("No changes needed")
+          else:
+              path.write_text(s, encoding="utf-8")
+              print("Patched cmd_tut.rs")
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "codex-bot"
+          git config user.email "codex-bot@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No patch changes"
+            exit 0
+          fi
+          git add src/bot/plugins/cmd_tut.rs
+          git commit -m "Add delete controls for TUT admin"
+          git push
