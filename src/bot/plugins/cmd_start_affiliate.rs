@@ -15,6 +15,8 @@ use crate::bot::{BotDialogue, i18n};
 
 pub struct StartAffiliatePlugin;
 
+const JOIN_CHECK_CALLBACK: &str = "start:check_join";
+const DEFAULT_REQUIRED_CHANNEL_URL: &str = "https://t.me/zvwboo";
 const AFFILIATE_REGISTER_CALLBACK: &str = "affiliate:register";
 const CHILD_BOT_GUIDE_CALLBACK: &str = "childbot:guide";
 const CHILD_BOT_BENEFITS_CALLBACK: &str = "childbot:benefits";
@@ -55,20 +57,13 @@ impl AppPlugin for StartAffiliatePlugin {
         } else {
             ctx.normalize_language_code(None)
         };
-        let msg_text = i18n::t(
-            &ctx,
-            &lang,
-            "start",
-            "👋 Welcome! Use the buttons below, or type /shop to buy and /orders to view orders.",
-        );
-        i18n::send_message_with_json_keyboard(
-            &ctx,
-            msg.chat.id,
-            "start",
-            msg_text,
-            start_menu_with_affiliate_keyboard_json(&ctx, &lang),
-        )
-        .await?;
+        if let Some(user) = msg.from() {
+            if !user_has_joined_required_channel(&ctx, user.id).await {
+                send_required_channel_prompt(&ctx, msg.chat.id, &lang).await?;
+                return Ok(true);
+            }
+        }
+        send_start_menu(&ctx, msg.chat.id, &lang).await?;
         Ok(true)
     }
 
@@ -83,6 +78,30 @@ impl AppPlugin for StartAffiliatePlugin {
         };
 
         match data {
+            JOIN_CHECK_CALLBACK => {
+                let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
+                let joined = user_has_joined_required_channel(&ctx, q.from.id).await;
+                let ack = if joined {
+                    i18n::t(&ctx, &lang, "required_channel_joined", "Đã xác nhận tham gia channel.")
+                } else {
+                    i18n::t(
+                        &ctx,
+                        &lang,
+                        "required_channel_not_joined",
+                        "Bot chưa thấy bạn trong channel, vui lòng tham gia rồi thử lại.",
+                    )
+                };
+                let _ = ctx.bot.answer_callback_query(q.id.clone()).text(ack).await;
+
+                if let Some(msg) = &q.message {
+                    if joined {
+                        send_start_menu(&ctx, msg.chat().id, &lang).await?;
+                    } else {
+                        send_required_channel_prompt(&ctx, msg.chat().id, &lang).await?;
+                    }
+                }
+                Ok(true)
+            }
             AFFILIATE_REGISTER_CALLBACK => {
                 let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
                 let _ = ctx
@@ -132,6 +151,150 @@ fn is_plain_start(text: &str) -> bool {
     let mut parts = text.split_whitespace();
     let command = parts.next().unwrap_or("");
     (command == "/start" || command.starts_with("/start@")) && parts.next().is_none()
+}
+
+fn required_channel_enabled_value(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    matches!(normalized.as_str(), "1" | "true" | "on" | "yes" | "enabled" | "bat" | "bật")
+}
+
+fn normalize_t_me_url(value: &str) -> Option<String> {
+    let value = value.trim();
+    let stripped = value
+        .strip_prefix("https://t.me/")
+        .or_else(|| value.strip_prefix("http://t.me/"))
+        .or_else(|| value.strip_prefix("t.me/"))?;
+    let username = stripped
+        .split(['?', '/', '#'])
+        .next()
+        .unwrap_or("")
+        .trim();
+    if username.is_empty() || username.starts_with('+') {
+        None
+    } else if username.starts_with('@') {
+        Some(username.to_string())
+    } else {
+        Some(format!("@{username}"))
+    }
+}
+
+fn normalize_required_channel_id(channel_id: &str, channel_url: &str) -> Option<String> {
+    if let Some(id_from_url) = normalize_t_me_url(channel_url) {
+        return Some(id_from_url);
+    }
+
+    let id = channel_id.trim();
+    if id.is_empty() {
+        return None;
+    }
+
+    if id.starts_with("http://t.me/") || id.starts_with("https://t.me/") || id.starts_with("t.me/") {
+        return normalize_t_me_url(id);
+    }
+
+    if id.starts_with('@') || id.starts_with("-100") {
+        Some(id.to_string())
+    } else {
+        Some(format!("@{id}"))
+    }
+}
+
+fn required_channel_enabled(ctx: &AppContext) -> bool {
+    required_channel_enabled_value(&ctx.get_text("required_channel_enabled", "1"))
+}
+
+fn required_channel_id(ctx: &AppContext) -> Option<String> {
+    normalize_required_channel_id(
+        &ctx.get_text("required_channel_id", "@zvwboo"),
+        &ctx.get_text("required_channel_url", DEFAULT_REQUIRED_CHANNEL_URL),
+    )
+}
+
+fn required_channel_url(ctx: &AppContext) -> String {
+    let url = ctx
+        .get_text("required_channel_url", DEFAULT_REQUIRED_CHANNEL_URL)
+        .trim()
+        .to_string();
+    if url.is_empty() {
+        DEFAULT_REQUIRED_CHANNEL_URL.to_string()
+    } else {
+        url
+    }
+}
+
+async fn user_has_joined_required_channel(ctx: &AppContext, user_id: teloxide::types::UserId) -> bool {
+    if !required_channel_enabled(ctx) {
+        return true;
+    }
+
+    let Some(channel_id) = required_channel_id(ctx) else {
+        return true;
+    };
+
+    match ctx.bot.get_chat_member(channel_id.clone(), user_id).await {
+        Ok(member) => member.kind.is_present(),
+        Err(err) => {
+            tracing::warn!("Failed to check required channel membership for {channel_id}: {err}");
+            false
+        }
+    }
+}
+
+fn join_required_channel_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
+    let channel_url = required_channel_url(ctx);
+    let join_text = i18n::button_text_for_key(ctx, lang, "required_channel_join_button", "📢 Tham gia channel");
+    let check_button = i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "required_channel_check_button",
+        "✅ Tôi đã tham gia",
+        JOIN_CHECK_CALLBACK,
+    );
+
+    let mut rows = Vec::new();
+    if let Ok(url) = Url::parse(&channel_url) {
+        rows.push(vec![json!({ "text": join_text, "url": url.as_str() })]);
+    }
+    rows.push(vec![check_button]);
+    json!({ "inline_keyboard": rows })
+}
+
+async fn send_required_channel_prompt(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
+    let channel_url = required_channel_url(ctx);
+    let text = ctx
+        .render_text_lang(
+            "required_channel_message",
+            lang,
+            "📢 Vui lòng tham gia channel trước khi sử dụng bot:\n{channel_url}\n\nSau khi tham gia, bấm “Tôi đã tham gia”.",
+            &[("channel_url", channel_url.clone())],
+        );
+    i18n::send_message_with_json_keyboard(
+        ctx,
+        chat_id,
+        "required_channel_message",
+        text,
+        join_required_channel_keyboard_json(ctx, lang),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
+    let msg_text = i18n::t(
+        ctx,
+        lang,
+        "start",
+        "👋 Welcome! Use the buttons below, or type /shop to buy and /orders to view orders.",
+    );
+    i18n::send_message_with_json_keyboard(
+        ctx,
+        chat_id,
+        "start",
+        msg_text,
+        start_menu_with_affiliate_keyboard_json(ctx, lang),
+    )
+    .await?;
+    Ok(())
 }
 
 fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
