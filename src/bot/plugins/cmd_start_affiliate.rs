@@ -242,7 +242,7 @@ async fn user_has_joined_required_channel(ctx: &AppContext, user_id: teloxide::t
 
 fn join_required_channel_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     let channel_url = required_channel_url(ctx);
-    let join_text = i18n::button_text_for_key(ctx, lang, "required_channel_join_button", "📢 Tham gia channel");
+    let join_text = i18n::button_t(ctx, lang, "required_channel_join_button", "📢 Tham gia channel");
     let check_button = i18n::inline_button_callback_json(
         ctx,
         lang,
