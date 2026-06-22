@@ -179,24 +179,23 @@ fn normalize_t_me_url(value: &str) -> Option<String> {
 }
 
 fn normalize_required_channel_id(channel_id: &str, channel_url: &str) -> Option<String> {
-    if let Some(id_from_url) = normalize_t_me_url(channel_url) {
-        return Some(id_from_url);
-    }
-
     let id = channel_id.trim();
-    if id.is_empty() {
-        return None;
+    if !id.is_empty() {
+        if id.starts_with("http://t.me/")
+            || id.starts_with("https://t.me/")
+            || id.starts_with("t.me/")
+        {
+            return normalize_t_me_url(id);
+        }
+
+        if id.starts_with('@') || id.starts_with("-100") {
+            return Some(id.to_string());
+        }
+
+        return Some(format!("@{id}"));
     }
 
-    if id.starts_with("http://t.me/") || id.starts_with("https://t.me/") || id.starts_with("t.me/") {
-        return normalize_t_me_url(id);
-    }
-
-    if id.starts_with('@') || id.starts_with("-100") {
-        Some(id.to_string())
-    } else {
-        Some(format!("@{id}"))
-    }
+    normalize_t_me_url(channel_url)
 }
 
 fn required_channel_enabled(ctx: &AppContext) -> bool {
