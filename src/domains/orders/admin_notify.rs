@@ -6,6 +6,7 @@ use tracing::warn;
 
 use crate::app::AppContext;
 use crate::bot::i18n;
+use crate::core::time::format_vietnam_datetime;
 use crate::domains::orders::fulfillment::PaymentSource;
 use crate::domains::orders::models::OrderWithProduct;
 use crate::domains::users::repo as users_repo;
@@ -96,7 +97,7 @@ pub fn render_admin_order_paid_notification(
             ("chat_id", order.order.chat_id.to_string()),
             ("payment_ref", payment_ref.to_string()),
             ("source", source_label.to_string()),
-            ("paid_at", paid_at.to_rfc3339()),
+            ("paid_at", format_vietnam_datetime(paid_at)),
         ],
     )
 }
@@ -187,7 +188,7 @@ mod tests {
 
         assert_eq!(
             text,
-            "Đơn MEMO1: Test product x2 = 50000; user @alice; ref tx-123; bank_webhook; 2026-05-26T01:02:03+00:00"
+            "Đơn MEMO1: Test product x2 = 50000; user @alice; ref tx-123; bank_webhook; 26/05/2026 08:02:03"
         );
     }
 

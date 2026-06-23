@@ -18,6 +18,7 @@ use url::Url;
 
 use crate::app::AppContext;
 use crate::core::qr::vietqr_link;
+use crate::core::time::format_vietnam_time;
 use crate::domains::client::repo as client_repo;
 use crate::domains::crypto_pay::models::{
     CryptoPaymentMethod, CryptoPaymentRequest, CryptoPaymentStatus,
@@ -806,7 +807,7 @@ async fn handle_binance_checkout(
                     ("pay_id", copyable_code(&pay_id)),
                     ("receiver_name", html_escape(&receiver_name)),
                     ("memo", copyable_code(&payment.memo)),
-                    ("expires_at", payment.expires_at.clone()),
+                    ("expires_at", format_vietnam_time(&payment.expires_at)),
                 ],
             );
             ctx.bot
@@ -858,7 +859,7 @@ async fn handle_bep20_checkout(
                         "order_id",
                         copyable_code(payment.order_id.as_deref().unwrap_or("-")),
                     ),
-                    ("expires_at", payment.expires_at.clone()),
+                    ("expires_at", format_vietnam_time(&payment.expires_at)),
                 ],
             );
             ctx.bot

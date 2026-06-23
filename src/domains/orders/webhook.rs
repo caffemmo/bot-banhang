@@ -23,6 +23,7 @@ use crate::domains::products::repo;
 use crate::domains::wallet::repo as wallet_repo;
 
 use crate::core::responses::MessageResponse;
+use crate::core::time::format_vietnam_datetime;
 use crate::domains::orders::api::{is_order_expired, parse_paid_at};
 use crate::domains::orders::fulfillment::{PaymentSource, fulfill_paid_order};
 
@@ -648,10 +649,7 @@ async fn handle_topup_webhook(
                 "balance",
                 crate::bot::plugins::cmd_wallet::format_vnd(balance_after),
             ),
-            (
-                "completed_at",
-                completed_at.format("%H:%M:%S %d/%m/%Y UTC").to_string(),
-            ),
+            ("completed_at", format_vietnam_datetime(completed_at)),
         ],
     );
     let keyboard = InlineKeyboardMarkup::new(vec![vec![

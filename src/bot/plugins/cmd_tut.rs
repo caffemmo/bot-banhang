@@ -15,6 +15,7 @@ use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::plugins::cmd_wallet::format_vnd;
 use crate::bot::{BotDialogue, State};
+use crate::core::time::format_vietnam_time;
 use crate::domains::users::repo as users_repo;
 use crate::domains::wallet::repo as wallet_repo;
 
@@ -542,7 +543,7 @@ async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
             tut.view_count,
             tut.is_active,
             tut.created_by,
-            tut.created_at
+            format_vietnam_time(&tut.created_at)
         ));
     }
 
@@ -600,17 +601,18 @@ async fn handle_tutvipadd_command(ctx: &AppContext, chat_id: ChatId, text: &str)
         .unwrap_or_else(|| vip_days(ctx));
 
     let expires_at = grant_vip_days(&ctx.pool, target_user_id, days).await?;
+    let expires_at_text = format_vietnam_time(&expires_at);
     ctx.bot
         .send_message(
             chat_id,
-            format!("✅ Đã cấp VIP TUT cho user {target_user_id}\nHạn đến: {expires_at}"),
+            format!("✅ Đã cấp VIP TUT cho user {target_user_id}\nHạn đến: {expires_at_text}"),
         )
         .await?;
     let _ = ctx
         .bot
         .send_message(
             ChatId(target_user_id),
-            format!("👑 Bạn đã được cấp VIP TUT.\nHạn đến: {expires_at}"),
+            format!("👑 Bạn đã được cấp VIP TUT.\nHạn đến: {expires_at_text}"),
         )
         .await;
     Ok(())
@@ -625,7 +627,10 @@ async fn send_vip_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
 
     let mut lines = vec!["👑 VIP TUT CÒN HẠN".to_string(), String::new()];
     for (user_id, expires_at) in rows {
-        lines.push(format!("• {user_id} - hết hạn {expires_at}"));
+        lines.push(format!(
+            "• {user_id} - hết hạn {}",
+            format_vietnam_time(&expires_at)
+        ));
     }
     ctx.bot.send_message(chat_id, lines.join("\n")).await?;
     Ok(())
@@ -899,12 +904,13 @@ async fn buy_vip_and_show_tut(
     }
 
     let expires_at = extend_vip_with_wallet(ctx, user_id, price, vip_days(ctx)).await?;
+    let expires_at_text = format_vietnam_time(&expires_at.0);
     ctx.bot
         .send_message(
             chat_id,
             format!(
                 "✅ Mua VIP TUT thành công\n\n👑 Hạn VIP đến: {}\n💳 Số dư còn lại: {}",
-                expires_at.0,
+                expires_at_text,
                 format_vnd(expires_at.1),
             ),
         )
@@ -922,15 +928,19 @@ async fn send_my_vip(ctx: &AppContext, chat_id: ChatId, user_id: i64) -> Result<
         return Ok(());
     }
     if let Some(expires_at) = vip_expires_at(&ctx.pool, user_id).await? {
+        let expires_at_text = format_vietnam_time(&expires_at);
         if vip_is_active(&ctx.pool, user_id).await? {
             ctx.bot
-                .send_message(chat_id, format!("👑 VIP TUT của bạn còn hạn đến:\n{expires_at}"))
+                .send_message(
+                    chat_id,
+                    format!("👑 VIP TUT của bạn còn hạn đến:\n{expires_at_text}"),
+                )
                 .await?;
         } else {
             ctx.bot
                 .send_message(
                     chat_id,
-                    format!("⏳ VIP TUT của bạn đã hết hạn:\n{expires_at}"),
+                    format!("⏳ VIP TUT của bạn đã hết hạn:\n{expires_at_text}"),
                 )
                 .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
                     "🔁 Gia hạn VIP 30 ngày",

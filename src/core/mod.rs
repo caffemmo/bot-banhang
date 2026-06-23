@@ -5,3 +5,4 @@ pub mod pages;
 pub mod pagination;
 pub mod qr;
 pub mod responses;
+pub mod time;

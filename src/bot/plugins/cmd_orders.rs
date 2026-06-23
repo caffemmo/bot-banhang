@@ -1,4 +1,3 @@
-use chrono::{DateTime, FixedOffset};
 use std::sync::Arc;
 use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters};
 use teloxide::requests::Requester;
@@ -9,6 +8,7 @@ use crate::app::AppContext;
 use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
+use crate::core::time::format_optional_vietnam_time;
 use crate::domains::orders::admin_notify::{admin_refund_confirm_keyboard, order_user_display};
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::refund::refund_paid_order_to_wallet;
@@ -307,20 +307,6 @@ async fn handle_admin_refund_callback(
     Ok(())
 }
 
-fn format_paid_at_display(raw: Option<&str>) -> String {
-    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
-        return "-".to_string();
-    };
-    let vn_offset = FixedOffset::east_opt(7 * 3600).expect("valid Vietnam UTC offset");
-    DateTime::parse_from_rfc3339(raw)
-        .map(|dt| {
-            dt.with_timezone(&vn_offset)
-                .format("%H:%M:%S %d/%m/%Y")
-                .to_string()
-        })
-        .unwrap_or_else(|_| raw.to_string())
-}
-
 fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProduct) -> String {
     let mut lines = vec![
         i18n::t(ctx, lang, "order_detail_title", "🧾 CHI TIẾT ĐƠN HÀNG"),
@@ -390,7 +376,7 @@ fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProdu
             lang,
             "order_detail_paid_at_label",
             "Thời gian thanh toán",
-            format_paid_at_display(order.order.paid_at.as_deref()),
+            format_optional_vietnam_time(order.order.paid_at.as_deref()),
         ),
     ]);
     if let Some(tx_id) = order
@@ -898,7 +884,7 @@ mod tests {
         assert!(text.contains("120.000đ"));
         assert!(text.contains("paid"));
         assert!(text.contains("DHPAID1234"));
-        assert!(text.contains("17:02:00 24/05/2026"));
+        assert!(text.contains("24/05/2026 17:02:00"));
         assert!(!text.contains("2026-05-24T10:02:00Z"));
         assert!(text.contains("TX123"));
         assert!(text.contains("license-key-1"));

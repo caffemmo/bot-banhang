@@ -18,6 +18,7 @@ use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
 use crate::core::qr::vietqr_link;
+use crate::core::time::format_vietnam_time;
 use crate::domains::crypto_pay::bep20 as bep20_pay;
 use crate::domains::crypto_pay::binance as binance_pay;
 use crate::domains::crypto_pay::binance_worker;
@@ -125,11 +126,7 @@ pub(crate) async fn show_topup_history(
                 "expired" => i18n::t(ctx, lang, "wallet_status_expired", "Cancelled"),
                 _ => i18n::t(ctx, lang, "wallet_status_pending", "Pending"),
             };
-            let date_str = if req.created_at.len() >= 16 {
-                &req.created_at[..16]
-            } else {
-                &req.created_at
-            };
+            let date_str = format_vietnam_time(&req.created_at);
             text.push_str(&format!(
                 "{} <code>{}</code> — <b>{}</b> — {} (<i>{}</i>)\n",
                 status_icon,
@@ -933,7 +930,7 @@ async fn send_usdt_topup_instructions(
             ("amount_vnd", format_vnd(payment.amount_vnd)),
             ("amount_usdt", copyable_code(&amount)),
             ("address", copyable_code(address)),
-            ("expires_at", payment.expires_at.clone()),
+            ("expires_at", format_vietnam_time(&payment.expires_at)),
         ],
     );
     ctx.bot
@@ -1021,7 +1018,7 @@ async fn send_binance_topup_instructions(
             ("pay_id", copyable_code(&pay_id)),
             ("receiver_name", html_escape(&receiver_name)),
             ("memo", copyable_code(&payment.memo)),
-            ("expires_at", payment.expires_at.clone()),
+            ("expires_at", format_vietnam_time(&payment.expires_at)),
         ],
     );
     ctx.bot

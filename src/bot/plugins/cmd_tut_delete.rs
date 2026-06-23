@@ -12,6 +12,7 @@ use teloxide::types::{
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::BotDialogue;
+use crate::core::time::format_vietnam_time;
 
 pub struct TutDeleteCommandPlugin;
 
@@ -157,7 +158,7 @@ async fn send_tut_list_with_delete(ctx: &AppContext, chat_id: ChatId) -> Result<
             tut.view_count,
             tut.is_active,
             tut.created_by,
-            tut.created_at
+            format_vietnam_time(&tut.created_at)
         ));
     }
 
