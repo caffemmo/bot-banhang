@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use rand::{Rng, distributions::Alphanumeric};
+use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use teloxide::payloads::{
@@ -970,7 +971,39 @@ async fn run_uptick(
         .send()
         .await?
         .error_for_status()?;
-    parse_sse_response(response, service).await.map(ViametaDelivery::Text)
+    parse_uptick_response(response, service).await.map(ViametaDelivery::Text)
+}
+
+async fn parse_uptick_response(response: reqwest::Response, service: ViametaService) -> Result<String> {
+    let is_sse = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+        .unwrap_or(false);
+    if is_sse {
+        return parse_sse_response(response, service).await;
+    }
+
+    let text = response.text().await?;
+    parse_uptick_text_response(&text, service)
+}
+
+fn parse_uptick_text_response(text: &str, service: ViametaService) -> Result<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("Dịch vụ trả về phản hồi trống"));
+    }
+
+    if trimmed.lines().any(|line| line.trim_start().starts_with("data:")) {
+        return parse_sse_text_response(trimmed, service);
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return parse_json_uptick_response(&value, service);
+    }
+
+    Ok(format!("✅ {} thành công\n\n{}", service.label(), trimmed))
 }
 
 async fn parse_sse_response(response: reqwest::Response, service: ViametaService) -> Result<String> {
@@ -987,40 +1020,147 @@ async fn parse_sse_response(response: reqwest::Response, service: ViametaService
                 continue;
             }
             let raw = line.trim_start_matches("data:").trim();
-            let event: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
-            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
-            let message = event
-                .get("payload")
-                .and_then(|payload| payload.get("message").or_else(|| payload.get("msg")))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            if event_type == "log" && !message.is_empty() {
-                last_logs.push(message);
-                if last_logs.len() > 5 {
-                    last_logs.remove(0);
-                }
-            } else if event_type == "done" {
-                let final_message = if message.is_empty() {
-                    "HOÀN TẤT XÁC MINH".to_string()
-                } else {
-                    message
-                };
-                return Ok(format!("✅ {} thành công\n\n{}", service.label(), final_message));
-            } else if event_type == "error" {
-                let final_message = if message.is_empty() {
-                    "Dịch vụ trả lỗi không rõ nội dung".to_string()
-                } else {
-                    message
-                };
-                return Err(anyhow!(final_message));
+            if raw.is_empty() || raw == "[DONE]" {
+                continue;
             }
+            let event: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
+            if let Some(result) = parse_json_event_result(&event, service, &mut last_logs)? {
+                return Ok(result);
+            }
+        }
+    }
+    if !buffer.trim().is_empty() {
+        return parse_uptick_text_response(&buffer, service);
+    }
+    Err(anyhow!(
+        "Dịch vụ kết thúc nhưng chưa có kết quả. Log cuối: {}",
+        last_logs.join(" | ")
+    ))
+}
+
+fn parse_sse_text_response(text: &str, service: ViametaService) -> Result<String> {
+    let mut last_logs = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with("data:") {
+            continue;
+        }
+        let raw = line.trim_start_matches("data:").trim();
+        if raw.is_empty() || raw == "[DONE]" {
+            continue;
+        }
+        let event: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
+        if let Some(result) = parse_json_event_result(&event, service, &mut last_logs)? {
+            return Ok(result);
         }
     }
     Err(anyhow!(
         "Dịch vụ kết thúc nhưng chưa có kết quả. Log cuối: {}",
         last_logs.join(" | ")
     ))
+}
+
+fn parse_json_uptick_response(value: &Value, service: ViametaService) -> Result<String> {
+    let success = value
+        .get("success")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            value.get("ok").and_then(Value::as_bool)
+        })
+        .or_else(|| {
+            value
+                .get("status")
+                .and_then(Value::as_str)
+                .map(|status| {
+                    matches!(
+                        status.to_ascii_lowercase().as_str(),
+                        "success" | "done" | "ok" | "completed"
+                    )
+                })
+        });
+    if success == Some(false) || json_has_error_status(value) || value.get("error").is_some() {
+        return Err(anyhow!(api_error_message(value)));
+    }
+
+    let message = json_message(value).unwrap_or_else(|| "HOÀN TẤT XÁC MINH".to_string());
+    Ok(format!("✅ {} thành công\n\n{}", service.label(), message))
+}
+
+fn parse_json_event_result(
+    event: &Value,
+    service: ViametaService,
+    last_logs: &mut Vec<String>,
+) -> Result<Option<String>> {
+    let event_type = event
+        .get("type")
+        .or_else(|| event.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let message = event_message(event).unwrap_or_default();
+    if event_type == "log" && !message.is_empty() {
+        last_logs.push(message);
+        if last_logs.len() > 5 {
+            last_logs.remove(0);
+        }
+        return Ok(None);
+    }
+    if event_type == "done" {
+        let final_message = if message.is_empty() {
+            "HOÀN TẤT XÁC MINH".to_string()
+        } else {
+            message
+        };
+        return Ok(Some(format!("✅ {} thành công\n\n{}", service.label(), final_message)));
+    }
+    if event_type == "error" {
+        let final_message = if message.is_empty() {
+            "Dịch vụ trả lỗi không rõ nội dung".to_string()
+        } else {
+            message
+        };
+        return Err(anyhow!(final_message));
+    }
+    Ok(None)
+}
+
+fn json_has_error_status(value: &Value) -> bool {
+    value
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|status| {
+            matches!(
+                status.to_ascii_lowercase().as_str(),
+                "error" | "failed" | "fail" | "false"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn json_message(value: &Value) -> Option<String> {
+    value
+        .get("message")
+        .or_else(|| value.get("msg"))
+        .or_else(|| value.get("result"))
+        .or_else(|| value.get("response"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("data").and_then(Value::as_str))
+        .or_else(|| {
+            value
+                .get("data")
+                .and_then(|data| data.get("message").or_else(|| data.get("msg")))
+                .and_then(Value::as_str)
+        })
+        .map(ToString::to_string)
+}
+
+fn event_message(event: &Value) -> Option<String> {
+    event
+        .get("payload")
+        .and_then(|payload| payload.get("message").or_else(|| payload.get("msg")))
+        .and_then(Value::as_str)
+        .or_else(|| event.get("message").and_then(Value::as_str))
+        .or_else(|| event.get("msg").and_then(Value::as_str))
+        .map(ToString::to_string)
 }
 
 async fn send_getlink_delivery(
@@ -1224,5 +1364,30 @@ mod tests {
     fn non_getlink_services_do_not_show_free_retry_notice() {
         assert!(getlink_free_retry_notice(ViametaService::UptickFb).is_none());
         assert!(getlink_free_retry_notice(ViametaService::UptickIg).is_none());
+    }
+
+    #[test]
+    fn uptick_parser_accepts_json_success() {
+        let text = r#"{"success":true,"message":"queued"}"#;
+        let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
+
+        assert!(parsed.contains("queued"));
+    }
+
+    #[test]
+    fn uptick_parser_accepts_sse_text() {
+        let text = r#"data: {"type":"log","payload":{"message":"uploading"}}
+data: {"type":"done","payload":{"message":"done"}}"#;
+        let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
+
+        assert!(parsed.contains("done"));
+    }
+
+    #[test]
+    fn uptick_parser_rejects_json_error() {
+        let text = r#"{"success":false,"message":"bad cookie"}"#;
+        let parsed = parse_uptick_text_response(text, ViametaService::UptickFb);
+
+        assert!(parsed.is_err());
     }
 }
