@@ -61,7 +61,7 @@ fn topup_amount_prompt(ctx: &AppContext, lang: &str) -> String {
     i18n::t(
         ctx,
         lang,
-        "topup_amount_prompt",
+        "topup_amount_prompt_10k",
         "💰 Enter the amount to top up (example: 100000 = 100,000 VND):\n\nMinimum 10,000 VND, maximum 100,000,000 VND.",
     )
 }
@@ -729,7 +729,7 @@ async fn process_topup_amount(
                 i18n::t(
                     ctx,
                     &lang,
-                    "topup_amount_min",
+                    "topup_amount_min_10k",
                     "⚠️ Minimum top-up amount is 10,000 VND. Please enter again.",
                 ),
             )
@@ -830,7 +830,7 @@ async fn process_usdt_topup_amount(
                 i18n::t(
                     ctx,
                     &lang,
-                    "topup_amount_invalid",
+                    "topup_amount_invalid_10k",
                     "⚠️ Amount must be from 10,000 to 100,000,000 VND.",
                 ),
             )
@@ -880,7 +880,7 @@ async fn process_binance_topup_amount(
                 i18n::t(
                     ctx,
                     &lang,
-                    "topup_amount_invalid",
+                    "topup_amount_invalid_10k",
                     "⚠️ Amount must be from 10,000 to 100,000,000 VND.",
                 ),
             )
