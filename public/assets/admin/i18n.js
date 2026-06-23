@@ -146,9 +146,10 @@
     function renderKeyboardButtonEmojiFields(detail, key, value, fallbackValue) {
       if (!isKeyboardButtonI18nKey(key)) return '';
       const config = emojiConfigForKey(detail, key);
+      const suggestedFallback = leadingEmojiToken(value) || leadingEmojiToken(fallbackValue) || '';
       const fallbackPlaceholder = leadingEmojiToken(value) || leadingEmojiToken(fallbackValue) || 'VD: 🛒';
       return `
-        <div class="row g-2 mt-2 bot-i18n-emoji-row" data-key="${escapeAttr(key)}">
+        <div class="row g-2 mt-2 bot-i18n-emoji-row" data-key="${escapeAttr(key)}" data-suggested-fallback="${escapeAttr(suggestedFallback)}">
           <div class="col-12 col-md-4">
             <label class="form-label small mb-1">Emoji thường</label>
             <input class="form-control form-control-sm bot-i18n-emoji-fallback" data-key="${escapeAttr(key)}"
@@ -173,7 +174,10 @@
 
       $('.bot-i18n-emoji-row').each(function () {
         const key = String($(this).data('key') || '');
-        const fallback = String($(this).find('.bot-i18n-emoji-fallback').val() || '').trim();
+        const explicitFallback = String($(this).find('.bot-i18n-emoji-fallback').val() || '').trim();
+        const textFallback = leadingEmojiToken($(this).closest('.bot-i18n-field').find('.bot-i18n-input').val());
+        const suggestedFallback = String($(this).data('suggested-fallback') || '').trim();
+        const fallback = explicitFallback || textFallback || suggestedFallback;
         const customId = String($(this).find('.bot-i18n-emoji-custom-id').val() || '').trim();
         if (!key) return;
         if (!fallback && !customId) {
