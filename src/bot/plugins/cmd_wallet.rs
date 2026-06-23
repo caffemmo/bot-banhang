@@ -31,6 +31,8 @@ use crate::domains::wallet::repo as wallet_repo;
 use tracing::warn;
 
 const COUNTDOWN_TICK_SECONDS: u64 = 2;
+const MIN_TOPUP_AMOUNT_VND: i64 = 10_000;
+const MAX_TOPUP_AMOUNT_VND: i64 = 100_000_000;
 const QUICK_TOPUP_AMOUNTS: [i64; 3] = [10_000, 30_000, 50_000];
 
 fn topup_expires_at(created_at: &str) -> DateTime<Utc> {
@@ -60,7 +62,7 @@ fn topup_amount_prompt(ctx: &AppContext, lang: &str) -> String {
         ctx,
         lang,
         "topup_amount_prompt",
-        "💰 Enter the amount to top up (example: 100000 = 100,000 VND):\n\nMinimum 1,000 VND, maximum 100,000,000 VND.",
+        "💰 Enter the amount to top up (example: 100000 = 100,000 VND):\n\nMinimum 10,000 VND, maximum 100,000,000 VND.",
     )
 }
 
@@ -479,7 +481,7 @@ async fn handle_wallet_callback(
                     ctx,
                     &lang,
                     "topup_usdt_amount_prompt",
-                    "🟢 Enter the VND amount you want to top up by USDT BEP20.",
+                    "🟢 Enter the VND amount you want to top up by USDT BEP20.\n\nMinimum 10,000 VND, maximum 100,000,000 VND.",
                 ),
             )
             .reply_markup(usdt_topup_amount_keyboard(ctx, &lang))
@@ -493,7 +495,7 @@ async fn handle_wallet_callback(
                     ctx,
                     &lang,
                     "topup_binance_amount_prompt",
-                    "🟡 Enter the VND amount you want to top up by Binance Pay.",
+                    "🟡 Enter the VND amount you want to top up by Binance Pay.\n\nMinimum 10,000 VND, maximum 100,000,000 VND.",
                 ),
             )
             .reply_markup(binance_topup_amount_keyboard(ctx, &lang))
@@ -526,7 +528,7 @@ async fn handle_wallet_callback(
                         ctx,
                         &lang,
                         "topup_usdt_amount_prompt",
-                        "🟢 Enter the VND amount you want to top up by USDT BEP20.",
+                        "🟢 Enter the VND amount you want to top up by USDT BEP20.\n\nMinimum 10,000 VND, maximum 100,000,000 VND.",
                     ),
                 )
                 .reply_markup(custom_topup_amount_reply_markup(ctx, &lang))
@@ -545,7 +547,7 @@ async fn handle_wallet_callback(
                         ctx,
                         &lang,
                         "topup_binance_amount_prompt",
-                        "🟡 Enter the VND amount you want to top up by Binance Pay.",
+                        "🟡 Enter the VND amount you want to top up by Binance Pay.\n\nMinimum 10,000 VND, maximum 100,000,000 VND.",
                     ),
                 )
                 .reply_markup(custom_topup_amount_reply_markup(ctx, &lang))
@@ -720,7 +722,7 @@ async fn process_topup_amount(
     dialogue: BotDialogue,
 ) -> Result<()> {
     let lang = i18n::user_lang_by_id(ctx, user_id).await;
-    if amount < 1_000 {
+    if amount < MIN_TOPUP_AMOUNT_VND {
         ctx.bot
             .send_message(
                 chat_id,
@@ -728,14 +730,14 @@ async fn process_topup_amount(
                     ctx,
                     &lang,
                     "topup_amount_min",
-                    "⚠️ Minimum top-up amount is 1,000 VND. Please enter again.",
+                    "⚠️ Minimum top-up amount is 10,000 VND. Please enter again.",
                 ),
             )
             .reply_markup(topup_amount_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     }
-    if amount > 100_000_000 {
+    if amount > MAX_TOPUP_AMOUNT_VND {
         ctx.bot
             .send_message(
                 chat_id,
@@ -821,7 +823,7 @@ async fn process_usdt_topup_amount(
     dialogue: BotDialogue,
 ) -> Result<()> {
     let lang = i18n::user_lang_by_id(ctx, user_id).await;
-    if amount < 1_000 || amount > 100_000_000 {
+    if !(MIN_TOPUP_AMOUNT_VND..=MAX_TOPUP_AMOUNT_VND).contains(&amount) {
         ctx.bot
             .send_message(
                 chat_id,
@@ -829,7 +831,7 @@ async fn process_usdt_topup_amount(
                     ctx,
                     &lang,
                     "topup_amount_invalid",
-                    "⚠️ Amount must be from 1,000 to 100,000,000 VND.",
+                    "⚠️ Amount must be from 10,000 to 100,000,000 VND.",
                 ),
             )
             .reply_markup(usdt_topup_amount_keyboard(ctx, &lang))
@@ -871,7 +873,7 @@ async fn process_binance_topup_amount(
     dialogue: BotDialogue,
 ) -> Result<()> {
     let lang = i18n::user_lang_by_id(ctx, user_id).await;
-    if amount < 1_000 || amount > 100_000_000 {
+    if !(MIN_TOPUP_AMOUNT_VND..=MAX_TOPUP_AMOUNT_VND).contains(&amount) {
         ctx.bot
             .send_message(
                 chat_id,
@@ -879,7 +881,7 @@ async fn process_binance_topup_amount(
                     ctx,
                     &lang,
                     "topup_amount_invalid",
-                    "⚠️ Amount must be from 1,000 to 100,000,000 VND.",
+                    "⚠️ Amount must be from 10,000 to 100,000,000 VND.",
                 ),
             )
             .reply_markup(binance_topup_amount_keyboard(ctx, &lang))

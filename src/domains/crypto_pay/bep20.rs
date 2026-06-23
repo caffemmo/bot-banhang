@@ -103,7 +103,7 @@ pub async fn create_or_reuse_bep20_wallet_topup(
     if !ctx.bep20_enabled() {
         return Err(anyhow!("BEP20 USDT payment is disabled"));
     }
-    if !(1_000..=100_000_000).contains(&amount_vnd) {
+    if !(10_000..=100_000_000).contains(&amount_vnd) {
         return Err(anyhow!("invalid top-up amount"));
     }
 

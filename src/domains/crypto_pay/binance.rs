@@ -289,7 +289,7 @@ pub async fn create_or_reuse_binance_wallet_topup(
     if !ctx.binance_pay_enabled() {
         return Err(anyhow!("Binance Pay is disabled"));
     }
-    if !(1_000..=100_000_000).contains(&amount_vnd) {
+    if !(10_000..=100_000_000).contains(&amount_vnd) {
         return Err(anyhow!("invalid top-up amount"));
     }
 
