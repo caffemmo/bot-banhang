@@ -314,12 +314,7 @@ impl AppPlugin for ViametaCommandPlugin {
                 send_viameta_message_without_preview(
                     &ctx,
                     msg.chat().id,
-                    format!(
-                        "{}\n\nGiá: {}\n{}\n\nVui lòng gửi cookie để tạo đơn.",
-                        service.label(),
-                        format_vnd(price),
-                        service_description(&ctx, service)
-                    ),
+                    service_cookie_prompt_text(&ctx, service, price),
                 )
                 .await?;
                 dialogue
@@ -552,13 +547,42 @@ fn viameta_back_keyboard() -> InlineKeyboardMarkup {
 }
 
 async fn prompt_cookie(ctx: &AppContext, chat_id: ChatId, service: ViametaService) -> Result<()> {
+    let mut lines = Vec::new();
+    if let Some(notice) = getlink_free_retry_notice(service) {
+        lines.push(notice.to_string());
+    }
+    lines.push(format!(
+        "Vui lòng gửi cookie.\n{}",
+        service_description(ctx, service)
+    ));
     send_viameta_message_without_preview(
         ctx,
         chat_id,
-        format!("Vui lòng gửi cookie.\n{}", service_description(ctx, service)),
+        lines.join("\n\n"),
     )
     .await?;
     Ok(())
+}
+
+fn service_cookie_prompt_text(ctx: &AppContext, service: ViametaService, price: i64) -> String {
+    let mut lines = vec![
+        service.label().to_string(),
+        String::new(),
+        format!("Giá: {}", format_vnd(price)),
+        service_description(ctx, service),
+    ];
+    if let Some(notice) = getlink_free_retry_notice(service) {
+        lines.push(String::new());
+        lines.push(notice.to_string());
+    }
+    lines.push(String::new());
+    lines.push("Vui lòng gửi cookie để tạo đơn.".to_string());
+    lines.join("\n")
+}
+
+fn getlink_free_retry_notice(service: ViametaService) -> Option<&'static str> {
+    matches!(service, ViametaService::GetlinkFb)
+        .then_some("UID đã từng get link trên Bot sẽ không tính phí khi get lại.")
 }
 
 async fn send_viameta_message_without_preview(
