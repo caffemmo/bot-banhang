@@ -14,6 +14,41 @@ use crate::core::responses::{ApiError, ApiResult, ok};
 use crate::domains::configs::repo as configs_repo;
 use crate::domains::i18n::repo;
 
+const REQUIRED_START_BUTTON_KEYS: &[&str] = &[
+    "start_btn_api_integration",
+    "start_btn_affiliate_register",
+    "start_btn_child_bot",
+    "start_btn_help",
+    "start_btn_language",
+    "start_btn_orders",
+    "start_btn_purchased",
+    "start_btn_shop",
+    "start_btn_topup",
+    "start_btn_topup_history",
+    "start_btn_tut",
+    "start_btn_viameta",
+    "start_btn_wallet",
+];
+
+fn required_start_button_default(key: &str) -> Option<&'static str> {
+    match key {
+        "start_btn_api_integration" => Some("🔌 API integration"),
+        "start_btn_affiliate_register" => Some("🤝 Register affiliate"),
+        "start_btn_child_bot" => Some("🤖 Create child bot"),
+        "start_btn_help" => Some("Help"),
+        "start_btn_language" => Some("🌐 Language"),
+        "start_btn_orders" => Some("📋 Recent orders"),
+        "start_btn_purchased" => Some("📦 Purchased"),
+        "start_btn_shop" => Some("🛒 Shop"),
+        "start_btn_topup" => Some("💰 Top up"),
+        "start_btn_topup_history" => Some("📜 Top-up history"),
+        "start_btn_tut" => Some("📚 TUT"),
+        "start_btn_viameta" => Some("✅ Verification service"),
+        "start_btn_wallet" => Some("💳 Wallet"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ImportLanguagePayload {
     pub format: String,
@@ -124,11 +159,16 @@ pub async fn language_detail(
     let mut keys = BTreeSet::new();
     keys.extend(texts.translation_base_keys());
     keys.extend(bot.keys().cloned());
+    keys.extend(REQUIRED_START_BUTTON_KEYS.iter().map(|key| (*key).to_string()));
     let keys: Vec<String> = keys.into_iter().collect();
     let fallback_bot = keys
         .iter()
         .filter_map(|key| {
-            let value = texts.get_lang(key, &language.fallback, "");
+            let value = texts.get_lang(
+                key,
+                &language.fallback,
+                required_start_button_default(key).unwrap_or(""),
+            );
             if value.is_empty() {
                 None
             } else {
