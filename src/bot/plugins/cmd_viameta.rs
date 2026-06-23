@@ -569,12 +569,11 @@ fn service_cookie_prompt_text(ctx: &AppContext, service: ViametaService, price: 
         service.label().to_string(),
         String::new(),
         format!("Giá: {}", format_vnd(price)),
-        service_description(ctx, service),
     ];
     if let Some(notice) = getlink_free_retry_notice(service) {
-        lines.push(String::new());
         lines.push(notice.to_string());
     }
+    lines.push(service_description(ctx, service));
     lines.push(String::new());
     lines.push("Vui lòng gửi cookie để tạo đơn.".to_string());
     lines.join("\n")
@@ -582,7 +581,7 @@ fn service_cookie_prompt_text(ctx: &AppContext, service: ViametaService, price: 
 
 fn getlink_free_retry_notice(service: ViametaService) -> Option<&'static str> {
     matches!(service, ViametaService::GetlinkFb)
-        .then_some("UID đã từng get link trên Bot sẽ không tính phí khi get lại.")
+        .then_some("Lưu ý: UID đã từng get link trên Bot sẽ không tính phí khi get lại.")
 }
 
 async fn send_viameta_message_without_preview(
@@ -1207,4 +1206,23 @@ fn html_escape(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn getlink_notice_mentions_free_retry() {
+        let notice = getlink_free_retry_notice(ViametaService::GetlinkFb).unwrap();
+
+        assert!(notice.contains("UID đã từng get link trên Bot"));
+        assert!(notice.contains("không tính phí khi get lại"));
+    }
+
+    #[test]
+    fn non_getlink_services_do_not_show_free_retry_notice() {
+        assert!(getlink_free_retry_notice(ViametaService::UptickFb).is_none());
+        assert!(getlink_free_retry_notice(ViametaService::UptickIg).is_none());
+    }
 }
