@@ -177,10 +177,45 @@ fn localized_commands_for_lang(
             let key = format!("cmd_{}", command.command.replace('-', "_"));
             BotCommand {
                 command: command.command.clone(),
-                description: texts.get_lang(&key, lang, &command.description),
+                description: sanitize_bot_command_description(
+                    &texts.get_lang(&key, lang, &command.description),
+                ),
             }
         })
         .collect()
+}
+
+fn sanitize_bot_command_description(description: &str) -> String {
+    let mut rendered = String::with_capacity(description.len());
+    let mut byte_index = 0usize;
+
+    while byte_index < description.len() {
+        let remaining = &description[byte_index..];
+        if let Some(placeholder_len) = custom_emoji_placeholder_len(remaining) {
+            rendered.push('✨');
+            byte_index += placeholder_len;
+        } else if let Some(ch) = remaining.chars().next() {
+            rendered.push(ch);
+            byte_index += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    rendered.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn custom_emoji_placeholder_len(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix('{')?;
+    let digits_len = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if digits_len == 0 || !rest[digits_len..].starts_with('}') {
+        return None;
+    }
+    Some(1 + digits_len + 1)
 }
 
 async fn register_bot_commands(
@@ -619,5 +654,32 @@ mod tests {
 
         assert_eq!(commands[0].description, "Bắt đầu");
         assert_eq!(commands[1].description, "Xem sản phẩm");
+    }
+
+    #[test]
+    fn localized_commands_render_custom_emoji_placeholders_as_fallback() {
+        let texts = BotTexts::from_language_maps(
+            vec![LanguageInfo {
+                code: "vi".to_string(),
+                label: "Tiếng Việt".to_string(),
+                fallback: "en".to_string(),
+                enabled: true,
+            }],
+            HashMap::from([(
+                "vi".to_string(),
+                HashMap::from([(
+                    "cmd_help".to_string(),
+                    "{5253742260054409879} Hỗ trợ".to_string(),
+                )]),
+            )]),
+        );
+        let base = vec![BotCommand {
+            command: "help".to_string(),
+            description: "Help".to_string(),
+        }];
+
+        let commands = localized_commands_for_lang(&base, &texts, "vi");
+
+        assert_eq!(commands[0].description, "✨ Hỗ trợ");
     }
 }
