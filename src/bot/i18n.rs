@@ -85,12 +85,12 @@ pub fn button_parts_for_key(ctx: &AppContext, key: &str, text: impl Into<String>
     };
     let trimmed = text.trim_start();
     if let Some(custom_id) = prefix.custom_emoji_id {
+        let label = trimmed
+            .strip_prefix(&prefix.fallback)
+            .map(str::trim_start)
+            .unwrap_or_else(|| strip_leading_button_symbols(trimmed));
         ButtonText {
-            text: trimmed
-                .strip_prefix(&prefix.fallback)
-                .map(str::trim_start)
-                .unwrap_or(trimmed)
-                .to_string(),
+            text: label.to_string(),
             icon_custom_emoji_id: Some(custom_id),
         }
     } else if trimmed.starts_with(&prefix.fallback) {
@@ -197,6 +197,8 @@ fn fallback_button_text_for_key(ctx: &AppContext, key: &str, text: impl Into<Str
     };
     if text.trim_start().starts_with(&prefix.fallback) {
         text
+    } else if prefix.custom_emoji_id.is_some() {
+        format!("{} {}", prefix.fallback, strip_leading_button_symbols(&text))
     } else {
         format!("{} {}", prefix.fallback, text)
     }
@@ -910,6 +912,10 @@ mod tests {
         assert_eq!(
             button_text_for_key(&ctx, "start_btn_language", "🌐 Language"),
             "Language"
+        );
+        assert_eq!(
+            button_text_for_key(&ctx, "start_btn_language", "* API integration"),
+            "API integration"
         );
         assert_eq!(
             button_text_for_key(&ctx, "start_btn_help", "Help"),

@@ -187,6 +187,10 @@
         if (customId && !/^\d{8,64}$/.test(customId)) {
           throw new Error(`Custom emoji ID nút ${key} phải là số, dài 8-64 ký tự.`);
         }
+        if (!fallback && customId) {
+          emojis[key] = { fallback: '✨', custom_emoji_id: customId };
+          return;
+        }
         if (!fallback) {
           throw new Error(`Nhập Emoji thường cho ${key} để làm fallback khi Telegram không hiện emoji động.`);
         }
