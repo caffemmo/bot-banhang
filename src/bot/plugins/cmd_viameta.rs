@@ -353,7 +353,19 @@ impl AppPlugin for ViametaCommandPlugin {
         let (status, response, error, delivered) = match result {
             Ok(ViametaDelivery::Text(text)) => ("done", Some(text.clone()), None, text),
             Ok(ViametaDelivery::GetlinkFb { uid, link, deducted }) => {
-                let delivered = send_getlink_delivery(&ctx, order, &uid, &link, deducted).await?;
+                let free_retry_refund = if deducted == Some(0) {
+                    refund_viameta_order(
+                        &ctx,
+                        order,
+                        "UID này đã từng get link nên Viameta không trừ phí",
+                    )
+                    .await?
+                } else {
+                    None
+                };
+                let delivered =
+                    send_getlink_delivery(&ctx, order, &uid, &link, deducted, free_retry_refund)
+                        .await?;
                 ("done", Some(link), None, delivered)
             }
             Err(err) => {
@@ -970,14 +982,18 @@ async fn send_getlink_delivery(
     uid: &str,
     link: &str,
     deducted: Option<i64>,
+    free_retry_refund: Option<i64>,
 ) -> Result<String> {
     let chat_id = ChatId(order.chat_id);
-    let text = "✅ Get link Facebook thành công\n\nKết quả đã được gửi trong file đính kèm.";
+    let fee_note = getlink_fee_note(deducted, free_retry_refund, order.amount);
+    let text = format!(
+        "✅ Get link Facebook thành công\n\n{fee_note}\n\nKết quả đã được gửi trong file đính kèm."
+    );
     let mut sent = false;
     if let Ok(url) = Url::parse(link) {
         if ctx
             .bot
-            .send_message(chat_id, text)
+            .send_message(chat_id, text.clone())
             .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
                 "🔗 Mở link Facebook",
                 url,
@@ -992,12 +1008,9 @@ async fn send_getlink_delivery(
         ctx.bot.send_message(chat_id, text).await?;
     }
 
-    let deducted_line = deducted
-        .map(|amount| format!("Phí xử lý: {}\n", format_vnd(amount)))
-        .unwrap_or_default();
     let file_content = format!(
-        "GET LINK FACEBOOK THÀNH CÔNG\n\nMã đơn: {}\nUID: {}\n{}\nLink:\n{}\n",
-        order.bank_memo, uid, deducted_line, link
+        "GET LINK FACEBOOK THÀNH CÔNG\n\nMã đơn: {}\nUID: {}\n{}\n\nLink:\n{}\n",
+        order.bank_memo, uid, fee_note, link
     );
     ctx.bot
         .send_document(
@@ -1009,9 +1022,24 @@ async fn send_getlink_delivery(
         .await?;
 
     Ok(format!(
-        "✅ Get link Facebook thành công\n\nUID: {}\nKết quả đã gửi bằng file getlink_{}.txt",
-        uid, order.bank_memo
+        "✅ Get link Facebook thành công\n\nUID: {}\n{}\n\nKết quả đã gửi bằng file getlink_{}.txt",
+        uid, fee_note, order.bank_memo
     ))
+}
+
+fn getlink_fee_note(deducted: Option<i64>, free_retry_refund: Option<i64>, order_amount: i64) -> String {
+    match (deducted, free_retry_refund) {
+        (Some(0), Some(balance_after)) => format!(
+            "ℹ️ UID này đã từng get link trên Viameta nên lần get lại không tính phí.\n✅ Bot đã hoàn {} vào ví của bạn.\n💳 Số dư ví hiện tại: {}",
+            format_vnd(order_amount),
+            format_vnd(balance_after)
+        ),
+        (Some(0), None) => {
+            "ℹ️ UID này đã từng get link trên Viameta nên lần get lại không tính phí. Đơn này đã được hoàn tiền trước đó.".to_string()
+        }
+        (Some(amount), _) => format!("Phí xử lý Viameta: {}", format_vnd(amount)),
+        (None, _) => "Phí xử lý Viameta: chưa có thông tin từ API.".to_string(),
+    }
 }
 
 async fn refund_viameta_order(
