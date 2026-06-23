@@ -311,15 +311,15 @@ impl AppPlugin for ViametaCommandPlugin {
                     return Ok(true);
                 }
                 let price = service_price(&ctx, service);
-                if let Some(notice) = getlink_free_retry_notice(service) {
-                    send_viameta_message_without_preview(&ctx, msg.chat().id, notice).await?;
-                }
                 send_viameta_message_without_preview(
                     &ctx,
                     msg.chat().id,
                     service_cookie_prompt_text(&ctx, service, price),
                 )
                 .await?;
+                if let Some(notice) = getlink_free_retry_notice(service) {
+                    send_viameta_message_without_preview(&ctx, msg.chat().id, notice).await?;
+                }
                 dialogue
                     .update(State::ViametaCollectingCookie {
                         service: service.as_str().to_string(),
