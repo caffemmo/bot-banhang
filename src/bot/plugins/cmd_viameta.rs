@@ -311,6 +311,9 @@ impl AppPlugin for ViametaCommandPlugin {
                     return Ok(true);
                 }
                 let price = service_price(&ctx, service);
+                if let Some(notice) = getlink_free_retry_notice(service) {
+                    send_viameta_message_without_preview(&ctx, msg.chat().id, notice).await?;
+                }
                 send_viameta_message_without_preview(
                     &ctx,
                     msg.chat().id,
@@ -570,9 +573,6 @@ fn service_cookie_prompt_text(ctx: &AppContext, service: ViametaService, price: 
         String::new(),
         format!("Giá: {}", format_vnd(price)),
     ];
-    if let Some(notice) = getlink_free_retry_notice(service) {
-        lines.push(notice.to_string());
-    }
     lines.push(service_description(ctx, service));
     lines.push(String::new());
     lines.push("Vui lòng gửi cookie để tạo đơn.".to_string());
@@ -581,7 +581,7 @@ fn service_cookie_prompt_text(ctx: &AppContext, service: ViametaService, price: 
 
 fn getlink_free_retry_notice(service: ViametaService) -> Option<&'static str> {
     matches!(service, ViametaService::GetlinkFb)
-        .then_some("Lưu ý: UID đã từng get link trên Bot sẽ không tính phí khi get lại.")
+        .then_some("💡 UID đã từng get link trên Bot sẽ không tính phí khi get lại.")
 }
 
 async fn send_viameta_message_without_preview(
