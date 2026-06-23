@@ -1003,7 +1003,7 @@ fn parse_uptick_text_response(text: &str, service: ViametaService) -> Result<Str
         return parse_json_uptick_response(&value, service);
     }
 
-    Ok(format!("✅ {} thành công\n\n{}", service.label(), trimmed))
+    Ok(format_uptick_delivery_message(service, trimmed.to_string()))
 }
 
 async fn parse_sse_response(response: reqwest::Response, service: ViametaService) -> Result<String> {
@@ -1082,8 +1082,8 @@ fn parse_json_uptick_response(value: &Value, service: ViametaService) -> Result<
         return Err(anyhow!(api_error_message(value)));
     }
 
-    let message = json_message(value).unwrap_or_else(|| "HOÀN TẤT XÁC MINH".to_string());
-    Ok(format!("✅ {} thành công\n\n{}", service.label(), message))
+    let message = json_message(value).unwrap_or_else(|| "Meta đã nhận yêu cầu của bạn.".to_string());
+    Ok(format_uptick_delivery_message(service, message))
 }
 
 fn parse_json_event_result(
@@ -1106,11 +1106,11 @@ fn parse_json_event_result(
     }
     if event_type == "done" {
         let final_message = if message.is_empty() {
-            "HOÀN TẤT XÁC MINH".to_string()
+            "Meta đã nhận yêu cầu của bạn.".to_string()
         } else {
             message
         };
-        return Ok(Some(format!("✅ {} thành công\n\n{}", service.label(), final_message)));
+        return Ok(Some(format_uptick_delivery_message(service, final_message)));
     }
     if event_type == "error" {
         let final_message = if message.is_empty() {
@@ -1121,6 +1121,14 @@ fn parse_json_event_result(
         return Err(anyhow!(final_message));
     }
     Ok(None)
+}
+
+fn format_uptick_delivery_message(service: ViametaService, message: String) -> String {
+    format!(
+        "✅ {} đã gửi yêu cầu\n\n{}\n\n⏳ Vui lòng chờ Viameta/Meta xử lý. Trạng thái tích xanh có thể chưa cập nhật ngay trong app.",
+        service.label(),
+        message
+    )
 }
 
 fn json_has_error_status(value: &Value) -> bool {
@@ -1372,6 +1380,7 @@ mod tests {
         let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
 
         assert!(parsed.contains("queued"));
+        assert!(parsed.contains("đã gửi yêu cầu"));
     }
 
     #[test]
@@ -1381,6 +1390,7 @@ data: {"type":"done","payload":{"message":"done"}}"#;
         let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
 
         assert!(parsed.contains("done"));
+        assert!(parsed.contains("chưa cập nhật ngay"));
     }
 
     #[test]
