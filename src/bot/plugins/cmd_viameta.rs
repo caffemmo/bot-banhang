@@ -311,18 +311,17 @@ impl AppPlugin for ViametaCommandPlugin {
                     return Ok(true);
                 }
                 let price = service_price(&ctx, service);
-                ctx.bot
-                    .send_message(
-                        msg.chat().id,
-                        format!(
-                            "{}\n\nGiá: {}\n{}\n\nVui lòng gửi cookie để tạo đơn.",
-                            service.label(),
-                            format_vnd(price),
-                            service_description(&ctx, service)
-                        ),
-                    )
-                    .reply_markup(viameta_back_keyboard())
-                    .await?;
+                send_viameta_message_without_preview(
+                    &ctx,
+                    msg.chat().id,
+                    format!(
+                        "{}\n\nGiá: {}\n{}\n\nVui lòng gửi cookie để tạo đơn.",
+                        service.label(),
+                        format_vnd(price),
+                        service_description(&ctx, service)
+                    ),
+                )
+                .await?;
                 dialogue
                     .update(State::ViametaCollectingCookie {
                         service: service.as_str().to_string(),
@@ -553,13 +552,38 @@ fn viameta_back_keyboard() -> InlineKeyboardMarkup {
 }
 
 async fn prompt_cookie(ctx: &AppContext, chat_id: ChatId, service: ViametaService) -> Result<()> {
-    ctx.bot
-        .send_message(
-            chat_id,
-            format!("Vui lòng gửi cookie.\n{}", service_description(ctx, service)),
-        )
-        .reply_markup(viameta_back_keyboard())
-        .await?;
+    send_viameta_message_without_preview(
+        ctx,
+        chat_id,
+        format!("Vui lòng gửi cookie.\n{}", service_description(ctx, service)),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn send_viameta_message_without_preview(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    text: impl Into<String>,
+) -> Result<()> {
+    i18n::send_raw_telegram_method(
+        ctx,
+        "sendMessage",
+        json!({
+            "chat_id": chat_id.0,
+            "text": text.into(),
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{ "text": "⬅️ Quay lại", "callback_data": "viameta:menu" }]
+                ]
+            },
+            "link_preview_options": {
+                "is_disabled": true
+            },
+            "disable_web_page_preview": true
+        }),
+    )
+    .await?;
     Ok(())
 }
 
