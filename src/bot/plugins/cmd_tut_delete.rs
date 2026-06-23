@@ -161,24 +161,21 @@ async fn send_tut_list_with_delete(ctx: &AppContext, chat_id: ChatId) -> Result<
         ));
     }
 
-    let buttons = rows
-        .into_iter()
-        .take(8)
-        .map(|tut| {
-            vec![
-                InlineKeyboardButton::callback(
-                    format!("👀 #{} {}", tut.id, short_label(&tut.title, 18)),
-                    format!("tut:view:{}", tut.id),
-                ),
-                InlineKeyboardButton::callback("📤 Đăng", format!("tut:post:{}", tut.id)),
-                InlineKeyboardButton::callback("🗑 Xóa", format!("{}{}", TUT_DELETE_PREFIX, tut.id)),
-            ]
-        })
-        .chain(std::iter::once(vec![InlineKeyboardButton::callback(
-            "⬅️ Menu TUT",
-            "tut:home",
-        )]))
-        .collect::<Vec<_>>();
+    let mut buttons = Vec::new();
+    for tut in rows.into_iter().take(8) {
+        buttons.push(vec![
+            InlineKeyboardButton::callback(
+                format!("👀 #{} {}", tut.id, short_label(&tut.title, 18)),
+                format!("tut:view:{}", tut.id),
+            ),
+            InlineKeyboardButton::callback("📤 Kênh", format!("tut:post:{}", tut.id)),
+        ]);
+        buttons.push(vec![
+            InlineKeyboardButton::callback("📣 Bot", format!("tut:broadcast:{}", tut.id)),
+            InlineKeyboardButton::callback("🗑 Xóa", format!("{}{}", TUT_DELETE_PREFIX, tut.id)),
+        ]);
+    }
+    buttons.push(vec![InlineKeyboardButton::callback("⬅️ Menu TUT", "tut:home")]);
 
     ctx.bot
         .send_message(chat_id, text.join("\n"))

@@ -8,12 +8,14 @@ use teloxide::prelude::Requester;
 use teloxide::types::{
     BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
 };
+use tokio::time::{sleep, Duration as TokioDuration};
 use url::Url;
 
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::plugins::cmd_wallet::format_vnd;
 use crate::bot::{BotDialogue, State};
+use crate::domains::users::repo as users_repo;
 use crate::domains::wallet::repo as wallet_repo;
 
 pub struct TutCommandPlugin;
@@ -23,6 +25,9 @@ const TUT_HOME: &str = "tut:home";
 const TUT_ADD: &str = "tut:add";
 const TUT_LIST: &str = "tut:list";
 const TUT_MYVIP: &str = "tut:myvip";
+const TUT_BROADCAST_PREFIX: &str = "tut:broadcast:";
+const TUT_BROADCAST_CONFIRM_PREFIX: &str = "tut:broadcast_confirm:";
+const TUT_BROADCAST_CANCEL: &str = "tut:broadcast_cancel";
 
 #[derive(Debug, Clone, FromRow)]
 struct VipTut {
@@ -270,6 +275,39 @@ impl AppPlugin for TutCommandPlugin {
             return Ok(true);
         }
 
+        if let Some(id) = data
+            .strip_prefix(TUT_BROADCAST_PREFIX)
+            .and_then(|v| v.parse::<i64>().ok())
+        {
+            if let Some(chat_id) = chat_id {
+                if is_tut_admin(&ctx, user_id) {
+                    confirm_broadcast_tut_to_bot(&ctx, chat_id, id).await?;
+                }
+            }
+            return Ok(true);
+        }
+
+        if let Some(id) = data
+            .strip_prefix(TUT_BROADCAST_CONFIRM_PREFIX)
+            .and_then(|v| v.parse::<i64>().ok())
+        {
+            if let Some(chat_id) = chat_id {
+                if is_tut_admin(&ctx, user_id) {
+                    broadcast_tut_to_bot_users(&ctx, chat_id, id).await?;
+                }
+            }
+            return Ok(true);
+        }
+
+        if data == TUT_BROADCAST_CANCEL {
+            if let Some(chat_id) = chat_id {
+                if is_tut_admin(&ctx, user_id) {
+                    ctx.bot.send_message(chat_id, "Đã hủy gửi TUT vào bot.").await?;
+                }
+            }
+            return Ok(true);
+        }
+
         Ok(false)
     }
 }
@@ -508,23 +546,21 @@ async fn send_tut_list(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
         ));
     }
 
-    let buttons = rows
-        .into_iter()
-        .take(8)
-        .map(|tut| {
-            vec![
-                InlineKeyboardButton::callback(
-                    format!("👀 #{} {}", tut.id, short_label(&tut.title, 22)),
-                    format!("tut:view:{}", tut.id),
-                ),
-                InlineKeyboardButton::callback("📤 Đăng", format!("tut:post:{}", tut.id)),
-            ]
-        })
-        .chain(std::iter::once(vec![InlineKeyboardButton::callback(
-            "⬅️ Menu TUT",
-            TUT_HOME,
-        )]))
-        .collect::<Vec<_>>();
+    let mut buttons = Vec::new();
+    for tut in rows.into_iter().take(8) {
+        buttons.push(vec![
+            InlineKeyboardButton::callback(
+                format!("👀 #{} {}", tut.id, short_label(&tut.title, 18)),
+                format!("tut:view:{}", tut.id),
+            ),
+            InlineKeyboardButton::callback("📤 Kênh", format!("tut:post:{}", tut.id)),
+        ]);
+        buttons.push(vec![InlineKeyboardButton::callback(
+            "📣 Bot",
+            format!("{}{}", TUT_BROADCAST_PREFIX, tut.id),
+        )]);
+    }
+    buttons.push(vec![InlineKeyboardButton::callback("⬅️ Menu TUT", TUT_HOME)]);
 
     ctx.bot
         .send_message(chat_id, text.join("\n"))
@@ -666,6 +702,109 @@ async fn post_tut_to_configured_channel(ctx: &AppContext, admin_chat_id: ChatId,
         .send_message(
             admin_chat_id,
             format!("✅ Đã đăng teaser TUT #{} lên {}", tut.id, channel),
+        )
+        .await?;
+    Ok(())
+}
+
+async fn confirm_broadcast_tut_to_bot(ctx: &AppContext, admin_chat_id: ChatId, id: i64) -> Result<()> {
+    let Some(tut) = get_tut(&ctx.pool, id).await? else {
+        ctx.bot.send_message(admin_chat_id, "Không tìm thấy TUT.").await?;
+        return Ok(());
+    };
+    let total_users = users_repo::list_subscribers(&ctx.pool)
+        .await?
+        .into_iter()
+        .filter(|sub| sub.chat_id != 0 && sub.is_bot.unwrap_or(0) == 0)
+        .count();
+
+    ctx.bot
+        .send_message(
+            admin_chat_id,
+            format!(
+                "📣 Gửi teaser TUT #{} vào bot cho {} user?\n\n{}\n\n{}",
+                tut.id, total_users, tut.title, tut.teaser
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                "✅ Gửi vào bot",
+                format!("{}{}", TUT_BROADCAST_CONFIRM_PREFIX, tut.id),
+            ),
+            InlineKeyboardButton::callback("❌ Hủy", TUT_BROADCAST_CANCEL),
+        ]]))
+        .await?;
+    Ok(())
+}
+
+async fn broadcast_tut_to_bot_users(ctx: &AppContext, admin_chat_id: ChatId, id: i64) -> Result<()> {
+    let Some(tut) = get_tut(&ctx.pool, id).await? else {
+        ctx.bot.send_message(admin_chat_id, "Không tìm thấy TUT.").await?;
+        return Ok(());
+    };
+
+    let me = ctx.bot.get_me().await?;
+    let Some(username) = me.user.username else {
+        ctx.bot
+            .send_message(admin_chat_id, "Bot chưa có username nên không tạo được link xem full.")
+            .await?;
+        return Ok(());
+    };
+    let url = Url::parse(&format!("https://t.me/{username}?start=tut_{}", tut.id))?;
+    let (badge, footer) = if tut_is_free(&tut) {
+        ("🆓", "Mở full miễn phí ngay trong bot.")
+    } else {
+        ("🔒", "👑 Thành viên VIP xem full ngay trong bot.")
+    };
+    let text = format!("{badge} {}\n\n{}\n\n{footer}", tut.title, tut.teaser);
+    let markup = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
+        "🚀 Xem full trong bot",
+        url,
+    )]]);
+
+    let subscribers = users_repo::list_subscribers(&ctx.pool).await?;
+    let recipients = subscribers
+        .into_iter()
+        .filter(|sub| sub.chat_id != 0 && sub.is_bot.unwrap_or(0) == 0)
+        .collect::<Vec<_>>();
+
+    if recipients.is_empty() {
+        ctx.bot
+            .send_message(admin_chat_id, "Chưa có user nào trong bot để gửi TUT.")
+            .await?;
+        return Ok(());
+    }
+
+    ctx.bot
+        .send_message(
+            admin_chat_id,
+            format!("📣 Bắt đầu gửi TUT #{} cho {} user...", tut.id, recipients.len()),
+        )
+        .await?;
+
+    let mut sent = 0usize;
+    let mut failed = 0usize;
+    for sub in recipients {
+        let result = ctx
+            .bot
+            .send_message(ChatId(sub.chat_id), text.clone())
+            .reply_markup(markup.clone())
+            .await;
+        if result.is_ok() {
+            sent += 1;
+        } else {
+            failed += 1;
+        }
+        sleep(TokioDuration::from_millis(40)).await;
+    }
+
+    ctx.bot
+        .send_message(
+            admin_chat_id,
+            format!(
+                "✅ Đã gửi TUT #{} vào bot.\nThành công: {}\nLỗi: {}",
+                tut.id, sent, failed
+            ),
         )
         .await?;
     Ok(())
