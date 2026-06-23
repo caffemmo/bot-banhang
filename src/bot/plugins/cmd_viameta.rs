@@ -1003,7 +1003,14 @@ fn parse_uptick_text_response(text: &str, service: ViametaService) -> Result<Str
         return parse_json_uptick_response(&value, service);
     }
 
-    Ok(format_uptick_delivery_message(service, trimmed.to_string()))
+    if !text_has_uptick_confirmation(trimmed) {
+        return Err(anyhow!(
+            "Viameta chưa trả mã đơn/ticket để xác nhận đã nhận đơn. Phản hồi: {}",
+            truncate_for_log(trimmed, 300)
+        ));
+    }
+
+    Ok(format_uptick_delivery_message(service, trimmed.to_string(), None))
 }
 
 async fn parse_sse_response(response: reqwest::Response, service: ViametaService) -> Result<String> {
@@ -1083,7 +1090,14 @@ fn parse_json_uptick_response(value: &Value, service: ViametaService) -> Result<
     }
 
     let message = json_message(value).unwrap_or_else(|| "Meta đã nhận yêu cầu của bạn.".to_string());
-    Ok(format_uptick_delivery_message(service, message))
+    let confirmation_ref = uptick_confirmation_ref(value);
+    let Some(confirmation_ref) = confirmation_ref else {
+        return Err(anyhow!(
+            "Viameta chưa trả mã đơn/ticket để xác nhận đã nhận đơn. Phản hồi: {}",
+            truncate_for_log(&value.to_string(), 300)
+        ));
+    };
+    Ok(format_uptick_delivery_message(service, message, Some(confirmation_ref)))
 }
 
 fn parse_json_event_result(
@@ -1110,7 +1124,17 @@ fn parse_json_event_result(
         } else {
             message
         };
-        return Ok(Some(format_uptick_delivery_message(service, final_message)));
+        let Some(confirmation_ref) = uptick_confirmation_ref(event) else {
+            return Err(anyhow!(
+                "Viameta chưa trả mã đơn/ticket để xác nhận đã nhận đơn. Phản hồi: {}",
+                truncate_for_log(&event.to_string(), 300)
+            ));
+        };
+        return Ok(Some(format_uptick_delivery_message(
+            service,
+            final_message,
+            Some(confirmation_ref),
+        )));
     }
     if event_type == "error" {
         let final_message = if message.is_empty() {
@@ -1123,10 +1147,18 @@ fn parse_json_event_result(
     Ok(None)
 }
 
-fn format_uptick_delivery_message(service: ViametaService, message: String) -> String {
+fn format_uptick_delivery_message(
+    service: ViametaService,
+    message: String,
+    confirmation_ref: Option<String>,
+) -> String {
+    let ref_line = confirmation_ref
+        .map(|value| format!("\n\nMã theo dõi Viameta: {}", value))
+        .unwrap_or_default();
     format!(
-        "✅ {} đã gửi yêu cầu\n\n{}\n\n⏳ Vui lòng chờ Viameta/Meta xử lý. Trạng thái tích xanh có thể chưa cập nhật ngay trong app.",
+        "✅ {} đã gửi yêu cầu{}\n\n{}\n\n⏳ Vui lòng chờ Viameta/Meta xử lý. Trạng thái tích xanh có thể chưa cập nhật ngay trong app.",
         service.label(),
+        ref_line,
         message
     )
 }
@@ -1142,6 +1174,65 @@ fn json_has_error_status(value: &Value) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+fn uptick_confirmation_ref(value: &Value) -> Option<String> {
+    for key in [
+        "order_id",
+        "orderId",
+        "request_id",
+        "requestId",
+        "ticket_id",
+        "ticketId",
+        "job_id",
+        "jobId",
+        "id",
+        "uid",
+    ] {
+        if let Some(found) = json_string(value, key).filter(|v| !v.trim().is_empty() && *v != "-") {
+            return Some(found.to_string());
+        }
+        if let Some(found) = value
+            .get(key)
+            .and_then(Value::as_i64)
+            .map(|v| v.to_string())
+        {
+            return Some(found);
+        }
+        if let Some(found) = value
+            .get("data")
+            .and_then(|data| json_string(data, key))
+            .filter(|v| !v.trim().is_empty() && *v != "-")
+        {
+            return Some(found.to_string());
+        }
+        if let Some(found) = value
+            .get("payload")
+            .and_then(|payload| json_string(payload, key))
+            .filter(|v| !v.trim().is_empty() && *v != "-")
+        {
+            return Some(found.to_string());
+        }
+    }
+    None
+}
+
+fn text_has_uptick_confirmation(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    ["order", "ticket", "request", "job", "uid", "mã đơn", "ma don"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for ch in value.chars().take(max_chars) {
+        out.push(ch);
+    }
+    if value.chars().count() > max_chars {
+        out.push_str("...");
+    }
+    out
 }
 
 fn json_message(value: &Value) -> Option<String> {
@@ -1376,26 +1467,36 @@ mod tests {
 
     #[test]
     fn uptick_parser_accepts_json_success() {
-        let text = r#"{"success":true,"message":"queued"}"#;
+        let text = r#"{"success":true,"order_id":"VM123","message":"queued"}"#;
         let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
 
         assert!(parsed.contains("queued"));
         assert!(parsed.contains("đã gửi yêu cầu"));
+        assert!(parsed.contains("VM123"));
     }
 
     #[test]
     fn uptick_parser_accepts_sse_text() {
         let text = r#"data: {"type":"log","payload":{"message":"uploading"}}
-data: {"type":"done","payload":{"message":"done"}}"#;
+data: {"type":"done","payload":{"message":"done","ticket_id":"TK9"}}"#;
         let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
 
         assert!(parsed.contains("done"));
         assert!(parsed.contains("chưa cập nhật ngay"));
+        assert!(parsed.contains("TK9"));
     }
 
     #[test]
     fn uptick_parser_rejects_json_error() {
         let text = r#"{"success":false,"message":"bad cookie"}"#;
+        let parsed = parse_uptick_text_response(text, ViametaService::UptickFb);
+
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn uptick_parser_rejects_generic_done_without_tracking_ref() {
+        let text = r#"data: {"type":"done","payload":{"message":"Meta accepted"}}"#;
         let parsed = parse_uptick_text_response(text, ViametaService::UptickFb);
 
         assert!(parsed.is_err());
