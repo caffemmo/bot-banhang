@@ -277,8 +277,18 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
             ],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu")],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help")],
+            [
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_api_integration", "🔌 API integration", "shop_api"),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
+            ],
+            [
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu"),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home"),
+            ],
+            [
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", "affiliate:register"),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", "childbot:guide"),
+            ],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
     })
@@ -310,14 +320,36 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
                 "wallet:topup_history".to_string(),
             ),
         ],
-        vec![(
-            texts.get_lang("start_btn_viameta", lang, "✅ Dịch vụ tích xanh"),
-            "viameta:menu".to_string(),
-        )],
-        vec![(
-            texts.get_lang("start_btn_help", lang, "Help"),
-            "start:help".to_string(),
-        )],
+        vec![
+            (
+                texts.get_lang("start_btn_api_integration", lang, "🔌 API integration"),
+                "shop_api".to_string(),
+            ),
+            (
+                texts.get_lang("start_btn_help", lang, "Help"),
+                "start:help".to_string(),
+            ),
+        ],
+        vec![
+            (
+                texts.get_lang("start_btn_viameta", lang, "✅ Dịch vụ tích xanh"),
+                "viameta:menu".to_string(),
+            ),
+            (
+                texts.get_lang("start_btn_tut", lang, "📚 TUT"),
+                "tut:user_home".to_string(),
+            ),
+        ],
+        vec![
+            (
+                texts.get_lang("start_btn_affiliate_register", lang, "🤝 Đăng kí CTV"),
+                "affiliate:register".to_string(),
+            ),
+            (
+                texts.get_lang("start_btn_child_bot", lang, "🤖 Tạo bot con"),
+                "childbot:guide".to_string(),
+            ),
+        ],
         vec![(
             texts.get_lang("start_btn_language", lang, "🌐 Language"),
             "start:language".to_string(),
@@ -402,6 +434,9 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "wallet:topup_history" => "start_btn_topup_history",
         "shop_api" => "start_btn_api_integration",
         "viameta:menu" => "start_btn_viameta",
+        "tut:user_home" => "start_btn_tut",
+        "affiliate:register" => "start_btn_affiliate_register",
+        "childbot:guide" => "start_btn_child_bot",
         "start:help" => "start_btn_help",
         "start:language" => "start_btn_language",
         _ => "start_btn",
@@ -1104,6 +1139,15 @@ mod tests {
                         "start_btn_viameta".to_string(),
                         "✅ Dịch vụ tích xanh".to_string(),
                     ),
+                    ("start_btn_tut".to_string(), "📚 TUT".to_string()),
+                    (
+                        "start_btn_affiliate_register".to_string(),
+                        "🤝 Đăng kí CTV".to_string(),
+                    ),
+                    (
+                        "start_btn_child_bot".to_string(),
+                        "🤖 Tạo bot con".to_string(),
+                    ),
                     ("start_btn_help".to_string(), "Hướng dẫn".to_string()),
                     ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
                 ]),
@@ -1127,8 +1171,18 @@ mod tests {
                         "wallet:topup_history".to_string()
                     ),
                 ],
-                vec![("✅ Dịch vụ tích xanh".to_string(), "viameta:menu".to_string())],
-                vec![("Hướng dẫn".to_string(), "start:help".to_string())],
+                vec![
+                    ("🔌 Tích hợp API".to_string(), "shop_api".to_string()),
+                    ("Hướng dẫn".to_string(), "start:help".to_string()),
+                ],
+                vec![
+                    ("✅ Dịch vụ tích xanh".to_string(), "viameta:menu".to_string()),
+                    ("📚 TUT".to_string(), "tut:user_home".to_string()),
+                ],
+                vec![
+                    ("🤝 Đăng kí CTV".to_string(), "affiliate:register".to_string()),
+                    ("🤖 Tạo bot con".to_string(), "childbot:guide".to_string()),
+                ],
                 vec![("🌐 Ngôn ngữ".to_string(), "start:language".to_string())],
             ]
         );
@@ -1162,6 +1216,15 @@ mod tests {
                         "start_btn_viameta".to_string(),
                         "✅ Dịch vụ tích xanh".to_string(),
                     ),
+                    ("start_btn_tut".to_string(), "📚 TUT".to_string()),
+                    (
+                        "start_btn_affiliate_register".to_string(),
+                        "🤝 Đăng kí CTV".to_string(),
+                    ),
+                    (
+                        "start_btn_child_bot".to_string(),
+                        "🤖 Tạo bot con".to_string(),
+                    ),
                     ("start_btn_help".to_string(), "Hướng dẫn".to_string()),
                     ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
                 ]),
@@ -1176,8 +1239,9 @@ mod tests {
                 vec!["🛒 Xem sản phẩm".to_string()],
                 vec!["💰 Nạp tiền".to_string(), "💳 Ví tiền".to_string()],
                 vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
-                vec!["✅ Dịch vụ tích xanh".to_string()],
-                vec!["Hướng dẫn".to_string()],
+                vec!["🔌 Tích hợp API".to_string(), "Hướng dẫn".to_string()],
+                vec!["✅ Dịch vụ tích xanh".to_string(), "📚 TUT".to_string()],
+                vec!["🤝 Đăng kí CTV".to_string(), "🤖 Tạo bot con".to_string()],
                 vec!["🌐 Ngôn ngữ".to_string()],
             ]
         );
