@@ -746,6 +746,7 @@ async fn create_viameta_order_and_payment(
     ensure_service_products(&ctx.pool).await?;
     let mut product = product_for_service(&ctx.pool, service).await?;
     product.price = service_price(&ctx, service);
+    let uid = uid_from_cookie(service, &cookie);
     let amount = product.price;
     let memo = generate_memo(&ctx).await?;
     let mut order = Order::new(
@@ -776,7 +777,7 @@ async fn create_viameta_order_and_payment(
     .bind(&order.id)
     .bind(service.as_str())
     .bind(cookie)
-    .bind(Option::<String>::None)
+    .bind(uid)
     .bind(image_path)
     .execute(&mut *tx)
     .await?;
@@ -959,11 +960,27 @@ async fn run_uptick(
         .unwrap_or("document.jpg")
         .to_string();
     let field = service.image_field().ok_or_else(|| anyhow!("service has no image field"))?;
-    let form = reqwest::multipart::Form::new()
+    let mut form = reqwest::multipart::Form::new()
         .text("cookie", request.cookie.clone())
         .text("confirm", "true")
         .part(field.to_string(), reqwest::multipart::Part::bytes(image_bytes).file_name(file_name));
+    if let Some(uid) = request.uid.as_deref().filter(|value| !value.trim().is_empty()) {
+        form = form.text("uid", uid.to_string());
+    }
+    if let Some(document_type) = document_type_for_service(service) {
+        form = form
+            .text("type", document_type.to_string())
+            .text("document_type", document_type.to_string())
+            .text("doc_type", document_type.to_string());
+    }
     let url = format!("{}{}", viameta_base_url(ctx), service.endpoint());
+    tracing::info!(
+        "sending Viameta uptick request service={} order={} uid_present={} image_field={}",
+        service.as_str(),
+        request.order_id,
+        request.uid.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        field
+    );
     let response = reqwest::Client::new()
         .post(url)
         .header("X-Api-Key", api_key)
@@ -1328,6 +1345,29 @@ fn getlink_fee_note(deducted: Option<i64>, free_retry_refund: Option<i64>, order
     }
 }
 
+fn uid_from_cookie(service: ViametaService, cookie: &str) -> Option<String> {
+    let key = match service {
+        ViametaService::GetlinkFb | ViametaService::UptickFb => "c_user",
+        ViametaService::UptickIg => "ds_user_id",
+    };
+    cookie
+        .split(';')
+        .filter_map(|part| part.trim().split_once('='))
+        .find_map(|(name, value)| {
+            name.trim()
+                .eq_ignore_ascii_case(key)
+                .then(|| value.trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
+}
+
+fn document_type_for_service(service: ViametaService) -> Option<&'static str> {
+    match service {
+        ViametaService::GetlinkFb => None,
+        ViametaService::UptickFb | ViametaService::UptickIg => Some("passport"),
+    }
+}
+
 async fn refund_viameta_order(
     ctx: &AppContext,
     order: &Order,
@@ -1463,6 +1503,20 @@ mod tests {
     fn non_getlink_services_do_not_show_free_retry_notice() {
         assert!(getlink_free_retry_notice(ViametaService::UptickFb).is_none());
         assert!(getlink_free_retry_notice(ViametaService::UptickIg).is_none());
+    }
+
+    #[test]
+    fn extracts_uid_from_facebook_cookie() {
+        let uid = uid_from_cookie(ViametaService::UptickFb, "xs=abc; c_user=123456789; fr=def");
+
+        assert_eq!(uid.as_deref(), Some("123456789"));
+    }
+
+    #[test]
+    fn extracts_uid_from_instagram_cookie() {
+        let uid = uid_from_cookie(ViametaService::UptickIg, "sessionid=abc; ds_user_id=987654");
+
+        assert_eq!(uid.as_deref(), Some("987654"));
     }
 
     #[test]
