@@ -93,6 +93,14 @@ impl ViametaService {
         }
     }
 
+    fn image_fields(self) -> &'static [&'static str] {
+        match self {
+            Self::GetlinkFb => &[],
+            Self::UptickFb => &["image", "file", "document", "passport", "id_image"],
+            Self::UptickIg => &["id_image", "image", "file", "document", "passport"],
+        }
+    }
+
     fn price_key(self) -> &'static str {
         match self {
             Self::GetlinkFb => "viameta_getlink_fb_price",
@@ -959,11 +967,17 @@ async fn run_uptick(
         .and_then(|v| v.to_str())
         .unwrap_or("document.jpg")
         .to_string();
-    let field = service.image_field().ok_or_else(|| anyhow!("service has no image field"))?;
+    let fields = service.image_fields();
+    let field = fields.first().copied().ok_or_else(|| anyhow!("service has no image field"))?;
     let mut form = reqwest::multipart::Form::new()
         .text("cookie", request.cookie.clone())
-        .text("confirm", "true")
-        .part(field.to_string(), reqwest::multipart::Part::bytes(image_bytes).file_name(file_name));
+        .text("confirm", "true");
+    for field_name in fields {
+        form = form.part(
+            (*field_name).to_string(),
+            reqwest::multipart::Part::bytes(image_bytes.clone()).file_name(file_name.clone()),
+        );
+    }
     if let Some(uid) = request.uid.as_deref().filter(|value| !value.trim().is_empty()) {
         form = form.text("uid", uid.to_string());
     }
@@ -975,11 +989,11 @@ async fn run_uptick(
     }
     let url = format!("{}{}", viameta_base_url(ctx), service.endpoint());
     tracing::info!(
-        "sending Viameta uptick request service={} order={} uid_present={} image_field={}",
+        "sending Viameta uptick request service={} order={} uid_present={} image_fields={}",
         service.as_str(),
         request.order_id,
         request.uid.as_deref().is_some_and(|value| !value.trim().is_empty()),
-        field
+        fields.join(",")
     );
     let response = reqwest::Client::new()
         .post(url)
@@ -1011,6 +1025,11 @@ fn parse_uptick_text_response(text: &str, service: ViametaService) -> Result<Str
     if trimmed.is_empty() {
         return Err(anyhow!("Dịch vụ trả về phản hồi trống"));
     }
+    tracing::info!(
+        "Viameta uptick response service={} body={}",
+        service.as_str(),
+        truncate_for_log(trimmed, 500)
+    );
 
     if trimmed.lines().any(|line| line.trim_start().starts_with("data:")) {
         return parse_sse_text_response(trimmed, service);
