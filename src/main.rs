@@ -44,21 +44,19 @@ async fn main() -> Result<()> {
     );
     log_crypto_feature_status(&ctx);
 
-    let mut all_commands = Vec::new();
-
     for plugin in ctx.plugins.iter() {
         if let Err(e) = plugin.on_init(&ctx.pool).await {
             tracing::error!("Plugin {} error on_init: {}", plugin.name(), e);
         }
-        all_commands.extend(plugin.commands());
     }
 
-    if !all_commands.is_empty() {
+    let public_commands = public_bot_commands();
+    if !public_commands.is_empty() {
         let texts = ctx.texts.read().map(|texts| texts.clone());
         let result = match texts {
-            Ok(texts) => register_bot_commands(&bot, &texts, &all_commands).await,
+            Ok(texts) => register_bot_commands(&bot, &texts, &public_commands).await,
             Err(_) => bot
-                .set_my_commands(all_commands)
+                .set_my_commands(public_commands)
                 .await
                 .map(|_| ())
                 .map_err(Into::into),
@@ -121,6 +119,51 @@ fn run_cli_command() -> Result<bool> {
         }
         _ => Ok(false),
     }
+}
+
+fn public_bot_commands() -> Vec<BotCommand> {
+    vec![
+        BotCommand {
+            command: "start".to_string(),
+            description: "Bắt đầu".to_string(),
+        },
+        BotCommand {
+            command: "shop".to_string(),
+            description: "Xem sản phẩm".to_string(),
+        },
+        BotCommand {
+            command: "wallet".to_string(),
+            description: "Xem ví tiền".to_string(),
+        },
+        BotCommand {
+            command: "orders".to_string(),
+            description: "Đơn hàng gần đây".to_string(),
+        },
+        BotCommand {
+            command: "order".to_string(),
+            description: "Tra cứu đơn theo mã".to_string(),
+        },
+        BotCommand {
+            command: "newapi".to_string(),
+            description: "Tạo API key mới".to_string(),
+        },
+        BotCommand {
+            command: "viameta".to_string(),
+            description: "Dịch vụ tích xanh".to_string(),
+        },
+        BotCommand {
+            command: "tut".to_string(),
+            description: "Kho TUT Free/VIP".to_string(),
+        },
+        BotCommand {
+            command: "myvip".to_string(),
+            description: "Xem hạn VIP TUT".to_string(),
+        },
+        BotCommand {
+            command: "help".to_string(),
+            description: "Hướng dẫn".to_string(),
+        },
+    ]
 }
 
 fn localized_commands_for_lang(
@@ -518,6 +561,22 @@ mod tests {
         assert!(DEPLOY_SH.contains("i18n"));
         assert!(BOT_CLONE_SH.contains("i18n"));
         assert!(BOT_UPDATE_SH.contains("i18n"));
+    }
+
+    #[test]
+    fn public_bot_commands_hide_admin_only_commands() {
+        let commands = public_bot_commands()
+            .into_iter()
+            .map(|command| command.command)
+            .collect::<Vec<_>>();
+
+        assert!(commands.contains(&"start".to_string()));
+        assert!(commands.contains(&"shop".to_string()));
+        assert!(commands.contains(&"wallet".to_string()));
+        assert!(commands.contains(&"tut".to_string()));
+        assert!(!commands.contains(&"ctvlist".to_string()));
+        assert!(!commands.contains(&"childbotadd".to_string()));
+        assert!(!commands.contains(&"tutadd".to_string()));
     }
 
     #[test]
