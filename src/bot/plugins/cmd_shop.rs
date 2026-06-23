@@ -33,7 +33,7 @@ use crate::domains::products::models::Product;
 use crate::domains::products::{repo, usage_instructions};
 use crate::domains::wallet::repo as wallet_repo;
 
-use crate::bot::i18n;
+use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
 use teloxide::types::BotCommand;
@@ -1750,15 +1750,18 @@ async fn send_raw_product_list_message(
             obj.insert("message_id".to_string(), json!(message_id.0));
         }
         match i18n::send_raw_telegram_method(ctx, "editMessageText", payload).await {
-            Ok(()) => Ok(()),
+            Ok(_) => Ok(()),
             Err(err) if should_fallback_to_new_product_list_message(&err) => {
                 let payload = shop_product_list_payload(ctx, chat_id, text, reply_markup)?;
-                i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await
+                let response = i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await?;
+                chat_ui::remember_menu_from_response(ctx, chat_id, &response).await?;
+                Ok(())
             }
             Err(err) => Err(err),
         }
     } else {
-        i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await
+        chat_ui::send_clean_menu_payload(ctx, chat_id, payload).await?;
+        Ok(())
     }
 }
 
@@ -4466,6 +4469,7 @@ impl AppPlugin for ShopCommandPlugin {
         };
 
         if is_shop_command(text) {
+            chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
             send_products(ctx.clone(), ctx.bot.clone(), msg.chat.id, 0, None, &lang).await?;
             dialogue.update(State::Idle).await?;
             return Ok(true);

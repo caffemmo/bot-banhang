@@ -17,6 +17,7 @@ use crate::domains::chat::repo as chat_repo;
 use crate::domains::users::repo as users_repo;
 
 pub mod i18n;
+pub mod chat_ui;
 pub mod plugins;
 pub mod storage;
 pub mod texts;

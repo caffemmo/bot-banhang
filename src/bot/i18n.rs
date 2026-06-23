@@ -526,14 +526,15 @@ pub async fn send_message_with_json_keyboard(
     reply_markup: Value,
 ) -> anyhow::Result<()> {
     let payload = message_payload_with_json_keyboard(ctx, chat_id, key, text, reply_markup)?;
-    send_raw_telegram_method(ctx, "sendMessage", payload).await
+    send_raw_telegram_method(ctx, "sendMessage", payload).await?;
+    Ok(())
 }
 
 pub async fn send_raw_telegram_method(
     ctx: &AppContext,
     method: &str,
     payload: Value,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Value> {
     let url = format!(
         "https://api.telegram.org/bot{}/{}",
         ctx.config.telegram_token, method
@@ -546,7 +547,7 @@ pub async fn send_raw_telegram_method(
     }
     let json: Value = serde_json::from_str(&body)?;
     if json.get("ok").and_then(Value::as_bool) == Some(true) {
-        Ok(())
+        Ok(json)
     } else {
         anyhow::bail!("Telegram {method} failed: {body}");
     }

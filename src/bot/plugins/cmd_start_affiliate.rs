@@ -11,7 +11,7 @@ use url::Url;
 
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
-use crate::bot::{BotDialogue, i18n};
+use crate::bot::{BotDialogue, chat_ui, i18n};
 
 pub struct StartAffiliatePlugin;
 
@@ -51,6 +51,7 @@ impl AppPlugin for StartAffiliatePlugin {
         if !is_plain_start(text) {
             return Ok(false);
         }
+        chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
 
         let lang = if let Some(user) = msg.from() {
             i18n::user_lang(&ctx, user.id.0 as i64, user.language_code.as_deref()).await
@@ -267,7 +268,7 @@ async fn send_required_channel_prompt(ctx: &AppContext, chat_id: ChatId, lang: &
             "📢 Vui lòng tham gia channel trước khi sử dụng bot:\n{channel_url}\n\nSau khi tham gia, bấm “Tôi đã tham gia”.",
             &[("channel_url", channel_url.clone())],
         );
-    i18n::send_message_with_json_keyboard(
+    chat_ui::send_clean_menu(
         ctx,
         chat_id,
         "required_channel_message",
@@ -285,7 +286,7 @@ async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resul
         "start",
         "👋 Welcome! Use the buttons below, or type /shop to buy and /orders to view orders.",
     );
-    i18n::send_message_with_json_keyboard(
+    chat_ui::send_clean_menu(
         ctx,
         chat_id,
         "start",

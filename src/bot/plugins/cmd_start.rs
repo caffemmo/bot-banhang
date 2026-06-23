@@ -10,7 +10,7 @@ use teloxide::types::{
 use url::Url;
 
 use crate::app::AppContext;
-use crate::bot::i18n;
+use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
 use crate::bot::plugins::cmd_orders;
 use crate::bot::plugins::cmd_shop;
@@ -232,7 +232,7 @@ async fn send_required_channel_prompt(
         "📢 Please join the channel before using this bot:\n{channel_url}\n\nAfter joining, press “I joined”.",
         &[("channel_url", channel_url.clone())],
     );
-    i18n::send_message_with_json_keyboard(
+    chat_ui::send_clean_menu(
         ctx,
         chat_id,
         "required_channel_message",
@@ -254,7 +254,7 @@ async fn send_start_menu(
         "start",
         "👋 Welcome! Use the buttons below, or type /shop to buy and /orders to view orders.",
     );
-    i18n::send_message_with_json_keyboard(
+    chat_ui::send_clean_menu(
         ctx,
         chat_id,
         "start",
@@ -430,7 +430,7 @@ async fn send_language_prompt(
         "language_prompt",
         "🌐 Please choose your language before continuing.",
     );
-    i18n::send_message_with_json_keyboard(
+    chat_ui::send_clean_menu(
         ctx,
         chat_id,
         "language_prompt",
@@ -736,6 +736,7 @@ impl AppPlugin for StartCommandPlugin {
         };
 
         if text.starts_with("/start") && start_payload.is_empty() {
+            chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
             if let Some(user) = msg.from() {
                 upsert_subscriber_from_user(&ctx, user, msg.chat.id.0, None).await;
             }
