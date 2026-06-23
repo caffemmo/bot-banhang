@@ -71,10 +71,10 @@ fn normalize_t_me_url(value: &str) -> Option<String> {
     }
 }
 
-fn normalize_required_channel_id(channel_id: &str, channel_url: &str) -> Option<String> {
-    let id = channel_id.trim();
+fn normalize_required_channel_value(value: &str) -> Option<String> {
+    let id = value.trim();
     if id.is_empty() {
-        return normalize_t_me_url(channel_url);
+        return None;
     }
 
     if id.starts_with("http://t.me/") || id.starts_with("https://t.me/") || id.starts_with("t.me/")
@@ -89,12 +89,35 @@ fn normalize_required_channel_id(channel_id: &str, channel_url: &str) -> Option<
     }
 }
 
+fn push_required_channel_candidate(candidates: &mut Vec<String>, candidate: Option<String>) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    if !candidates.iter().any(|value| value == &candidate) {
+        candidates.push(candidate);
+    }
+}
+
+fn required_channel_candidates(channel_id: &str, channel_url: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    push_required_channel_candidate(&mut candidates, normalize_t_me_url(channel_url));
+    push_required_channel_candidate(&mut candidates, normalize_required_channel_value(channel_id));
+    candidates
+}
+
+#[cfg(test)]
+fn normalize_required_channel_id(channel_id: &str, channel_url: &str) -> Option<String> {
+    required_channel_candidates(channel_id, channel_url)
+        .into_iter()
+        .next()
+}
+
 fn required_channel_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("required_channel_enabled", "1"))
 }
 
-fn required_channel_id(ctx: &AppContext) -> Option<String> {
-    normalize_required_channel_id(
+fn required_channel_ids(ctx: &AppContext) -> Vec<String> {
+    required_channel_candidates(
         &ctx.get_text("required_channel_id", "@zvwboo"),
         &ctx.get_text("required_channel_url", DEFAULT_REQUIRED_CHANNEL_URL),
     )
@@ -166,17 +189,23 @@ async fn user_has_joined_required_channel(
         return true;
     }
 
-    let Some(channel_id) = required_channel_id(ctx) else {
+    let channel_ids = required_channel_ids(ctx);
+    if channel_ids.is_empty() {
         return true;
-    };
+    }
 
-    match ctx.bot.get_chat_member(channel_id, user_id).await {
-        Ok(member) => member.kind.is_present(),
-        Err(err) => {
-            tracing::warn!("Failed to check required channel membership: {err}");
-            false
+    for channel_id in channel_ids {
+        match ctx.bot.get_chat_member(channel_id.clone(), user_id).await {
+            Ok(member) if member.kind.is_present() => return true,
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to check required channel membership for {channel_id}: {err}"
+                );
+            }
         }
     }
+    false
 }
 
 fn join_required_channel_keyboard(
@@ -983,14 +1012,18 @@ mod tests {
     }
 
     #[test]
-    fn normalize_required_channel_uses_id_or_t_me_url() {
+    fn normalize_required_channel_prefers_join_url_then_id_fallback() {
         assert_eq!(
             normalize_required_channel_id("@zvwboo", "https://t.me/other"),
-            Some("@zvwboo".to_string())
+            Some("@other".to_string())
         );
         assert_eq!(
             normalize_required_channel_id("", "https://t.me/zvwboo"),
             Some("@zvwboo".to_string())
+        );
+        assert_eq!(
+            required_channel_candidates("@zvwboo", "https://t.me/other"),
+            vec!["@other".to_string(), "@zvwboo".to_string()]
         );
         assert_eq!(
             normalize_required_channel_id("zvwboo", ""),
