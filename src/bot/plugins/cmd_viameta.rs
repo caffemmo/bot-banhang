@@ -93,14 +93,6 @@ impl ViametaService {
         }
     }
 
-    fn image_fields(self) -> &'static [&'static str] {
-        match self {
-            Self::GetlinkFb => &[],
-            Self::UptickFb => &["image", "file", "document", "passport", "id_image"],
-            Self::UptickIg => &["id_image", "image", "file", "document", "passport"],
-        }
-    }
-
     fn price_key(self) -> &'static str {
         match self {
             Self::GetlinkFb => "viameta_getlink_fb_price",
@@ -967,33 +959,17 @@ async fn run_uptick(
         .and_then(|v| v.to_str())
         .unwrap_or("document.jpg")
         .to_string();
-    let fields = service.image_fields();
-    let field = fields.first().copied().ok_or_else(|| anyhow!("service has no image field"))?;
-    let mut form = reqwest::multipart::Form::new()
+    let field = service.image_field().ok_or_else(|| anyhow!("service has no image field"))?;
+    let form = reqwest::multipart::Form::new()
         .text("cookie", request.cookie.clone())
-        .text("confirm", "true");
-    for field_name in fields {
-        form = form.part(
-            (*field_name).to_string(),
-            reqwest::multipart::Part::bytes(image_bytes.clone()).file_name(file_name.clone()),
-        );
-    }
-    if let Some(uid) = request.uid.as_deref().filter(|value| !value.trim().is_empty()) {
-        form = form.text("uid", uid.to_string());
-    }
-    if let Some(document_type) = document_type_for_service(service) {
-        form = form
-            .text("type", document_type.to_string())
-            .text("document_type", document_type.to_string())
-            .text("doc_type", document_type.to_string());
-    }
+        .text("confirm", "true")
+        .part(field.to_string(), reqwest::multipart::Part::bytes(image_bytes).file_name(file_name));
     let url = format!("{}{}", viameta_base_url(ctx), service.endpoint());
     tracing::info!(
-        "sending Viameta uptick request service={} order={} uid_present={} image_fields={}",
+        "sending Viameta uptick request service={} order={} image_field={}",
         service.as_str(),
         request.order_id,
-        request.uid.as_deref().is_some_and(|value| !value.trim().is_empty()),
-        fields.join(",")
+        field
     );
     let response = reqwest::Client::new()
         .post(url)
@@ -1037,13 +1013,6 @@ fn parse_uptick_text_response(text: &str, service: ViametaService) -> Result<Str
 
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
         return parse_json_uptick_response(&value, service);
-    }
-
-    if !text_has_uptick_confirmation(trimmed) {
-        return Err(anyhow!(
-            "Viameta chưa trả mã đơn/ticket để xác nhận đã nhận đơn. Phản hồi: {}",
-            truncate_for_log(trimmed, 300)
-        ));
     }
 
     Ok(format_uptick_delivery_message(service, trimmed.to_string(), None))
@@ -1126,14 +1095,11 @@ fn parse_json_uptick_response(value: &Value, service: ViametaService) -> Result<
     }
 
     let message = json_message(value).unwrap_or_else(|| "Meta đã nhận yêu cầu của bạn.".to_string());
-    let confirmation_ref = uptick_confirmation_ref(value);
-    let Some(confirmation_ref) = confirmation_ref else {
-        return Err(anyhow!(
-            "Viameta chưa trả mã đơn/ticket để xác nhận đã nhận đơn. Phản hồi: {}",
-            truncate_for_log(&value.to_string(), 300)
-        ));
-    };
-    Ok(format_uptick_delivery_message(service, message, Some(confirmation_ref)))
+    Ok(format_uptick_delivery_message(
+        service,
+        message,
+        uptick_confirmation_ref(value),
+    ))
 }
 
 fn parse_json_event_result(
@@ -1160,16 +1126,10 @@ fn parse_json_event_result(
         } else {
             message
         };
-        let Some(confirmation_ref) = uptick_confirmation_ref(event) else {
-            return Err(anyhow!(
-                "Viameta chưa trả mã đơn/ticket để xác nhận đã nhận đơn. Phản hồi: {}",
-                truncate_for_log(&event.to_string(), 300)
-            ));
-        };
         return Ok(Some(format_uptick_delivery_message(
             service,
             final_message,
-            Some(confirmation_ref),
+            uptick_confirmation_ref(event),
         )));
     }
     if event_type == "error" {
@@ -1251,13 +1211,6 @@ fn uptick_confirmation_ref(value: &Value) -> Option<String> {
         }
     }
     None
-}
-
-fn text_has_uptick_confirmation(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    ["order", "ticket", "request", "job", "uid", "mã đơn", "ma don"]
-        .iter()
-        .any(|marker| lower.contains(marker))
 }
 
 fn truncate_for_log(value: &str, max_chars: usize) -> String {
@@ -1378,13 +1331,6 @@ fn uid_from_cookie(service: ViametaService, cookie: &str) -> Option<String> {
                 .then(|| value.trim().to_string())
         })
         .filter(|value| !value.is_empty())
-}
-
-fn document_type_for_service(service: ViametaService) -> Option<&'static str> {
-    match service {
-        ViametaService::GetlinkFb => None,
-        ViametaService::UptickFb | ViametaService::UptickIg => Some("passport"),
-    }
 }
 
 async fn refund_viameta_order(
@@ -1568,10 +1514,10 @@ data: {"type":"done","payload":{"message":"done","ticket_id":"TK9"}}"#;
     }
 
     #[test]
-    fn uptick_parser_rejects_generic_done_without_tracking_ref() {
+    fn uptick_parser_accepts_generic_done_without_tracking_ref() {
         let text = r#"data: {"type":"done","payload":{"message":"Meta accepted"}}"#;
-        let parsed = parse_uptick_text_response(text, ViametaService::UptickFb);
+        let parsed = parse_uptick_text_response(text, ViametaService::UptickFb).unwrap();
 
-        assert!(parsed.is_err());
+        assert!(parsed.contains("Meta accepted"));
     }
 }
