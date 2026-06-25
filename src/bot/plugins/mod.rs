@@ -3,6 +3,7 @@ pub mod cmd_affiliate;
 pub mod cmd_api;
 pub mod cmd_broadcast;
 pub mod cmd_childbot;
+pub mod cmd_facebook_unlock;
 pub mod cmd_group_sales;
 pub mod cmd_help;
 pub mod cmd_orders;
@@ -68,6 +69,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_admin_menu::AdminMenuCommandPlugin),
         Box::new(cmd_affiliate::AffiliateCommandPlugin),
         Box::new(cmd_childbot::ChildBotCommandPlugin),
+        Box::new(cmd_facebook_unlock::FacebookUnlockCommandPlugin),
         Box::new(cmd_tut_public::TutPublicCommandPlugin),
         Box::new(cmd_tut_delete::TutDeleteCommandPlugin),
         Box::new(cmd_tut::TutCommandPlugin),

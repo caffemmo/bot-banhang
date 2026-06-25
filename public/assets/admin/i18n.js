@@ -122,6 +122,7 @@
     function isKeyboardButtonI18nKey(key) {
       return KEYBOARD_BUTTON_I18N_KEYS.has(key)
         || key.startsWith('start_btn_')
+        || key.startsWith('fbunlock_btn_')
         || key.startsWith('shop_btn_')
         || key.startsWith('topup_btn_')
         || key.startsWith('wallet_btn_');

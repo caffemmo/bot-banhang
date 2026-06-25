@@ -15,9 +15,14 @@ use crate::domains::configs::repo as configs_repo;
 use crate::domains::i18n::repo;
 
 const REQUIRED_START_BUTTON_KEYS: &[&str] = &[
+    "fbunlock_btn_back",
+    "fbunlock_btn_customer",
+    "fbunlock_btn_worker",
+    "fbunlock_btn_worker_apply",
     "start_btn_api_integration",
     "start_btn_affiliate_register",
     "start_btn_child_bot",
+    "start_btn_facebook_unlock",
     "start_btn_help",
     "start_btn_language",
     "start_btn_orders",
@@ -32,9 +37,14 @@ const REQUIRED_START_BUTTON_KEYS: &[&str] = &[
 
 fn required_start_button_default(key: &str) -> Option<&'static str> {
     match key {
+        "fbunlock_btn_back" => Some("⬅️ Back"),
+        "fbunlock_btn_customer" => Some("🙋 I need Facebook unlock"),
+        "fbunlock_btn_worker" => Some("🧑‍💻 I provide this service"),
+        "fbunlock_btn_worker_apply" => Some("📝 Apply as service worker"),
         "start_btn_api_integration" => Some("🔌 API integration"),
         "start_btn_affiliate_register" => Some("🤝 Register affiliate"),
         "start_btn_child_bot" => Some("🤖 Create child bot"),
+        "start_btn_facebook_unlock" => Some("🔓 Unlock Facebook"),
         "start_btn_help" => Some("Help"),
         "start_btn_language" => Some("🌐 Language"),
         "start_btn_orders" => Some("📋 Recent orders"),

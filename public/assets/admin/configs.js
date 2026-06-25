@@ -57,6 +57,13 @@
         ]
       },
       {
+        title: 'Mở khóa Facebook',
+        icon: '🔓',
+        fields: [
+          { key: 'facebook_unlock_price', label: 'Phí mở khóa Facebook', value: '50000' },
+        ]
+      },
+      {
         title: 'Admin Telegram',
         icon: '🧩',
         fields: [
@@ -229,6 +236,7 @@
         'viameta_getlink_fb_price',
         'viameta_uptick_fb_price',
         'viameta_uptick_ig_price',
+        'facebook_unlock_price',
       ]);
       if (numericKeys.has(key)) {
         return `<input type="number" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" min="0" step="1000">`;
@@ -289,11 +297,11 @@
         payload.order_memo_length = String(length);
       }
 
-      for (const key of ['viameta_getlink_fb_price', 'viameta_uptick_fb_price', 'viameta_uptick_ig_price']) {
+      for (const key of ['viameta_getlink_fb_price', 'viameta_uptick_fb_price', 'viameta_uptick_ig_price', 'facebook_unlock_price']) {
         if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
         const value = Number(String(payload[key] || '').trim());
         if (!Number.isInteger(value) || value < 0) {
-          return 'Giá dịch vụ tích xanh phải là số nguyên từ 0 trở lên.';
+          return 'Giá dịch vụ phải là số nguyên từ 0 trở lên.';
         }
         payload[key] = String(value);
       }

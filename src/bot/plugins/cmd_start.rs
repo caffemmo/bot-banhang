@@ -314,6 +314,7 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home"),
             ],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_facebook_unlock", "🔓 Mở khóa Facebook", "fbunlock:menu")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", "affiliate:register"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", "childbot:guide"),
@@ -369,6 +370,10 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
                 "tut:user_home".to_string(),
             ),
         ],
+        vec![(
+            texts.get_lang("start_btn_facebook_unlock", lang, "🔓 Mở khóa Facebook"),
+            "fbunlock:menu".to_string(),
+        )],
         vec![
             (
                 texts.get_lang("start_btn_affiliate_register", lang, "🤝 Đăng kí CTV"),
@@ -464,6 +469,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "shop_api" => "start_btn_api_integration",
         "viameta:menu" => "start_btn_viameta",
         "tut:user_home" => "start_btn_tut",
+        "fbunlock:menu" => "start_btn_facebook_unlock",
         "affiliate:register" => "start_btn_affiliate_register",
         "childbot:guide" => "start_btn_child_bot",
         "start:help" => "start_btn_help",
@@ -1174,6 +1180,10 @@ mod tests {
                     ),
                     ("start_btn_tut".to_string(), "📚 TUT".to_string()),
                     (
+                        "start_btn_facebook_unlock".to_string(),
+                        "🔓 Mở khóa Facebook".to_string(),
+                    ),
+                    (
                         "start_btn_affiliate_register".to_string(),
                         "🤝 Đăng kí CTV".to_string(),
                     ),
@@ -1212,6 +1222,10 @@ mod tests {
                     ("✅ Dịch vụ tích xanh".to_string(), "viameta:menu".to_string()),
                     ("📚 TUT".to_string(), "tut:user_home".to_string()),
                 ],
+                vec![(
+                    "🔓 Mở khóa Facebook".to_string(),
+                    "fbunlock:menu".to_string()
+                )],
                 vec![
                     ("🤝 Đăng kí CTV".to_string(), "affiliate:register".to_string()),
                     ("🤖 Tạo bot con".to_string(), "childbot:guide".to_string()),
@@ -1251,6 +1265,10 @@ mod tests {
                     ),
                     ("start_btn_tut".to_string(), "📚 TUT".to_string()),
                     (
+                        "start_btn_facebook_unlock".to_string(),
+                        "🔓 Mở khóa Facebook".to_string(),
+                    ),
+                    (
                         "start_btn_affiliate_register".to_string(),
                         "🤝 Đăng kí CTV".to_string(),
                     ),
@@ -1274,6 +1292,7 @@ mod tests {
                 vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
                 vec!["🔌 Tích hợp API".to_string(), "Hướng dẫn".to_string()],
                 vec!["✅ Dịch vụ tích xanh".to_string(), "📚 TUT".to_string()],
+                vec!["🔓 Mở khóa Facebook".to_string()],
                 vec!["🤝 Đăng kí CTV".to_string(), "🤖 Tạo bot con".to_string()],
                 vec!["🌐 Ngôn ngữ".to_string()],
             ]
