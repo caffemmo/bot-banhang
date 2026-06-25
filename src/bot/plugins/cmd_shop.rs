@@ -4518,6 +4518,9 @@ impl AppPlugin for ShopCommandPlugin {
             State::CreatingTutContent { .. } => {}
             State::ViametaCollectingCookie { .. } => {}
             State::ViametaCollectingImage { .. } => {}
+            State::FacebookUnlockIssue => {}
+            State::FacebookUnlockDetails { .. } => {}
+            State::FacebookUnlockWorkerApply => {}
         }
 
         Ok(false)
