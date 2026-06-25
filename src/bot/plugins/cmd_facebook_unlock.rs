@@ -432,7 +432,7 @@ async fn submit_unlock_case(
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(case_created_keyboard(ctx, lang))
+        .reply_markup(case_created_keyboard(&ctx, lang))
         .await?;
 
     if let Some(case) = load_case(&ctx.pool, &case_id).await? {
