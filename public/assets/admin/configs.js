@@ -60,7 +60,8 @@
         title: 'Mở khóa Facebook',
         icon: '🔓',
         fields: [
-          { key: 'facebook_unlock_price', label: 'Phí mở khóa Facebook', value: '50000' },
+          { key: 'facebook_unlock_platform_fee_percent', label: 'Phí sàn khi case thành công (%)', value: '20' },
+          { key: 'facebook_unlock_worker_ids', label: 'Telegram IDs người dịch vụ nhận case', value: '' },
         ]
       },
       {
@@ -236,7 +237,7 @@
         'viameta_getlink_fb_price',
         'viameta_uptick_fb_price',
         'viameta_uptick_ig_price',
-        'facebook_unlock_price',
+        'facebook_unlock_platform_fee_percent',
       ]);
       if (numericKeys.has(key)) {
         return `<input type="number" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" min="0" step="1000">`;
@@ -297,13 +298,21 @@
         payload.order_memo_length = String(length);
       }
 
-      for (const key of ['viameta_getlink_fb_price', 'viameta_uptick_fb_price', 'viameta_uptick_ig_price', 'facebook_unlock_price']) {
+      for (const key of ['viameta_getlink_fb_price', 'viameta_uptick_fb_price', 'viameta_uptick_ig_price']) {
         if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
         const value = Number(String(payload[key] || '').trim());
         if (!Number.isInteger(value) || value < 0) {
           return 'Giá dịch vụ phải là số nguyên từ 0 trở lên.';
         }
         payload[key] = String(value);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(payload, 'facebook_unlock_platform_fee_percent')) {
+        const value = Number(String(payload.facebook_unlock_platform_fee_percent || '').trim());
+        if (!Number.isInteger(value) || value < 0 || value > 100) {
+          return 'Phí sàn mở khóa Facebook phải là số nguyên từ 0 đến 100.';
+        }
+        payload.facebook_unlock_platform_fee_percent = String(value);
       }
 
       return null;

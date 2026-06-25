@@ -60,6 +60,9 @@ pub enum State {
         issue: String,
     },
     FacebookUnlockWorkerApply,
+    FacebookUnlockQuote {
+        case_id: String,
+    },
 }
 
 pub type BotDialogue = Dialogue<State, SqliteDialogueStorage>;

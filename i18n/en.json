@@ -123,6 +123,8 @@
   "fbunlock_btn_customer": "🙋 I need Facebook unlock",
   "fbunlock_btn_worker": "🧑‍💻 I provide this service",
   "fbunlock_btn_worker_apply": "📝 Apply as service worker",
+  "fbunlock_btn_worker_cases": "📋 View cases to quote",
+  "fbunlock_btn_quote_case": "💬 Quote case",
   "start_keyboard_placeholder": "Choose an action",
   "stock_left_short": "left {stock}",
   "stock_notify_buy_now_btn": "🛒 Buy now",

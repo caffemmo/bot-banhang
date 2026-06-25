@@ -17,8 +17,10 @@ use crate::domains::i18n::repo;
 const REQUIRED_START_BUTTON_KEYS: &[&str] = &[
     "fbunlock_btn_back",
     "fbunlock_btn_customer",
+    "fbunlock_btn_quote_case",
     "fbunlock_btn_worker",
     "fbunlock_btn_worker_apply",
+    "fbunlock_btn_worker_cases",
     "start_btn_api_integration",
     "start_btn_affiliate_register",
     "start_btn_child_bot",
@@ -39,8 +41,10 @@ fn required_start_button_default(key: &str) -> Option<&'static str> {
     match key {
         "fbunlock_btn_back" => Some("⬅️ Back"),
         "fbunlock_btn_customer" => Some("🙋 I need Facebook unlock"),
+        "fbunlock_btn_quote_case" => Some("💬 Quote case"),
         "fbunlock_btn_worker" => Some("🧑‍💻 I provide this service"),
         "fbunlock_btn_worker_apply" => Some("📝 Apply as service worker"),
+        "fbunlock_btn_worker_cases" => Some("📋 View cases to quote"),
         "start_btn_api_integration" => Some("🔌 API integration"),
         "start_btn_affiliate_register" => Some("🤝 Register affiliate"),
         "start_btn_child_bot" => Some("🤖 Create child bot"),

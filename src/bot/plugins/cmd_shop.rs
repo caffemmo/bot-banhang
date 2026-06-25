@@ -4521,6 +4521,7 @@ impl AppPlugin for ShopCommandPlugin {
             State::FacebookUnlockIssue => {}
             State::FacebookUnlockDetails { .. } => {}
             State::FacebookUnlockWorkerApply => {}
+            State::FacebookUnlockQuote { .. } => {}
         }
 
         Ok(false)

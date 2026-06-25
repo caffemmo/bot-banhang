@@ -130,6 +130,8 @@
   "fbunlock_btn_customer": "🙋 Tôi cần mở khóa Facebook",
   "fbunlock_btn_worker": "🧑‍💻 Tôi là người dịch vụ",
   "fbunlock_btn_worker_apply": "📝 Đăng ký làm dịch vụ",
+  "fbunlock_btn_worker_cases": "📋 Xem case cần báo giá",
+  "fbunlock_btn_quote_case": "💬 Báo giá case",
   "start_keyboard_placeholder": "Chọn thao tác",
   "stock_left_short": "còn {stock}",
   "stock_notify_buy_now_btn": "🛒 Mua ngay",
