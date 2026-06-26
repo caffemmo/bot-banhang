@@ -396,6 +396,21 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 request_cancel_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
                 dialogue.update(State::Idle).await?;
             }
+            _ if data.starts_with("fbunlock:confirm_delete_case:") => {
+                let case_id = data.trim_start_matches("fbunlock:confirm_delete_case:");
+                customer_delete_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:delete_case:") => {
+                let case_id = data.trim_start_matches("fbunlock:delete_case:");
+                confirm_customer_delete_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id, &lang).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:hide_case:") => {
+                let case_id = data.trim_start_matches("fbunlock:hide_case:");
+                customer_hide_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
             _ if data.starts_with("fbunlock:confirm_done:") => {
                 let case_id = data.trim_start_matches("fbunlock:confirm_done:");
                 complete_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
@@ -455,6 +470,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
             payout_at TEXT,
             platform_fee INTEGER NOT NULL DEFAULT 0,
             worker_payout INTEGER NOT NULL DEFAULT 0,
+            customer_hidden INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -474,6 +490,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
         "payout_at TEXT",
         "platform_fee INTEGER NOT NULL DEFAULT 0",
         "worker_payout INTEGER NOT NULL DEFAULT 0",
+        "customer_hidden INTEGER NOT NULL DEFAULT 0",
     ] {
         let sql = format!("ALTER TABLE facebook_unlock_cases ADD COLUMN {column}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -1190,6 +1207,24 @@ async fn send_customer_my_cases(
             html_escape(&case.issue),
             html_escape(&case_note_info(&case.case_details))
         ));
+        if case.status == "open" {
+            rows.push(vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_delete_case",
+                &format!("🗑 Xóa #{}", number),
+                format!("fbunlock:delete_case:{}", case.id),
+            )]);
+        }
+        if case.status == "quoted_accepted" {
+            rows.push(vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_cancel_case",
+                &format!("❌ Hủy #{}", number),
+                format!("fbunlock:cancel_case:{}", case.id),
+            )]);
+        }
         if case.status == "paid_in_progress" || case.status == "worker_done" {
             rows.push(vec![
                 i18n::inline_button_callback(
@@ -1208,6 +1243,15 @@ async fn send_customer_my_cases(
                 ),
             ]);
         }
+        if case.status == "worker_failed" {
+            rows.push(vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_cancel_case",
+                &format!("❌ Yêu cầu hủy #{}", number),
+                format!("fbunlock:cancel_case:{}", case.id),
+            )]);
+        }
         if case.status == "worker_done" {
             rows.push(vec![
                 i18n::inline_button_callback(
@@ -1225,6 +1269,15 @@ async fn send_customer_my_cases(
                     format!("fbunlock:dispute:{}", case.id),
                 ),
             ]);
+        }
+        if matches!(case.status.as_str(), "cancelled" | "completed" | "refunded") {
+            rows.push(vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_hide_case",
+                &format!("🧹 Ẩn #{}", number),
+                format!("fbunlock:hide_case:{}", case.id),
+            )]);
         }
     }
     rows.push(vec![i18n::inline_button_callback(
@@ -1246,6 +1299,162 @@ async fn send_customer_my_cases(
         }),
     )
     .await?;
+    Ok(())
+}
+
+async fn confirm_customer_delete_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+    lang: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !is_case_customer(&case, customer_user_id, chat_id) {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền xóa case này.")
+            .await?;
+        return Ok(());
+    }
+    if case.status != "open" {
+        ctx.bot
+            .send_message(
+                chat_id,
+                "Chỉ xóa được case chưa có dịch vụ nhận. Case khác hãy dùng hủy hoặc ẩn.",
+            )
+            .await?;
+        return Ok(());
+    }
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "Bạn chắc chắn muốn xóa case <code>{}</code>?\nCase sẽ biến mất khỏi danh sách và không gửi cho dịch vụ nữa.",
+                html_escape(case_id)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            i18n::inline_button_callback(
+                ctx.as_ref(),
+                lang,
+                "fbunlock_btn_confirm_delete_case",
+                "✅ Xóa",
+                format!("fbunlock:confirm_delete_case:{case_id}"),
+            ),
+            i18n::inline_button_callback(
+                ctx.as_ref(),
+                lang,
+                "fbunlock_btn_back",
+                "↩️ Không",
+                "fbunlock:customer_my_cases",
+            ),
+        ]]))
+        .await?;
+    Ok(())
+}
+
+async fn customer_delete_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !is_case_customer(&case, customer_user_id, chat_id) {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền xóa case này.")
+            .await?;
+        return Ok(());
+    }
+    if case.status != "open" {
+        ctx.bot
+            .send_message(chat_id, "Chỉ xóa được case chưa có dịch vụ nhận.")
+            .await?;
+        return Ok(());
+    }
+
+    let mut tx = ctx.pool.begin().await?;
+    sqlx::query("DELETE FROM facebook_unlock_messages WHERE case_id = ?")
+        .bind(case_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM facebook_unlock_quotes WHERE case_id = ?")
+        .bind(case_id)
+        .execute(&mut *tx)
+        .await?;
+    let deleted = sqlx::query(
+        "DELETE FROM facebook_unlock_cases
+         WHERE id = ? AND status = 'open' AND (user_id = ? OR chat_id = ?)",
+    )
+    .bind(case_id)
+    .bind(customer_user_id)
+    .bind(chat_id.0)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+
+    if deleted == 0 {
+        ctx.bot
+            .send_message(chat_id, "Case này không còn xóa được.")
+            .await?;
+        return Ok(());
+    }
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!("Đã xóa case <code>{}</code> khỏi danh sách.", html_escape(case_id)),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    Ok(())
+}
+
+async fn customer_hide_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !is_case_customer(&case, customer_user_id, chat_id) {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền ẩn case này.")
+            .await?;
+        return Ok(());
+    }
+    if !matches!(case.status.as_str(), "cancelled" | "completed" | "refunded") {
+        ctx.bot
+            .send_message(chat_id, "Chỉ ẩn được case đã hủy, hoàn tiền hoặc hoàn tất.")
+            .await?;
+        return Ok(());
+    }
+
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE facebook_unlock_cases SET customer_hidden = 1, updated_at = ? WHERE id = ?",
+    )
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!("Đã ẩn case <code>{}</code> khỏi danh sách của bạn.", html_escape(case_id)),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
     Ok(())
 }
 
@@ -2022,7 +2231,8 @@ async fn list_customer_cases(
                 COALESCE(case_details, account_info, '') AS case_details,
                 accepted_quote_id, worker_user_id, amount, status, created_at
          FROM facebook_unlock_cases
-         WHERE user_id = ? OR chat_id = ?
+         WHERE (user_id = ? OR chat_id = ?)
+           AND COALESCE(customer_hidden, 0) = 0
          ORDER BY created_at DESC
          LIMIT ?",
     )
