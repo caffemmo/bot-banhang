@@ -4519,11 +4519,14 @@ impl AppPlugin for ShopCommandPlugin {
             State::ViametaCollectingCookie { .. } => {}
             State::ViametaCollectingImage { .. } => {}
             State::FacebookUnlockIssue => {}
+            State::FacebookUnlockCustomerUsername => {}
             State::FacebookUnlockDetails { .. } => {}
             State::FacebookUnlockOwnership { .. } => {}
             State::FacebookUnlockLockedDuration { .. } => {}
             State::FacebookUnlockCaseNote { .. } => {}
             State::FacebookUnlockWorkerApply => {}
+            State::FacebookUnlockWorkerServices { .. } => {}
+            State::FacebookUnlockWorkerRate { .. } => {}
             State::FacebookUnlockQuote { .. } => {}
             State::FacebookUnlockWorkerMessage { .. } => {}
             State::FacebookUnlockCustomerMessage { .. } => {}

@@ -56,6 +56,7 @@ pub enum State {
         cookie: String,
     },
     FacebookUnlockIssue,
+    FacebookUnlockCustomerUsername,
     FacebookUnlockDetails {
         issue: String,
     },
@@ -70,8 +71,16 @@ pub enum State {
         issue: String,
         ownership: String,
         locked_duration: String,
+        customer_username: String,
     },
     FacebookUnlockWorkerApply,
+    FacebookUnlockWorkerServices {
+        telegram_username: String,
+    },
+    FacebookUnlockWorkerRate {
+        telegram_username: String,
+        services: String,
+    },
     FacebookUnlockQuote {
         case_id: String,
     },

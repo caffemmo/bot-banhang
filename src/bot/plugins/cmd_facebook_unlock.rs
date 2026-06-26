@@ -100,6 +100,21 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
         };
 
         match state {
+            State::FacebookUnlockCustomerUsername => {
+                if text.is_empty() {
+                    ask_customer_telegram_username(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                let Some(username) = validate_own_telegram_username(&ctx, &msg, text).await? else {
+                    ask_customer_telegram_username(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                };
+                dialogue.update(State::FacebookUnlockIssue).await?;
+                ask_issue(&ctx, msg.chat.id).await?;
+                let _ = username;
+                Ok(true)
+            }
             State::FacebookUnlockIssue => {
                 if text.is_empty() {
                     ask_issue(&ctx, msg.chat.id).await?;
@@ -145,6 +160,7 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                         issue,
                         ownership,
                         locked_duration: text.to_string(),
+                        customer_username: telegram_username_from_message(&msg).unwrap_or_default(),
                     })
                     .await?;
                 ask_case_note(&ctx, msg.chat.id).await?;
@@ -154,6 +170,7 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 issue,
                 ownership,
                 locked_duration,
+                customer_username,
             } => {
                 if text.is_empty() {
                     ask_case_note(&ctx, msg.chat.id).await?;
@@ -166,6 +183,7 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                     issue,
                     ownership,
                     locked_duration,
+                    customer_username,
                     text.to_string(),
                     &lang,
                 )
@@ -175,11 +193,47 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
             }
             State::FacebookUnlockWorkerApply => {
                 if text.is_empty() {
-                    ask_worker_application(&ctx, msg.chat.id).await?;
+                    ask_worker_telegram_username(&ctx, msg.chat.id).await?;
                     return Ok(true);
                 }
                 chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
-                submit_worker_application(ctx.clone(), &msg, text.to_string()).await?;
+                let Some(username) = validate_own_telegram_username(&ctx, &msg, text).await? else {
+                    ask_worker_telegram_username(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                };
+                dialogue
+                    .update(State::FacebookUnlockWorkerServices {
+                        telegram_username: username,
+                    })
+                    .await?;
+                ask_worker_services(&ctx, msg.chat.id).await?;
+                Ok(true)
+            }
+            State::FacebookUnlockWorkerServices { telegram_username } => {
+                if text.is_empty() {
+                    ask_worker_services(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                dialogue
+                    .update(State::FacebookUnlockWorkerRate {
+                        telegram_username,
+                        services: text.to_string(),
+                    })
+                    .await?;
+                ask_worker_rate(&ctx, msg.chat.id).await?;
+                Ok(true)
+            }
+            State::FacebookUnlockWorkerRate {
+                telegram_username,
+                services,
+            } => {
+                if text.is_empty() {
+                    ask_worker_rate(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                submit_worker_application(ctx.clone(), &msg, telegram_username, services, text.to_string()).await?;
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
@@ -242,15 +296,19 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 dialogue.update(State::Idle).await?;
             }
             "fbunlock:customer" => {
-                ask_issue(&ctx, chat_id).await?;
-                dialogue.update(State::FacebookUnlockIssue).await?;
+                ask_customer_telegram_username(&ctx, chat_id).await?;
+                dialogue.update(State::FacebookUnlockCustomerUsername).await?;
+            }
+            "fbunlock:customer_my_cases" => {
+                send_customer_my_cases(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
+                dialogue.update(State::Idle).await?;
             }
             "fbunlock:worker" => {
                 send_worker_menu(&ctx, chat_id, &lang).await?;
                 dialogue.update(State::Idle).await?;
             }
             "fbunlock:worker_apply" => {
-                ask_worker_application(&ctx, chat_id).await?;
+                ask_worker_telegram_username(&ctx, chat_id).await?;
                 dialogue.update(State::FacebookUnlockWorkerApply).await?;
             }
             "fbunlock:worker_cases" => {
@@ -361,6 +419,11 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
             _ if data.starts_with("fbunlock:admin_reopen:") => {
                 let case_id = data.trim_start_matches("fbunlock:admin_reopen:");
                 admin_reopen_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:admin_delete_customer_cases:") => {
+                let case_id = data.trim_start_matches("fbunlock:admin_delete_customer_cases:");
+                admin_delete_customer_cases(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
                 dialogue.update(State::Idle).await?;
             }
             _ => {}
@@ -523,6 +586,7 @@ async fn send_unlock_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
             "reply_markup": {
                 "inline_keyboard": [
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_customer", "🙋 Tôi cần mở khóa Facebook", "fbunlock:customer")],
+                    [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_customer_my_cases", "🧾 Case của tôi", "fbunlock:customer_my_cases")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker", "🧑‍💻 Tôi là người dịch vụ", "fbunlock:worker")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_back", "⬅️ Quay lại", "start:menu")]
                 ]
@@ -573,6 +637,16 @@ async fn ask_issue(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     Ok(())
 }
 
+async fn ask_customer_telegram_username(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    ctx.bot
+        .send_message(
+            chat_id,
+            "Vui lòng nhập user Telegram của bạn:\nVD: @tencuaban\n\nLưu ý: phải đúng username của tài khoản Telegram đang dùng bot.",
+        )
+        .await?;
+    Ok(())
+}
+
 async fn ask_account_ownership(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     ctx.bot
         .send_message(
@@ -604,12 +678,26 @@ async fn ask_case_note(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     Ok(())
 }
 
-async fn ask_worker_application(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+async fn ask_worker_telegram_username(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     ctx.bot
         .send_message(
             chat_id,
-            "📝 Vui lòng gửi thông tin đăng ký làm dịch vụ:\n\nKinh nghiệm:\nDịch vụ xử lý được:\nTỉ lệ nhận case:\nLiên hệ Telegram:\n\nSau khi admin duyệt, bạn sẽ thấy các case đang cần báo giá.",
+            "Vui lòng nhập user Telegram của bạn:\nVD: @tencuaban\n\nLưu ý: phải đúng username của tài khoản Telegram đang dùng bot.",
         )
+        .await?;
+    Ok(())
+}
+
+async fn ask_worker_services(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    ctx.bot
+        .send_message(chat_id, "Dịch vụ xử lý được:\nVD: 282, 956, FAQ")
+        .await?;
+    Ok(())
+}
+
+async fn ask_worker_rate(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    ctx.bot
+        .send_message(chat_id, "Tỉ lệ nhận case:\nVD: 100%")
         .await?;
     Ok(())
 }
@@ -634,6 +722,7 @@ async fn submit_unlock_case(
     issue: String,
     ownership: String,
     locked_duration: String,
+    customer_username: String,
     case_note: String,
     lang: &str,
 ) -> Result<()> {
@@ -647,7 +736,8 @@ async fn submit_unlock_case(
     let case_id = format!("FBUNLOCK-{}", short_id());
     let now = Utc::now().to_rfc3339();
     let case_details = format!(
-        "Tài khoản chính chủ: {}\nThời gian bị khóa: {}\nThông tin khách note case: {}",
+        "Telegram khách: {}\nTài khoản chính chủ: {}\nThời gian bị khóa: {}\nThông tin khách note case: {}",
+        customer_username.trim(),
         ownership.trim(),
         locked_duration.trim(),
         case_note.trim()
@@ -691,7 +781,13 @@ async fn submit_unlock_case(
     Ok(())
 }
 
-async fn submit_worker_application(ctx: Arc<AppContext>, msg: &Message, info: String) -> Result<()> {
+async fn submit_worker_application(
+    ctx: Arc<AppContext>,
+    msg: &Message,
+    telegram_username: String,
+    services: String,
+    receive_rate: String,
+) -> Result<()> {
     let Some(user) = msg.from() else {
         ctx.bot.send_message(msg.chat.id, "Không xác định được user.").await?;
         return Ok(());
@@ -699,6 +795,12 @@ async fn submit_worker_application(ctx: Arc<AppContext>, msg: &Message, info: St
 
     let application_id = format!("FBWORKER-{}", short_id());
     let now = Utc::now().to_rfc3339();
+    let info = format!(
+        "Telegram dịch vụ: {}\nDịch vụ xử lý được: {}\nTỉ lệ nhận case: {}",
+        telegram_username.trim(),
+        services.trim(),
+        receive_rate.trim()
+    );
     sqlx::query(
         r#"
         INSERT INTO facebook_unlock_worker_applications
@@ -710,7 +812,7 @@ async fn submit_worker_application(ctx: Arc<AppContext>, msg: &Message, info: St
     .bind(user.id.0 as i64)
     .bind(msg.chat.id.0)
     .bind(user.username.clone())
-    .bind(info.trim())
+    .bind(info.as_str())
     .bind(&now)
     .bind(&now)
     .execute(&ctx.pool)
@@ -1044,6 +1146,92 @@ async fn send_worker_my_cases(
         "fbunlock_btn_back",
         "⬅️ Quay lại",
         "fbunlock:worker",
+    )]);
+
+    chat_ui::send_clean_menu_payload(
+        ctx,
+        chat_id,
+        json!({
+            "chat_id": chat_id.0,
+            "text": lines.join("\n"),
+            "parse_mode": "HTML",
+            "reply_markup": { "inline_keyboard": rows }
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn send_customer_my_cases(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    lang: &str,
+) -> Result<()> {
+    let cases = list_customer_cases(&ctx.pool, customer_user_id, chat_id.0, 10).await?;
+    if cases.is_empty() {
+        ctx.bot
+            .send_message(chat_id, "Bạn chưa có case mở khóa Facebook nào.")
+            .await?;
+        return Ok(());
+    }
+
+    let mut lines = vec!["🧾 <b>CASE CỦA TÔI</b>".to_string()];
+    let mut rows = Vec::new();
+    for (index, case) in cases.iter().enumerate() {
+        let number = index + 1;
+        lines.push(format!(
+            "\n#{} | Mã case: <code>{}</code>\nTrạng thái: {}\nThời gian: {}\n\nFacebook này đang bị vấn đề:\n{}\n\nThông tin khách note case:\n{}",
+            number,
+            html_escape(&case.id),
+            html_escape(customer_status_label(&case.status)),
+            html_escape(&format_time(&case.created_at)),
+            html_escape(&case.issue),
+            html_escape(&case_note_info(&case.case_details))
+        ));
+        if case.status == "paid_in_progress" || case.status == "worker_done" {
+            rows.push(vec![
+                i18n::inline_button_callback(
+                    ctx,
+                    lang,
+                    "fbunlock_btn_message_worker",
+                    &format!("💬 Nhắn dịch vụ #{}", number),
+                    format!("fbunlock:msg_worker:{}", case.id),
+                ),
+                i18n::inline_button_callback(
+                    ctx,
+                    lang,
+                    "fbunlock_btn_cancel_case",
+                    &format!("❌ Yêu cầu hủy #{}", number),
+                    format!("fbunlock:cancel_case:{}", case.id),
+                ),
+            ]);
+        }
+        if case.status == "worker_done" {
+            rows.push(vec![
+                i18n::inline_button_callback(
+                    ctx,
+                    lang,
+                    "fbunlock_btn_confirm_done",
+                    &format!("✅ Xác nhận #{}", number),
+                    format!("fbunlock:confirm_done:{}", case.id),
+                ),
+                i18n::inline_button_callback(
+                    ctx,
+                    lang,
+                    "fbunlock_btn_dispute",
+                    &format!("⚠️ Khiếu nại #{}", number),
+                    format!("fbunlock:dispute:{}", case.id),
+                ),
+            ]);
+        }
+    }
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_back",
+        "⬅️ Quay lại",
+        "fbunlock:menu",
     )]);
 
     chat_ui::send_clean_menu_payload(
@@ -1701,6 +1889,59 @@ async fn admin_reopen_case(
     Ok(())
 }
 
+async fn admin_delete_customer_cases(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    admin_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    if !is_admin(&ctx, admin_user_id) {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền xóa case khách.").await?;
+        return Ok(());
+    }
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    let mut tx = ctx.pool.begin().await?;
+    let case_ids = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM facebook_unlock_cases WHERE user_id = ? OR chat_id = ?",
+    )
+    .bind(case.user_id)
+    .bind(case.chat_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for id in &case_ids {
+        sqlx::query("DELETE FROM facebook_unlock_messages WHERE case_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM facebook_unlock_quotes WHERE case_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let deleted = sqlx::query("DELETE FROM facebook_unlock_cases WHERE user_id = ? OR chat_id = ?")
+        .bind(case.user_id)
+        .bind(case.chat_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await?;
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "Đã xóa {} case của khách {}.",
+                deleted,
+                html_escape(&case_customer_username(&case))
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    Ok(())
+}
+
 async fn load_case(pool: &SqlitePool, case_id: &str) -> Result<Option<FacebookUnlockCase>> {
     let case = sqlx::query_as::<_, FacebookUnlockCase>(
         "SELECT id, user_id, chat_id, username, issue, COALESCE(case_details, account_info, '') AS case_details,
@@ -1763,6 +2004,29 @@ async fn list_worker_in_progress_cases(
     .bind(worker_user_id)
     .bind(worker_user_id)
     .bind(worker_chat_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+async fn list_customer_cases(
+    pool: &SqlitePool,
+    customer_user_id: i64,
+    customer_chat_id: i64,
+    limit: i64,
+) -> Result<Vec<FacebookUnlockCase>> {
+    let rows = sqlx::query_as::<_, FacebookUnlockCase>(
+        "SELECT id, user_id, chat_id, username, issue,
+                COALESCE(case_details, account_info, '') AS case_details,
+                accepted_quote_id, worker_user_id, amount, status, created_at
+         FROM facebook_unlock_cases
+         WHERE user_id = ? OR chat_id = ?
+         ORDER BY created_at DESC
+         LIMIT ?",
+    )
+    .bind(customer_user_id)
+    .bind(customer_chat_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -2164,6 +2428,10 @@ fn admin_refund_keyboard(
             format!("fbunlock:admin_reopen:{case_id}"),
         )]);
     }
+    rows.push(vec![InlineKeyboardButton::callback(
+        "🗑️ Xóa toàn bộ case của khách",
+        format!("fbunlock:admin_delete_customer_cases:{case_id}"),
+    )]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2234,6 +2502,52 @@ fn case_note_info(case_details: &str) -> String {
         .unwrap_or_else(|| "Khách chưa ghi note case.".to_string())
 }
 
+fn detail_value(case_details: &str, prefix: &str) -> Option<String> {
+    case_details.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(prefix)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn case_customer_username(case: &FacebookUnlockCase) -> String {
+    detail_value(&case.case_details, "Telegram khách:")
+        .or_else(|| case.username.as_deref().map(|username| format!("@{}", username.trim_start_matches('@'))))
+        .unwrap_or_else(|| "Không có username".to_string())
+}
+
+async fn case_worker_username(ctx: &AppContext, case: &FacebookUnlockCase) -> String {
+    let Some(quote_id) = case.accepted_quote_id.as_deref() else {
+        return "Chưa có dịch vụ".to_string();
+    };
+    match load_quote(&ctx.pool, quote_id).await {
+        Ok(Some(quote)) => quote
+            .worker_username
+            .as_deref()
+            .map(|username| format!("@{}", username.trim_start_matches('@')))
+            .unwrap_or_else(|| "Dịch vụ chưa có username".to_string()),
+        _ => "Không tìm thấy dịch vụ".to_string(),
+    }
+}
+
+fn customer_status_label(status: &str) -> &str {
+    match status {
+        "open" => "Chưa có dịch vụ nhận / đang chờ báo giá",
+        "quoted_accepted" => "Đã chọn báo giá, chờ thanh toán",
+        "paid_in_progress" => "Dịch vụ đã nhận case / đang xử lý",
+        "worker_done" => "Dịch vụ báo hoàn tất, chờ bạn xác nhận",
+        "cancel_requested" => "Đang yêu cầu hủy/hoàn tiền",
+        "disputed" => "Đang tranh chấp/khiếu nại",
+        "worker_failed" => "Dịch vụ báo không xử lý được",
+        "completed" => "Đã hoàn tất",
+        "refunded" => "Đã hoàn tiền",
+        "cancelled" => "Đã hủy",
+        other => other,
+    }
+}
+
 fn short_id() -> String {
     Uuid::new_v4()
         .to_string()
@@ -2249,6 +2563,48 @@ fn html_escape(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn telegram_username_from_message(msg: &Message) -> Option<String> {
+    msg.from()
+        .and_then(|user| user.username.as_deref())
+        .map(|username| format!("@{}", username.trim_start_matches('@')))
+}
+
+async fn validate_own_telegram_username(
+    ctx: &AppContext,
+    msg: &Message,
+    raw: &str,
+) -> Result<Option<String>> {
+    let entered = raw.trim();
+    if !entered.starts_with('@') || entered.len() <= 1 || entered.split_whitespace().count() != 1 {
+        ctx.bot
+            .send_message(msg.chat.id, "Username Telegram phải có dạng @tencuaban.")
+            .await?;
+        return Ok(None);
+    }
+    let Some(actual) = telegram_username_from_message(msg) else {
+        ctx.bot
+            .send_message(
+                msg.chat.id,
+                "Tài khoản Telegram của bạn chưa đặt username. Vui lòng đặt username Telegram trước rồi quay lại.",
+            )
+            .await?;
+        return Ok(None);
+    };
+    if !entered.eq_ignore_ascii_case(&actual) {
+        ctx.bot
+            .send_message(
+                msg.chat.id,
+                format!(
+                    "Username bạn nhập không trùng với Telegram của tài khoản đang dùng bot. Vui lòng nhập đúng {}.",
+                    actual
+                ),
+            )
+            .await?;
+        return Ok(None);
+    }
+    Ok(Some(actual))
 }
 
 fn notification_admin_ids(ctx: &AppContext) -> Vec<i64> {
@@ -2325,14 +2681,18 @@ async fn save_relay_message(
 }
 
 async fn notify_admins_cancel_requested(ctx: &AppContext, case: &FacebookUnlockCase) {
+    let customer_username = case_customer_username(case);
+    let worker_username = case_worker_username(ctx, case).await;
     for admin_id in notification_admin_ids(ctx) {
         let _ = ctx
             .bot
             .send_message(
                 ChatId(admin_id),
                 format!(
-                    "⚠️ <b>KHÁCH YÊU CẦU HỦY/HOÀN TIỀN</b>\n\nCase: <code>{}</code>\nSố tiền: <b>{}</b>\nThời gian tạo: {}",
+                    "⚠️ <b>KHÁCH YÊU CẦU HỦY/HOÀN TIỀN</b>\n\nCase: <code>{}</code>\nKhách: {}\nDịch vụ: {}\nSố tiền: <b>{}</b>\nThời gian tạo: {}",
                     html_escape(&case.id),
+                    html_escape(&customer_username),
+                    html_escape(&worker_username),
                     format_vnd(case.amount),
                     html_escape(&format_time(&case.created_at))
                 ),
@@ -2344,14 +2704,18 @@ async fn notify_admins_cancel_requested(ctx: &AppContext, case: &FacebookUnlockC
 }
 
 async fn notify_admins_worker_failed(ctx: &AppContext, case: &FacebookUnlockCase) {
+    let customer_username = case_customer_username(case);
+    let worker_username = case_worker_username(ctx, case).await;
     for admin_id in notification_admin_ids(ctx) {
         let _ = ctx
             .bot
             .send_message(
                 ChatId(admin_id),
                 format!(
-                    "⚠️ <b>WORKER BÁO KHÔNG XỬ LÝ ĐƯỢC</b>\n\nCase: <code>{}</code>\nSố tiền: <b>{}</b>",
+                    "⚠️ <b>WORKER BÁO KHÔNG XỬ LÝ ĐƯỢC</b>\n\nCase: <code>{}</code>\nKhách: {}\nDịch vụ: {}\nSố tiền: <b>{}</b>",
                     html_escape(&case.id),
+                    html_escape(&customer_username),
+                    html_escape(&worker_username),
                     format_vnd(case.amount)
                 ),
             )
@@ -2362,14 +2726,18 @@ async fn notify_admins_worker_failed(ctx: &AppContext, case: &FacebookUnlockCase
 }
 
 async fn notify_admins_dispute(ctx: &AppContext, case: &FacebookUnlockCase) {
+    let customer_username = case_customer_username(case);
+    let worker_username = case_worker_username(ctx, case).await;
     for admin_id in notification_admin_ids(ctx) {
         let _ = ctx
             .bot
             .send_message(
                 ChatId(admin_id),
                 format!(
-                    "⚠️ <b>KHÁCH KHIẾU NẠI CASE MỞ KHÓA FACEBOOK</b>\n\nCase: <code>{}</code>\nSố tiền: <b>{}</b>",
+                    "⚠️ <b>KHÁCH KHIẾU NẠI CASE MỞ KHÓA FACEBOOK</b>\n\nCase: <code>{}</code>\nKhách: {}\nDịch vụ: {}\nSố tiền: <b>{}</b>",
                     html_escape(&case.id),
+                    html_escape(&customer_username),
+                    html_escape(&worker_username),
                     format_vnd(case.amount)
                 ),
             )

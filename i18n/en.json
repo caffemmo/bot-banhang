@@ -121,6 +121,7 @@
   "start_btn_wallet": "💳 Wallet",
   "fbunlock_btn_back": "⬅️ Back",
   "fbunlock_btn_customer": "🙋 I need Facebook unlock",
+  "fbunlock_btn_customer_my_cases": "🧾 My cases",
   "fbunlock_btn_worker": "🧑‍💻 I provide this service",
   "fbunlock_btn_worker_apply": "📝 Apply as service worker",
   "fbunlock_btn_worker_cases": "📋 View cases to quote",
