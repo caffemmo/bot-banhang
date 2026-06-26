@@ -428,7 +428,14 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
             }
             _ if data.starts_with("fbunlock:confirm_done:") => {
                 let case_id = data.trim_start_matches("fbunlock:confirm_done:");
-                complete_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                complete_case(
+                    ctx.clone(),
+                    chat_id,
+                    q.from.id.0 as i64,
+                    q.from.username.as_deref(),
+                    case_id,
+                )
+                .await?;
                 dialogue.update(State::Idle).await?;
             }
             _ if data.starts_with("fbunlock:dispute:") => {
@@ -1828,14 +1835,25 @@ async fn complete_case(
     ctx: Arc<AppContext>,
     chat_id: ChatId,
     customer_user_id: i64,
+    customer_username: Option<&str>,
     case_id: &str,
 ) -> Result<()> {
     let Some(case) = load_case(&ctx.pool, case_id).await? else {
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if !is_case_customer(&case, customer_user_id, chat_id) {
+    if !is_case_customer_with_username(&case, customer_user_id, chat_id, customer_username) {
         ctx.bot.send_message(chat_id, "Bạn không thể xác nhận case này.").await?;
+        return Ok(());
+    }
+    if case.status == "completed" {
+        ctx.bot
+            .send_message(
+                chat_id,
+                format!("Case <code>{}</code> đã được xác nhận hoàn tất rồi.", html_escape(case_id)),
+            )
+            .parse_mode(ParseMode::Html)
+            .await?;
         return Ok(());
     }
     if !matches!(case.status.as_str(), "paid_in_progress" | "worker_done") {
@@ -2842,6 +2860,14 @@ fn telegram_username_from_message(msg: &Message) -> Option<String> {
         .map(|username| format!("@{}", username.trim_start_matches('@')))
 }
 
+fn normalize_telegram_username(username: Option<&str>) -> Option<String> {
+    let username = username?.trim();
+    if username.is_empty() {
+        return None;
+    }
+    Some(format!("@{}", username.trim_start_matches('@')).to_ascii_lowercase())
+}
+
 async fn validate_own_telegram_username(
     ctx: &AppContext,
     msg: &Message,
@@ -2894,6 +2920,30 @@ fn is_admin(ctx: &AppContext, user_id: i64) -> bool {
 
 fn is_case_customer(case: &FacebookUnlockCase, user_id: i64, chat_id: ChatId) -> bool {
     case.user_id == user_id || case.chat_id == chat_id.0
+}
+
+fn is_case_customer_with_username(
+    case: &FacebookUnlockCase,
+    user_id: i64,
+    chat_id: ChatId,
+    username: Option<&str>,
+) -> bool {
+    if is_case_customer(case, user_id, chat_id) {
+        return true;
+    }
+    let Some(username) = normalize_telegram_username(username) else {
+        return false;
+    };
+    case.username
+        .as_deref()
+        .and_then(|stored| normalize_telegram_username(Some(stored)))
+        .or_else(|| {
+            detail_value(&case.case_details, "Telegram khách:")
+                .as_deref()
+                .and_then(|stored| normalize_telegram_username(Some(stored)))
+        })
+        .map(|stored| stored.eq_ignore_ascii_case(&username))
+        .unwrap_or(false)
 }
 
 async fn is_approved_worker(pool: &SqlitePool, user_id: i64) -> Result<bool> {
