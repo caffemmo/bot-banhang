@@ -25,6 +25,8 @@ const DEFAULT_CUSTOMER_MAX_OPEN_CASES: i64 = 3;
 const DEFAULT_CUSTOMER_CREATE_COOLDOWN_SECONDS: i64 = 120;
 const DEFAULT_CASE_NOTE_MIN_CHARS: usize = 10;
 const DEFAULT_MIN_QUOTE_AMOUNT: i64 = 10_000;
+const DEFAULT_DAILY_PROMO_INTERVAL_HOURS: i64 = 24;
+const DEFAULT_DAILY_PROMO_BATCH_LIMIT: i64 = 150;
 const REMINDER_DISABLED_FOREVER: &str = "forever";
 
 #[derive(Debug, Clone, FromRow)]
@@ -570,6 +572,18 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                     .await;
                 dialogue.update(State::Idle).await?;
             }
+            "fbunlock:daily_promo_disable" => {
+                disable_daily_promo(&ctx, q.from.id.0 as i64, chat_id.0).await?;
+                ctx.bot
+                    .send_message(chat_id, "Đã tắt nhắc hỗ trợ Facebook hằng ngày.")
+                    .await?;
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text("Đã tắt nhắc hỗ trợ Facebook hằng ngày.")
+                    .await;
+                dialogue.update(State::Idle).await?;
+            }
             _ => {}
         }
 
@@ -709,6 +723,20 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS facebook_unlock_daily_promos (
+            user_id INTEGER PRIMARY KEY,
+            chat_id INTEGER NOT NULL,
+            last_sent_at TEXT,
+            disabled INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -781,6 +809,28 @@ fn min_quote_amount(ctx: &AppContext) -> i64 {
     .ok()
     .filter(|amount| *amount > 0)
     .unwrap_or(DEFAULT_MIN_QUOTE_AMOUNT)
+}
+
+fn daily_promo_enabled(ctx: &AppContext) -> bool {
+    matches!(
+        ctx.get_text("facebook_unlock_daily_promo_enabled", "1")
+            .trim()
+            .to_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn daily_promo_interval_hours(ctx: &AppContext) -> i64 {
+    ctx.get_text(
+        "facebook_unlock_daily_promo_interval_hours",
+        &DEFAULT_DAILY_PROMO_INTERVAL_HOURS.to_string(),
+    )
+    .trim()
+    .parse::<i64>()
+    .ok()
+    .filter(|hours| *hours > 0)
+    .unwrap_or(DEFAULT_DAILY_PROMO_INTERVAL_HOURS)
 }
 
 fn button_matches(ctx: &AppContext, lang: &str, key: &str, text: &str) -> bool {
@@ -3267,6 +3317,70 @@ pub async fn send_open_case_reminders(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
+pub async fn send_daily_facebook_promos(ctx: &AppContext) -> Result<()> {
+    ensure_schema(&ctx.pool).await?;
+    if !daily_promo_enabled(ctx) {
+        return Ok(());
+    }
+    let cutoff = (Utc::now() - chrono::Duration::hours(daily_promo_interval_hours(ctx))).to_rfc3339();
+    let recipients = daily_promo_recipients(&ctx.pool, &cutoff, DEFAULT_DAILY_PROMO_BATCH_LIMIT).await?;
+    for recipient in recipients {
+        let user_id = recipient.0;
+        let chat_id = recipient.1;
+        let lang = i18n::user_lang_by_id(ctx, user_id).await;
+        let is_worker = is_approved_worker(&ctx.pool, user_id).await.unwrap_or(false);
+        let text = i18n::t(
+            ctx,
+            &lang,
+            "fbunlock_daily_promo_text",
+            "🔓 Bạn cần hỗ trợ về Facebook?\nHãy tạo case để được nhiều bên dịch vụ báo giá.\n\n🧑‍💻 Bạn muốn làm dịch vụ Facebook?\nHãy đăng ký để nhận case phù hợp.",
+        );
+        let mut rows = vec![vec![i18n::inline_button_callback(
+            ctx,
+            &lang,
+            "fbunlock_btn_customer",
+            "🙋 Tạo case Facebook",
+            "fbunlock:customer",
+        )]];
+        if is_worker {
+            rows.push(vec![i18n::inline_button_callback(
+                ctx,
+                &lang,
+                "fbunlock_btn_worker_cases",
+                "📋 Xem case cần báo giá",
+                "fbunlock:worker_cases",
+            )]);
+        } else {
+            rows.push(vec![i18n::inline_button_callback(
+                ctx,
+                &lang,
+                "fbunlock_btn_worker_apply",
+                "📝 Đăng ký làm dịch vụ",
+                "fbunlock:worker_apply",
+            )]);
+        }
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            &lang,
+            "fbunlock_btn_daily_promo_disable",
+            "🔕 Không nhắc nữa",
+            "fbunlock:daily_promo_disable",
+        )]);
+        if let Err(err) = ctx
+            .bot
+            .send_message(ChatId(chat_id), text)
+            .reply_markup(InlineKeyboardMarkup::new(rows))
+            .await
+        {
+            tracing::warn!("send facebook unlock daily promo to {chat_id} failed: {err}");
+            continue;
+        }
+        mark_daily_promo_sent(&ctx.pool, user_id, chat_id).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    }
+    Ok(())
+}
+
 async fn notify_admins_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
     for admin_id in notification_admin_ids(ctx) {
         let text = format!(
@@ -4124,6 +4238,71 @@ async fn approved_worker_recipients(pool: &SqlitePool) -> Result<Vec<(i64, i64)>
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+async fn daily_promo_recipients(
+    pool: &SqlitePool,
+    cutoff: &str,
+    limit: i64,
+) -> Result<Vec<(i64, i64)>> {
+    let rows = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT s.user_id, s.chat_id
+        FROM subscribers s
+        LEFT JOIN facebook_unlock_daily_promos p ON p.user_id = s.user_id
+        WHERE COALESCE(s.is_bot, 0) = 0
+          AND COALESCE(p.disabled, 0) = 0
+          AND (p.last_sent_at IS NULL OR p.last_sent_at < ?)
+        ORDER BY COALESCE(p.last_sent_at, '1970-01-01T00:00:00Z') ASC,
+                 COALESCE(s.updated_at, s.created_at, '1970-01-01T00:00:00Z') DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(cutoff)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+async fn mark_daily_promo_sent(pool: &SqlitePool, user_id: i64, chat_id: i64) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO facebook_unlock_daily_promos
+         (user_id, chat_id, last_sent_at, disabled, updated_at)
+         VALUES (?, ?, ?, 0, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+            chat_id = excluded.chat_id,
+            last_sent_at = excluded.last_sent_at,
+            updated_at = excluded.updated_at",
+    )
+    .bind(user_id)
+    .bind(chat_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn disable_daily_promo(ctx: &AppContext, user_id: i64, chat_id: i64) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO facebook_unlock_daily_promos
+         (user_id, chat_id, last_sent_at, disabled, updated_at)
+         VALUES (?, ?, ?, 1, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+            chat_id = excluded.chat_id,
+            disabled = 1,
+            updated_at = excluded.updated_at",
+    )
+    .bind(user_id)
+    .bind(chat_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(())
 }
 
 async fn mute_worker_reminders(
