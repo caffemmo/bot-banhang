@@ -2315,7 +2315,7 @@ async fn complete_case(
         &mut tx,
         worker_user_id,
         worker_payout,
-        "facebook_unlock_payout",
+        "admin_adjust",
         Some(&case.id),
         None,
         Some("facebook_unlock_worker_payout"),
@@ -2331,8 +2331,12 @@ async fn complete_case(
                 &ctx,
                 &customer_lang,
                 "fbunlock_case_completed_customer",
-                "✅ Case <code>{case_id}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.",
-                &[("case_id", html_escape(case_id))]
+                "✅ Case <code>{case_id}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.\n\nBot đã trả dịch vụ: <b>{worker_payout}</b>\nPhí sàn: <b>{platform_fee}</b>",
+                &[
+                    ("case_id", html_escape(case_id)),
+                    ("worker_payout", format_vnd(worker_payout)),
+                    ("platform_fee", format_vnd(platform_fee)),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -2550,7 +2554,10 @@ async fn admin_refund_case(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if !matches!(case.status.as_str(), "cancel_requested" | "worker_failed" | "disputed") {
+    if !matches!(
+        case.status.as_str(),
+        "paid_in_progress" | "worker_done" | "cancel_requested" | "worker_failed" | "disputed"
+    ) {
         ctx.bot.send_message(chat_id, "Case này không ở trạng thái cần hoàn tiền.").await?;
         return Ok(());
     }
@@ -2559,7 +2566,7 @@ async fn admin_refund_case(
     let updated = sqlx::query(
         "UPDATE facebook_unlock_cases
          SET status = 'refunded', refunded_at = ?, updated_at = ?
-         WHERE id = ? AND status IN ('cancel_requested', 'worker_failed', 'disputed')",
+         WHERE id = ? AND status IN ('paid_in_progress', 'worker_done', 'cancel_requested', 'worker_failed', 'disputed')",
     )
     .bind(&now)
     .bind(&now)
@@ -2575,7 +2582,7 @@ async fn admin_refund_case(
         &mut tx,
         case.user_id,
         case.amount,
-        "facebook_unlock_refund",
+        "refund",
         Some(&case.id),
         None,
         Some("facebook_unlock_refund"),
@@ -2625,7 +2632,10 @@ async fn admin_reject_refund(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if !matches!(case.status.as_str(), "cancel_requested" | "disputed" | "worker_failed") {
+    if !matches!(
+        case.status.as_str(),
+        "paid_in_progress" | "worker_done" | "cancel_requested" | "disputed" | "worker_failed"
+    ) {
         ctx.bot.send_message(chat_id, "Case này không ở trạng thái yêu cầu hoàn.").await?;
         return Ok(());
     }

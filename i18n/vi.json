@@ -198,7 +198,7 @@
   "fbunlock_case_paid_customer": "✅ Đã thanh toán case <code>{case_id}</code>.\nSố tiền bot đang giữ trung gian: <b>{amount}</b>\nSố dư còn lại: {balance}\n\nNgười dịch vụ phụ trách: {worker_username}\nBạn có thể bấm nút nhắn dịch vụ để trao đổi trực tiếp.",
   "fbunlock_case_paid_worker": "💰 <b>CASE ĐÃ THANH TOÁN</b>\n\nCase: <code>{case_id}</code>\nKhách đã thanh toán: <b>{amount}</b>\nPhí sàn: <b>{fee_percent}%</b> = {platform_fee}\nBạn nhận dự kiến khi hoàn tất: <b>{worker_receive}</b>\n\nTelegram khách: {customer_username}\n\n<b>Vấn đề:</b>\n{issue}\n\n<b>Thông tin case:</b>\n<pre>{case_details}</pre>",
   "fbunlock_worker_done_customer": "✅ Người dịch vụ báo đã hoàn tất case <code>{case_id}</code>. Vui lòng kiểm tra và xác nhận.",
-  "fbunlock_case_completed_customer": "✅ Case <code>{case_id}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.",
+  "fbunlock_case_completed_customer": "✅ Case <code>{case_id}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.\n\nBot đã trả dịch vụ: <b>{worker_payout}</b>\nPhí sàn: <b>{platform_fee}</b>",
   "fbunlock_cancel_unpaid_customer": "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.\n\nBạn có muốn đặt lại case này để dịch vụ khác báo giá không?",
   "fbunlock_repost_case_done": "✅ Đã đặt lại case.\n\nCase cũ: <code>{old_case_id}</code>\nCase mới: <code>{new_case_id}</code>\nTrạng thái: chờ dịch vụ báo giá.",
   "fbunlock_dispute_sent_customer": "Đã gửi khiếu nại kèm lý do cho admin.",

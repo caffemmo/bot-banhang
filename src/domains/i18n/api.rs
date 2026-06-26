@@ -198,7 +198,7 @@ fn required_start_button_default(key: &str) -> Option<&'static str> {
         "fbunlock_case_paid_customer" => Some("✅ Paid case <code>{case_id}</code>.\nEscrow held by bot: <b>{amount}</b>\nRemaining balance: {balance}\n\nService worker in charge: {worker_username}\nYou can press message service to chat directly."),
         "fbunlock_case_paid_worker" => Some("💰 <b>CASE PAID</b>\n\nCase: <code>{case_id}</code>\nCustomer paid: <b>{amount}</b>\nPlatform fee: <b>{fee_percent}%</b> = {platform_fee}\nExpected receive when complete: <b>{worker_receive}</b>\n\nCustomer Telegram: {customer_username}\n\n<b>Problem:</b>\n{issue}\n\n<b>Case info:</b>\n<pre>{case_details}</pre>"),
         "fbunlock_worker_done_customer" => Some("✅ Service worker marked case <code>{case_id}</code> as completed.\nPlease check and confirm."),
-        "fbunlock_case_completed_customer" => Some("✅ Case <code>{case_id}</code> completed. Thank you for confirming."),
+        "fbunlock_case_completed_customer" => Some("✅ Case <code>{case_id}</code> completed. Thank you for confirming.\n\nWorker payout: <b>{worker_payout}</b>\nPlatform fee: <b>{platform_fee}</b>"),
         "fbunlock_cancel_unpaid_customer" => Some("Case cancelled. You were not charged, so no refund is needed.\n\nDo you want to repost this case for other workers to quote?"),
         "fbunlock_repost_case_done" => Some("✅ Case reposted.\n\nOld case: <code>{old_case_id}</code>\nNew case: <code>{new_case_id}</code>\nStatus: waiting for service workers to quote."),
         "fbunlock_dispute_sent_customer" => Some("Dispute with reason sent to admin."),
