@@ -10,6 +10,7 @@ use teloxide::types::{
     BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
     ParseMode,
 };
+use url::Url;
 use uuid::Uuid;
 
 use crate::app::AppContext;
@@ -247,22 +248,30 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 Ok(true)
             }
             State::FacebookUnlockWorkerMessage { case_id } => {
-                if text.is_empty() {
-                    ask_relay_message(&ctx, msg.chat.id, &case_id, "khách").await?;
+                let Some(user) = msg.from() else {
                     return Ok(true);
-                }
-                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
-                relay_worker_message(ctx.clone(), &msg, &case_id, text).await?;
+                };
+                send_customer_contact_to_worker(&ctx, msg.chat.id, user.id.0 as i64, &case_id)
+                    .await?;
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
             State::FacebookUnlockCustomerMessage { case_id } => {
+                let Some(user) = msg.from() else {
+                    return Ok(true);
+                };
+                send_worker_contact_to_customer(&ctx, msg.chat.id, user.id.0 as i64, &case_id)
+                    .await?;
+                dialogue.update(State::Idle).await?;
+                Ok(true)
+            }
+            State::FacebookUnlockDisputeReason { case_id } => {
                 if text.is_empty() {
-                    ask_relay_message(&ctx, msg.chat.id, &case_id, "dịch vụ").await?;
+                    ask_dispute_reason(&ctx, msg.chat.id, &case_id).await?;
                     return Ok(true);
                 }
                 chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
-                relay_customer_message(ctx.clone(), &msg, &case_id, text).await?;
+                dispute_case(ctx.clone(), &msg, &case_id, text).await?;
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
@@ -393,14 +402,16 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 dialogue.update(State::Idle).await?;
             }
             _ if data.starts_with("fbunlock:msg_customer:") => {
-                let case_id = data.trim_start_matches("fbunlock:msg_customer:").to_string();
-                ask_relay_message(&ctx, chat_id, &case_id, "khách").await?;
-                dialogue.update(State::FacebookUnlockWorkerMessage { case_id }).await?;
+                let case_id = data.trim_start_matches("fbunlock:msg_customer:");
+                send_customer_contact_to_worker(&ctx, chat_id, q.from.id.0 as i64, case_id)
+                    .await?;
+                dialogue.update(State::Idle).await?;
             }
             _ if data.starts_with("fbunlock:msg_worker:") => {
-                let case_id = data.trim_start_matches("fbunlock:msg_worker:").to_string();
-                ask_relay_message(&ctx, chat_id, &case_id, "dịch vụ").await?;
-                dialogue.update(State::FacebookUnlockCustomerMessage { case_id }).await?;
+                let case_id = data.trim_start_matches("fbunlock:msg_worker:");
+                send_worker_contact_to_customer(&ctx, chat_id, q.from.id.0 as i64, case_id)
+                    .await?;
+                dialogue.update(State::Idle).await?;
             }
             _ if data.starts_with("fbunlock:worker_done:") => {
                 let case_id = data.trim_start_matches("fbunlock:worker_done:");
@@ -445,9 +456,11 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 dialogue.update(State::Idle).await?;
             }
             _ if data.starts_with("fbunlock:dispute:") => {
-                let case_id = data.trim_start_matches("fbunlock:dispute:");
-                dispute_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
-                dialogue.update(State::Idle).await?;
+                let case_id = data.trim_start_matches("fbunlock:dispute:").to_string();
+                ask_dispute_reason(&ctx, chat_id, &case_id).await?;
+                dialogue
+                    .update(State::FacebookUnlockDisputeReason { case_id })
+                    .await?;
             }
             _ if data.starts_with("fbunlock:admin_refund:") => {
                 let case_id = data.trim_start_matches("fbunlock:admin_refund:");
@@ -753,6 +766,20 @@ async fn ask_quote_amount(ctx: &AppContext, chat_id: ChatId, case_id: &str) -> R
             chat_id,
             format!(
                 "💬 Nhập báo giá cho case <code>{}</code>.\n\nVí dụ: <code>300000</code> hoặc <code>300000 | Có thể xử lý trong 24h</code>",
+                html_escape(case_id)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    Ok(())
+}
+
+async fn ask_dispute_reason(ctx: &AppContext, chat_id: ChatId, case_id: &str) -> Result<()> {
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "⚠️ Vui lòng nhập lý do khiếu nại cho case <code>{}</code>.\n\nVD: Dịch vụ báo xong nhưng tài khoản vẫn chưa mở.",
                 html_escape(case_id)
             ),
         )
@@ -1319,10 +1346,19 @@ async fn send_customer_case_action_menu(
         } else if action == "message"
             && matches!(case.status.as_str(), "paid_in_progress" | "worker_done")
         {
-            rows.push(vec![InlineKeyboardButton::callback(
-                format!("#{} · Nhắn · {}", number, issue),
-                format!("fbunlock:msg_worker:{}", case.id),
-            )]);
+            if let Some(quote_id) = case.accepted_quote_id.as_deref() {
+                if let Some(button) = load_quote(&ctx.pool, quote_id)
+                    .await?
+                    .and_then(|quote| {
+                        telegram_contact_button(
+                            &format!("#{} · Nhắn · {}", number, issue),
+                            &quote_worker_username(&quote),
+                        )
+                    })
+                {
+                    rows.push(vec![button]);
+                }
+            }
         }
     }
 
@@ -1657,14 +1693,15 @@ async fn pay_accepted_quote(
         .send_message(
             chat_id,
             format!(
-                "✅ Đã thanh toán case <code>{}</code>.\nSố tiền bot đang giữ trung gian: <b>{}</b>\nSố dư còn lại: {}\n\nNgười dịch vụ đã nhận case để xử lý.",
+                "✅ Đã thanh toán case <code>{}</code>.\nSố tiền bot đang giữ trung gian: <b>{}</b>\nSố dư còn lại: {}\n\nNgười dịch vụ phụ trách: {}\nBạn có thể bấm nút nhắn dịch vụ để trao đổi trực tiếp.",
                 html_escape(&case.id),
                 format_vnd(quote.amount),
-                format_vnd(balance_after)
+                format_vnd(balance_after),
+                html_escape(&quote_worker_username(&quote))
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(customer_case_keyboard(&ctx, lang, &case.id))
+        .reply_markup(customer_case_keyboard(&ctx, lang, &case.id, &quote))
         .await?;
 
     notify_worker_case_paid(&ctx, &case, &quote).await;
@@ -1723,7 +1760,7 @@ async fn relay_worker_message(
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(customer_case_keyboard(&ctx, "vi", case_id))
+        .reply_markup(customer_case_keyboard_from_case(&ctx, "vi", &case).await)
         .await?;
     ctx.bot.send_message(msg.chat.id, "Đã chuyển tin nhắn cho khách.").await?;
     Ok(())
@@ -1767,9 +1804,93 @@ async fn relay_customer_message(
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(worker_paid_case_keyboard(&ctx, "vi", case_id))
+        .reply_markup(worker_paid_case_keyboard(&ctx, "vi", case_id, &case_customer_username(&case)))
         .await?;
     ctx.bot.send_message(msg.chat.id, "Đã chuyển tin nhắn cho dịch vụ.").await?;
+    Ok(())
+}
+
+async fn send_customer_contact_to_worker(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    worker_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await? {
+        ctx.bot
+            .send_message(chat_id, "Bạn chưa được gắn với case này.")
+            .await?;
+        return Ok(());
+    }
+    let username = case_customer_username(&case);
+    if let Some(button) = telegram_contact_button("💬 Mở chat khách", &username) {
+        ctx.bot
+            .send_message(
+                chat_id,
+                format!(
+                    "Telegram khách của case <code>{}</code>: {}",
+                    html_escape(case_id),
+                    html_escape(&username)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button]]))
+            .await?;
+    } else {
+        ctx.bot
+            .send_message(chat_id, "Khách chưa có username Telegram để nhắn trực tiếp.")
+            .await?;
+    }
+    Ok(())
+}
+
+async fn send_worker_contact_to_customer(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !is_case_customer(&case, customer_user_id, chat_id) {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền nhắn dịch vụ trong case này.")
+            .await?;
+        return Ok(());
+    }
+    let Some(quote_id) = case.accepted_quote_id.as_deref() else {
+        ctx.bot.send_message(chat_id, "Case chưa có dịch vụ được chọn.").await?;
+        return Ok(());
+    };
+    let Some(quote) = load_quote(&ctx.pool, quote_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy dịch vụ của case.").await?;
+        return Ok(());
+    };
+    let username = quote_worker_username(&quote);
+    if let Some(button) = telegram_contact_button("💬 Mở chat dịch vụ", &username) {
+        ctx.bot
+            .send_message(
+                chat_id,
+                format!(
+                    "Telegram dịch vụ của case <code>{}</code>: {}",
+                    html_escape(case_id),
+                    html_escape(&username)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button]]))
+            .await?;
+    } else {
+        ctx.bot
+            .send_message(chat_id, "Dịch vụ chưa có username Telegram để nhắn trực tiếp.")
+            .await?;
+    }
     Ok(())
 }
 
@@ -1809,7 +1930,7 @@ async fn worker_mark_done(
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(customer_done_keyboard(&ctx, "vi", case_id))
+        .reply_markup(customer_done_keyboard_from_case(&ctx, "vi", &case).await)
         .await?;
     Ok(())
 }
@@ -2074,22 +2195,35 @@ async fn repost_cancelled_case(
 
 async fn dispute_case(
     ctx: Arc<AppContext>,
-    chat_id: ChatId,
-    customer_user_id: i64,
+    msg: &Message,
     case_id: &str,
+    reason: &str,
 ) -> Result<()> {
     let Some(case) = load_case(&ctx.pool, case_id).await? else {
-        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if !is_case_customer(&case, customer_user_id, chat_id) {
-        ctx.bot.send_message(chat_id, "Bạn không thể khiếu nại case này.").await?;
+    let Some(user) = msg.from() else {
+        ctx.bot
+            .send_message(msg.chat.id, "Không xác định được tài khoản Telegram.")
+            .await?;
+        return Ok(());
+    };
+    if !is_case_customer_with_username(&case, user.id.0 as i64, msg.chat.id, user.username.as_deref()) {
+        ctx.bot
+            .send_message(msg.chat.id, "Bạn không thể khiếu nại case này.")
+            .await?;
         return Ok(());
     }
     if !matches!(case.status.as_str(), "paid_in_progress" | "worker_done") {
         ctx.bot
-            .send_message(chat_id, "Case này không còn ở trạng thái có thể khiếu nại.")
+            .send_message(msg.chat.id, "Case này không còn ở trạng thái có thể khiếu nại.")
             .await?;
+        return Ok(());
+    }
+    let reason = reason.trim();
+    if reason.is_empty() {
+        ask_dispute_reason(&ctx, msg.chat.id, case_id).await?;
         return Ok(());
     }
     let now = Utc::now().to_rfc3339();
@@ -2098,8 +2232,10 @@ async fn dispute_case(
         .bind(case_id)
         .execute(&ctx.pool)
         .await?;
-    ctx.bot.send_message(chat_id, "Đã gửi khiếu nại cho admin.").await?;
-    notify_admins_dispute(&ctx, &case).await;
+    ctx.bot
+        .send_message(msg.chat.id, "Đã gửi khiếu nại kèm lý do cho admin.")
+        .await?;
+    notify_admins_dispute(&ctx, &case, reason).await;
     Ok(())
 }
 
@@ -2192,7 +2328,7 @@ async fn admin_reject_refund(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.status != "cancel_requested" && case.status != "disputed" {
+    if !matches!(case.status.as_str(), "cancel_requested" | "disputed" | "worker_failed") {
         ctx.bot.send_message(chat_id, "Case này không ở trạng thái yêu cầu hoàn.").await?;
         return Ok(());
     }
@@ -2608,6 +2744,7 @@ async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, qu
                  Khách đã thanh toán: <b>{}</b>\n\
                  Phí sàn nội bộ: <b>{}%</b> = {}\n\
                  Bạn nhận dự kiến khi hoàn tất: <b>{}</b>\n\n\
+                 Khách Telegram: {}\n\n\
                  <b>Vấn đề:</b>\n{}\n\n\
                  <b>Thông tin case:</b>\n<pre>{}</pre>",
                 html_escape(&case.id),
@@ -2615,12 +2752,18 @@ async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, qu
                 fee_percent,
                 format_vnd(platform_fee),
                 format_vnd(worker_receive),
+                html_escape(&case_customer_username(case)),
                 html_escape(&case.issue),
                 html_escape(&case.case_details),
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(worker_paid_case_keyboard(ctx, "vi", &case.id))
+        .reply_markup(worker_paid_case_keyboard(
+            ctx,
+            "vi",
+            &case.id,
+            &case_customer_username(case),
+        ))
         .await;
 }
 
@@ -2634,9 +2777,11 @@ async fn notify_admins_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, qu
             .send_message(
                 ChatId(admin_id),
                 format!(
-                    "💰 <b>CASE MỞ KHÓA ĐÃ THANH TOÁN</b>\n\nCase: <code>{}</code>\nQuote: <code>{}</code>\nKhách trả: <b>{}</b>\nWorker: <code>{}</code>\nPhí sàn {}%: {}\nWorker nhận dự kiến: {}",
+                    "💰 <b>CASE MỞ KHÓA ĐÃ THANH TOÁN</b>\n\nCase: <code>{}</code>\nQuote: <code>{}</code>\nKhách: {}\nDịch vụ: {}\nKhách trả: <b>{}</b>\nWorker ID: <code>{}</code>\nPhí sàn {}%: {}\nWorker nhận dự kiến: {}",
                     html_escape(&case.id),
                     html_escape(&quote.id),
+                    html_escape(&case_customer_username(case)),
+                    html_escape(&quote_worker_username(quote)),
                     format_vnd(quote.amount),
                     quote.worker_user_id,
                     fee_percent,
@@ -2750,54 +2895,111 @@ fn repost_cancelled_case_keyboard(case_id: &str) -> teloxide::types::InlineKeybo
     ])
 }
 
-fn worker_paid_case_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![i18n::inline_button_callback(
+fn worker_paid_case_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+    customer_username: &str,
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if let Some(button) = telegram_contact_button("💬 Nhắn khách", customer_username) {
+        rows.push(vec![button]);
+    }
+    rows.push(vec![
+        i18n::inline_button_callback(
             ctx,
             lang,
-            "fbunlock_btn_message_customer",
-            "💬 Nhắn khách",
-            format!("fbunlock:msg_customer:{case_id}"),
-        )],
-        vec![
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "fbunlock_btn_worker_done",
-                "✅ Báo đã hoàn tất",
-                format!("fbunlock:worker_done:{case_id}"),
-            ),
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "fbunlock_btn_worker_failed",
-                "⚠️ Không xử lý được",
-                format!("fbunlock:worker_failed:{case_id}"),
-            ),
-        ],
-    ])
+            "fbunlock_btn_worker_done",
+            "✅ Báo đã hoàn tất",
+            format!("fbunlock:worker_done:{case_id}"),
+        ),
+        i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_worker_failed",
+            "⚠️ Không xử lý được",
+            format!("fbunlock:worker_failed:{case_id}"),
+        ),
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
-fn customer_case_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "fbunlock_btn_message_worker",
-            "💬 Nhắn dịch vụ",
-            format!("fbunlock:msg_worker:{case_id}"),
-        )],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "fbunlock_btn_cancel_case",
-            "❌ Yêu cầu hủy/hoàn tiền",
-            format!("fbunlock:cancel_case:{case_id}"),
-        )],
-    ])
+async fn customer_case_keyboard_from_case(
+    ctx: &AppContext,
+    lang: &str,
+    case: &FacebookUnlockCase,
+) -> InlineKeyboardMarkup {
+    if let Some(quote_id) = case.accepted_quote_id.as_deref() {
+        if let Ok(Some(quote)) = load_quote(&ctx.pool, quote_id).await {
+            return customer_case_keyboard(ctx, lang, &case.id, &quote);
+        }
+    }
+    customer_case_keyboard_without_worker(ctx, lang, &case.id)
 }
 
-fn customer_done_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> InlineKeyboardMarkup {
+async fn customer_done_keyboard_from_case(
+    ctx: &AppContext,
+    lang: &str,
+    case: &FacebookUnlockCase,
+) -> InlineKeyboardMarkup {
+    if let Some(quote_id) = case.accepted_quote_id.as_deref() {
+        if let Ok(Some(quote)) = load_quote(&ctx.pool, quote_id).await {
+            return customer_done_keyboard(ctx, lang, &case.id, &quote);
+        }
+    }
+    customer_done_keyboard_without_worker(ctx, lang, &case.id)
+}
+
+fn customer_case_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+    quote: &FacebookUnlockQuote,
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if let Some(button) = telegram_contact_button("💬 Nhắn dịch vụ", &quote_worker_username(quote)) {
+        rows.push(vec![button]);
+    }
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_cancel_case",
+        "❌ Yêu cầu hủy/hoàn tiền",
+        format!("fbunlock:cancel_case:{case_id}"),
+    )]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn customer_case_keyboard_without_worker(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_cancel_case",
+        "❌ Yêu cầu hủy/hoàn tiền",
+        format!("fbunlock:cancel_case:{case_id}"),
+    )]])
+}
+
+fn customer_done_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+    quote: &FacebookUnlockQuote,
+) -> InlineKeyboardMarkup {
+    let mut second_row = vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_dispute",
+        "⚠️ Khiếu nại",
+        format!("fbunlock:dispute:{case_id}"),
+    )];
+    if let Some(button) = telegram_contact_button("💬 Nhắn dịch vụ", &quote_worker_username(quote)) {
+        second_row.push(button);
+    }
     InlineKeyboardMarkup::new(vec![
         vec![i18n::inline_button_callback(
             ctx,
@@ -2806,22 +3008,30 @@ fn customer_done_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> Inline
             "✅ Xác nhận thành công",
             format!("fbunlock:confirm_done:{case_id}"),
         )],
-        vec![
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "fbunlock_btn_dispute",
-                "⚠️ Khiếu nại",
-                format!("fbunlock:dispute:{case_id}"),
-            ),
-            i18n::inline_button_callback(
-                ctx,
-                lang,
-                "fbunlock_btn_message_worker",
-                "💬 Nhắn dịch vụ",
-                format!("fbunlock:msg_worker:{case_id}"),
-            ),
-        ],
+        second_row,
+    ])
+}
+
+fn customer_done_keyboard_without_worker(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_confirm_done",
+            "✅ Xác nhận thành công",
+            format!("fbunlock:confirm_done:{case_id}"),
+        )],
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_dispute",
+            "⚠️ Khiếu nại",
+            format!("fbunlock:dispute:{case_id}"),
+        )],
     ])
 }
 
@@ -2949,6 +3159,23 @@ fn case_customer_username(case: &FacebookUnlockCase) -> String {
     detail_value(&case.case_details, "Telegram khách:")
         .or_else(|| case.username.as_deref().map(|username| format!("@{}", username.trim_start_matches('@'))))
         .unwrap_or_else(|| "Không có username".to_string())
+}
+
+fn quote_worker_username(quote: &FacebookUnlockQuote) -> String {
+    quote
+        .worker_username
+        .as_deref()
+        .map(|username| format!("@{}", username.trim_start_matches('@')))
+        .unwrap_or_else(|| "Dịch vụ chưa có username".to_string())
+}
+
+fn telegram_contact_button(text: &str, username: &str) -> Option<InlineKeyboardButton> {
+    let username = username.trim().trim_start_matches('@');
+    if username.is_empty() || username.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let url = Url::parse(&format!("https://t.me/{username}")).ok()?;
+    Some(InlineKeyboardButton::url(text.to_string(), url))
 }
 
 async fn case_worker_username(ctx: &AppContext, case: &FacebookUnlockCase) -> String {
@@ -3203,7 +3430,7 @@ async fn notify_admins_worker_failed(ctx: &AppContext, case: &FacebookUnlockCase
     }
 }
 
-async fn notify_admins_dispute(ctx: &AppContext, case: &FacebookUnlockCase) {
+async fn notify_admins_dispute(ctx: &AppContext, case: &FacebookUnlockCase, reason: &str) {
     let customer_username = case_customer_username(case);
     let worker_username = case_worker_username(ctx, case).await;
     for admin_id in notification_admin_ids(ctx) {
@@ -3212,11 +3439,12 @@ async fn notify_admins_dispute(ctx: &AppContext, case: &FacebookUnlockCase) {
             .send_message(
                 ChatId(admin_id),
                 format!(
-                    "⚠️ <b>KHÁCH KHIẾU NẠI CASE MỞ KHÓA FACEBOOK</b>\n\nCase: <code>{}</code>\nKhách: {}\nDịch vụ: {}\nSố tiền: <b>{}</b>",
+                    "⚠️ <b>KHÁCH KHIẾU NẠI CASE MỞ KHÓA FACEBOOK</b>\n\nCase: <code>{}</code>\nKhách: {}\nDịch vụ: {}\nSố tiền: <b>{}</b>\n\n<b>Lý do khiếu nại:</b>\n{}",
                     html_escape(&case.id),
                     html_escape(&customer_username),
                     html_escape(&worker_username),
-                    format_vnd(case.amount)
+                    format_vnd(case.amount),
+                    html_escape(reason)
                 ),
             )
             .parse_mode(ParseMode::Html)

@@ -4530,6 +4530,7 @@ impl AppPlugin for ShopCommandPlugin {
             State::FacebookUnlockQuote { .. } => {}
             State::FacebookUnlockWorkerMessage { .. } => {}
             State::FacebookUnlockCustomerMessage { .. } => {}
+            State::FacebookUnlockDisputeReason { .. } => {}
         }
 
         Ok(false)
