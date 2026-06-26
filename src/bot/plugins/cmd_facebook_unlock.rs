@@ -1033,17 +1033,18 @@ async fn send_worker_case_list(
         return Ok(());
     }
 
-    let mut lines = vec!["📋 <b>CASE ĐANG CHỜ BÁO GIÁ</b>".to_string()];
+    let mut lines = vec!["🔓 <b>CASE CHỜ DỊCH VỤ</b>".to_string()];
     let mut rows = Vec::new();
     for (index, case) in cases.iter().enumerate() {
         let number = index + 1;
+        let note = html_escape(&case_note_info(&case.case_details));
         lines.push(format!(
-            "\n#{} | Mã case: <code>{}</code>\nTrạng thái: chờ dịch vụ nhận case\nThời gian: {}\n\nFacebook này đang bị vấn đề:\n{}\n\nThông tin khách note case:\n{}",
+            "\n╭─ 🧾 #{} · <code>{}</code>\n├ 🔒 Vấn đề: {}\n├ 📝 Ghi chú: <i>{}</i>\n├ 🕓 Thời gian: {}\n╰────────────────",
             number,
             html_escape(&case.id),
-            html_escape(&format_time(&case.created_at)),
             html_escape(&case.issue),
-            html_escape(&case_note_info(&case.case_details))
+            note,
+            html_escape(&format_short_time(&case.created_at))
         ));
         rows.push(vec![InlineKeyboardButton::callback(
             format!("💬 Báo giá #{}", number),
@@ -2094,17 +2095,18 @@ async fn notify_workers_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
         }
     }
     for worker_id in worker_ids {
+        let note = html_escape(&case_note_info(&case.case_details));
         let text = format!(
-            "🔓<b>CÓ CASE MỞ KHÓA FACEBOOK MỚI!</b>\n\n\
-             Mã case: <code>{}</code>\n\n\
-             Trạng thái: chờ dịch vụ nhận case\n\
-             Thời gian: {}\n\n\
-             Facebook này đang bị vấn đề:\n{}\n\n\
-             Thông tin khách note case:\n{}",
+            "🔓 <b>CASE CHỜ DỊCH VỤ</b>\n\n\
+             ╭─ 🧾 <code>{}</code>\n\
+             ├ 🔒 Vấn đề: {}\n\
+             ├ 📝 Ghi chú: <i>{}</i>\n\
+             ├ 🕓 Thời gian: {}\n\
+             ╰────────────────",
             html_escape(&case.id),
-            html_escape(&format_time(&case.created_at)),
             html_escape(&case.issue),
-            html_escape(&case_note_info(&case.case_details)),
+            note,
+            html_escape(&format_short_time(&case.created_at)),
         );
         let _ = ctx
             .bot
@@ -2467,6 +2469,14 @@ fn format_time(value: &str) -> String {
     };
     let vietnam = FixedOffset::east_opt(7 * 3600).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
     dt.with_timezone(&vietnam).format("%d/%m/%Y %H:%M").to_string()
+}
+
+fn format_short_time(value: &str) -> String {
+    let Ok(dt) = DateTime::parse_from_rfc3339(value) else {
+        return value.to_string();
+    };
+    let vietnam = FixedOffset::east_opt(7 * 3600).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+    dt.with_timezone(&vietnam).format("%d/%m %H:%M").to_string()
 }
 
 fn public_case_info(case_details: &str) -> String {
