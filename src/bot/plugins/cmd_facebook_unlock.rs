@@ -628,12 +628,12 @@ fn button_matches(ctx: &AppContext, lang: &str, key: &str, text: &str) -> bool {
 }
 
 async fn send_unlock_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
-    let text = i18n::t(ctx, lang, "fbunlock_menu_text", "🔓 <b>MỞ KHÓA FACEBOOK</b>\n\n\
+    let text = render_html_custom_emoji_placeholders(i18n::t(ctx, lang, "fbunlock_menu_text", "🔓 <b>MỞ KHÓA FACEBOOK</b>\n\n\
         Bot là trung gian giữa khách và người làm dịch vụ.\n\n\
         • Khách tạo case miễn phí để nhận báo giá.\n\
         • Nhiều người dịch vụ có thể cùng báo giá một case.\n\
         • Khách chọn giá phù hợp rồi thanh toán cho bot giữ tiền trung gian.\n\
-        • Khi case đã thanh toán, người dịch vụ mới nhận case để xử lý.");
+        • Khi case đã thanh toán, người dịch vụ mới nhận case để xử lý."));
     chat_ui::send_clean_menu_payload(
         ctx,
         chat_id,
@@ -657,7 +657,7 @@ async fn send_unlock_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
 
 async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
     let fee_percent = platform_fee_percent(ctx);
-    let text = i18n::tr(
+    let text = render_html_custom_emoji_placeholders(i18n::tr(
         ctx,
         lang,
         "fbunlock_worker_menu_text",
@@ -669,7 +669,7 @@ async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
             ("fee_percent", fee_percent.to_string()),
             ("sample_payout", format_vnd(300_000 - (300_000 * fee_percent / 100))),
         ],
-    );
+    ));
     chat_ui::send_clean_menu_payload(
         ctx,
         chat_id,
@@ -3359,6 +3359,39 @@ fn html_escape(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn render_html_custom_emoji_placeholders(text: String) -> String {
+    let mut rendered = String::with_capacity(text.len());
+    let mut byte_index = 0usize;
+
+    while byte_index < text.len() {
+        let remaining = &text[byte_index..];
+        if let Some((placeholder, custom_id)) = html_custom_emoji_placeholder(remaining) {
+            rendered.push_str(&format!(
+                r#"<tg-emoji emoji-id="{}">✨</tg-emoji>"#,
+                custom_id
+            ));
+            byte_index += placeholder.len();
+        } else if let Some(ch) = remaining.chars().next() {
+            rendered.push(ch);
+            byte_index += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    rendered
+}
+
+fn html_custom_emoji_placeholder(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('{')?;
+    let end = rest.find('}')?;
+    let custom_id = &rest[..end];
+    if !(8..=64).contains(&custom_id.len()) || !custom_id.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some((&text[..end + 2], custom_id))
 }
 
 fn telegram_username_from_message(msg: &Message) -> Option<String> {
