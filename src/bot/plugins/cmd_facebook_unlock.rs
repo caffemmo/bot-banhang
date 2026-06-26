@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::json;
 use sqlx::{FromRow, SqlitePool};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
-use teloxide::types::{BotCommand, CallbackQuery, ChatId, Message, ParseMode};
+use teloxide::types::{
+    BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+    ParseMode,
+};
 use uuid::Uuid;
 
 use crate::app::AppContext;
@@ -15,7 +18,7 @@ use crate::bot::plugins::cmd_wallet::format_vnd;
 use crate::bot::{BotDialogue, State, chat_ui, i18n};
 use crate::domains::wallet::repo as wallet_repo;
 
-const DEFAULT_PLATFORM_FEE_PERCENT: i64 = 20;
+const DEFAULT_PLATFORM_FEE_PERCENT: i64 = 10;
 
 #[derive(Debug, Clone, FromRow)]
 struct FacebookUnlockCase {
@@ -26,6 +29,7 @@ struct FacebookUnlockCase {
     issue: String,
     case_details: String,
     accepted_quote_id: Option<String>,
+    worker_user_id: Option<i64>,
     amount: i64,
     status: String,
     created_at: String,
@@ -42,6 +46,15 @@ struct FacebookUnlockQuote {
     note: Option<String>,
     status: String,
     created_at: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FacebookUnlockWorkerApplication {
+    id: String,
+    user_id: i64,
+    chat_id: i64,
+    username: Option<String>,
+    info: String,
 }
 
 pub struct FacebookUnlockCommandPlugin;
@@ -130,6 +143,26 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
+            State::FacebookUnlockWorkerMessage { case_id } => {
+                if text.is_empty() {
+                    ask_relay_message(&ctx, msg.chat.id, &case_id, "khách").await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                relay_worker_message(ctx.clone(), &msg, &case_id, text).await?;
+                dialogue.update(State::Idle).await?;
+                Ok(true)
+            }
+            State::FacebookUnlockCustomerMessage { case_id } => {
+                if text.is_empty() {
+                    ask_relay_message(&ctx, msg.chat.id, &case_id, "dịch vụ").await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                relay_customer_message(ctx.clone(), &msg, &case_id, text).await?;
+                dialogue.update(State::Idle).await?;
+                Ok(true)
+            }
             _ => Ok(false),
         }
     }
@@ -172,7 +205,17 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 dialogue.update(State::FacebookUnlockWorkerApply).await?;
             }
             "fbunlock:worker_cases" => {
-                send_worker_case_list(&ctx, chat_id, &lang).await?;
+                send_worker_case_list(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:approve_worker:") => {
+                let application_id = data.trim_start_matches("fbunlock:approve_worker:");
+                approve_worker_application(ctx.clone(), chat_id, q.from.id.0 as i64, application_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:reject_worker:") => {
+                let application_id = data.trim_start_matches("fbunlock:reject_worker:");
+                reject_worker_application(ctx.clone(), chat_id, q.from.id.0 as i64, application_id).await?;
                 dialogue.update(State::Idle).await?;
             }
             _ if data.starts_with("fbunlock:quote:") => {
@@ -188,6 +231,56 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
             _ if data.starts_with("fbunlock:pay_quote:") => {
                 let quote_id = data.trim_start_matches("fbunlock:pay_quote:");
                 pay_accepted_quote(ctx.clone(), chat_id, q.from.id.0 as i64, quote_id, &lang).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:msg_customer:") => {
+                let case_id = data.trim_start_matches("fbunlock:msg_customer:").to_string();
+                ask_relay_message(&ctx, chat_id, &case_id, "khách").await?;
+                dialogue.update(State::FacebookUnlockWorkerMessage { case_id }).await?;
+            }
+            _ if data.starts_with("fbunlock:msg_worker:") => {
+                let case_id = data.trim_start_matches("fbunlock:msg_worker:").to_string();
+                ask_relay_message(&ctx, chat_id, &case_id, "dịch vụ").await?;
+                dialogue.update(State::FacebookUnlockCustomerMessage { case_id }).await?;
+            }
+            _ if data.starts_with("fbunlock:worker_done:") => {
+                let case_id = data.trim_start_matches("fbunlock:worker_done:");
+                worker_mark_done(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:worker_failed:") => {
+                let case_id = data.trim_start_matches("fbunlock:worker_failed:");
+                worker_mark_failed(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:cancel_case:") => {
+                let case_id = data.trim_start_matches("fbunlock:cancel_case:");
+                request_cancel_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:confirm_done:") => {
+                let case_id = data.trim_start_matches("fbunlock:confirm_done:");
+                complete_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:dispute:") => {
+                let case_id = data.trim_start_matches("fbunlock:dispute:");
+                dispute_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:admin_refund:") => {
+                let case_id = data.trim_start_matches("fbunlock:admin_refund:");
+                admin_refund_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:admin_reject_refund:") => {
+                let case_id = data.trim_start_matches("fbunlock:admin_reject_refund:");
+                admin_reject_refund(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
+                dialogue.update(State::Idle).await?;
+            }
+            _ if data.starts_with("fbunlock:admin_reopen:") => {
+                let case_id = data.trim_start_matches("fbunlock:admin_reopen:");
+                admin_reopen_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
                 dialogue.update(State::Idle).await?;
             }
             _ => {}
@@ -213,6 +306,12 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
             accepted_quote_id TEXT,
             worker_user_id INTEGER,
             worker_note TEXT,
+            paid_at TEXT,
+            completed_at TEXT,
+            refunded_at TEXT,
+            payout_at TEXT,
+            platform_fee INTEGER NOT NULL DEFAULT 0,
+            worker_payout INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -226,6 +325,12 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
         "accepted_quote_id TEXT",
         "worker_user_id INTEGER",
         "worker_note TEXT",
+        "paid_at TEXT",
+        "completed_at TEXT",
+        "refunded_at TEXT",
+        "payout_at TEXT",
+        "platform_fee INTEGER NOT NULL DEFAULT 0",
+        "worker_payout INTEGER NOT NULL DEFAULT 0",
     ] {
         let sql = format!("ALTER TABLE facebook_unlock_cases ADD COLUMN {column}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -252,6 +357,24 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS facebook_unlock_workers (
+            user_id INTEGER PRIMARY KEY,
+            chat_id INTEGER NOT NULL,
+            username TEXT,
+            info TEXT,
+            status TEXT NOT NULL DEFAULT 'approved',
+            approved_by INTEGER,
+            approved_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS facebook_unlock_worker_applications (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -261,6 +384,21 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS facebook_unlock_messages (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL,
+            sender_role TEXT NOT NULL,
+            sender_user_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL
         )
         "#,
     )
@@ -321,8 +459,8 @@ async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
         "🧑‍💻 <b>KHU NGƯỜI LÀM DỊCH VỤ</b>\n\n\
          Bạn có thể xem các case đang chờ báo giá và gửi giá xử lý cho khách.\n\n\
          Phí sàn nội bộ: <b>{fee_percent}%</b> trên case thành công.\n\
-         Ví dụ báo giá 300.000đ, phí sàn {}%, bạn nhận dự kiến 240.000đ sau khi hoàn tất.",
-        fee_percent
+         Ví dụ báo giá 300.000đ, phí sàn {fee_percent}%, bạn nhận dự kiến {} sau khi hoàn tất.",
+        format_vnd(300_000 - (300_000 * fee_percent / 100))
     );
     chat_ui::send_clean_menu_payload(
         ctx,
@@ -358,7 +496,7 @@ async fn ask_case_details(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     ctx.bot
         .send_message(
             chat_id,
-            "🔐 Vui lòng gửi thông tin theo mẫu:\n\nUID hoặc link Facebook:\nTên tài khoản nếu có:\nLiên hệ Telegram:\nGhi chú thêm:\n\nKhông gửi mật khẩu hoặc mã 2FA trong chat. Bot sẽ xóa tin nhắn này sau khi nhận để dọn chat.",
+            "🔐 Vui lòng gửi thông tin theo mẫu:\n\nUID hoặc link Facebook:\nTình trạng tài khoản:\nẢnh chụp lỗi nếu có:\nGhi chú thêm:\n\nLưu ý: Không gửi mật khẩu, mã 2FA hoặc mã khôi phục. Người dịch vụ sẽ hướng dẫn bạn thao tác qua bot.",
         )
         .await?;
     Ok(())
@@ -368,7 +506,7 @@ async fn ask_worker_application(ctx: &AppContext, chat_id: ChatId) -> Result<()>
     ctx.bot
         .send_message(
             chat_id,
-            "📝 Vui lòng gửi thông tin đăng ký làm dịch vụ:\n\nKinh nghiệm:\nDịch vụ xử lý được:\nTỉ lệ nhận case:\nLiên hệ Telegram:\n\nBot sẽ xóa tin nhắn này sau khi nhận.",
+            "📝 Vui lòng gửi thông tin đăng ký làm dịch vụ:\n\nKinh nghiệm:\nDịch vụ xử lý được:\nTỉ lệ nhận case:\nLiên hệ Telegram:\n\nSau khi admin duyệt, bạn sẽ thấy các case đang cần báo giá.",
         )
         .await?;
     Ok(())
@@ -483,6 +621,99 @@ async fn submit_worker_application(ctx: Arc<AppContext>, msg: &Message, info: St
     Ok(())
 }
 
+async fn approve_worker_application(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    admin_user_id: i64,
+    application_id: &str,
+) -> Result<()> {
+    if !is_admin(&ctx, admin_user_id) {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền duyệt worker.").await?;
+        return Ok(());
+    }
+    let Some(application) = load_worker_application(&ctx.pool, application_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy đăng ký worker.").await?;
+        return Ok(());
+    };
+    let now = Utc::now().to_rfc3339();
+    let mut tx = ctx.pool.begin().await?;
+    sqlx::query(
+        "UPDATE facebook_unlock_worker_applications SET status = 'approved', updated_at = ? WHERE id = ?",
+    )
+    .bind(&now)
+    .bind(application_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO facebook_unlock_workers
+         (user_id, chat_id, username, info, status, approved_by, approved_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'approved', ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET chat_id = excluded.chat_id, username = excluded.username,
+             info = excluded.info, status = 'approved', approved_by = excluded.approved_by,
+             approved_at = excluded.approved_at, updated_at = excluded.updated_at",
+    )
+    .bind(application.user_id)
+    .bind(application.chat_id)
+    .bind(application.username.clone())
+    .bind(application.info.clone())
+    .bind(admin_user_id)
+    .bind(&now)
+    .bind(&now)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    ctx.bot
+        .send_message(chat_id, format!("Đã duyệt worker cho đăng ký <code>{}</code>.", html_escape(application_id)))
+        .parse_mode(ParseMode::Html)
+        .await?;
+    let _ = ctx
+        .bot
+        .send_message(
+            ChatId(application.chat_id),
+            "✅ Admin đã duyệt bạn làm dịch vụ mở khóa Facebook. Bạn có thể xem case và báo giá.",
+        )
+        .await;
+    Ok(())
+}
+
+async fn reject_worker_application(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    admin_user_id: i64,
+    application_id: &str,
+) -> Result<()> {
+    if !is_admin(&ctx, admin_user_id) {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền từ chối worker.").await?;
+        return Ok(());
+    }
+    let Some(application) = load_worker_application(&ctx.pool, application_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy đăng ký worker.").await?;
+        return Ok(());
+    };
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE facebook_unlock_worker_applications SET status = 'rejected', updated_at = ? WHERE id = ?",
+    )
+    .bind(&now)
+    .bind(application_id)
+    .execute(&ctx.pool)
+    .await?;
+    ctx.bot
+        .send_message(chat_id, format!("Đã từ chối đăng ký <code>{}</code>.", html_escape(application_id)))
+        .parse_mode(ParseMode::Html)
+        .await?;
+    let _ = ctx
+        .bot
+        .send_message(
+            ChatId(application.chat_id),
+            "Admin đã từ chối đăng ký làm dịch vụ mở khóa Facebook.",
+        )
+        .await;
+    Ok(())
+}
+
 async fn submit_quote(
     ctx: Arc<AppContext>,
     msg: &Message,
@@ -496,6 +727,12 @@ async fn submit_quote(
             .await?;
         return Ok(());
     };
+    if !is_approved_worker(&ctx.pool, user.id.0 as i64).await? {
+        ctx.bot
+            .send_message(msg.chat.id, "Bạn cần được admin duyệt làm dịch vụ trước khi báo giá.")
+            .await?;
+        return Ok(());
+    }
     let Some(case) = load_case(&ctx.pool, case_id).await? else {
         ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
@@ -553,7 +790,29 @@ async fn submit_quote(
     Ok(())
 }
 
-async fn send_worker_case_list(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
+async fn send_worker_case_list(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    worker_user_id: i64,
+    lang: &str,
+) -> Result<()> {
+    if !is_approved_worker(&ctx.pool, worker_user_id).await? {
+        ctx.bot
+            .send_message(
+                chat_id,
+                "Bạn cần đăng ký và được admin duyệt trước khi xem danh sách case.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_apply",
+                "📝 Đăng ký làm dịch vụ",
+                "fbunlock:worker_apply",
+            )]]))
+            .await?;
+        return Ok(());
+    }
+
     let cases = list_open_cases(&ctx.pool, 8).await?;
     if cases.is_empty() {
         ctx.bot
@@ -564,18 +823,18 @@ async fn send_worker_case_list(ctx: &AppContext, chat_id: ChatId, lang: &str) ->
 
     let mut lines = vec!["📋 <b>CASE ĐANG CHỜ BÁO GIÁ</b>".to_string()];
     let mut rows = Vec::new();
-    for case in cases {
+    for (index, case) in cases.iter().enumerate() {
+        let number = index + 1;
         lines.push(format!(
-            "\n<code>{}</code>\nVấn đề: {}\nTạo lúc: {}",
+            "\n#{} | Mã case: <code>{}</code>\nVấn đề: {}\nThời gian: {}\nThông tin public: {}",
+            number,
             html_escape(&case.id),
             html_escape(&case.issue),
-            html_escape(&case.created_at)
+            html_escape(&format_time(&case.created_at)),
+            html_escape(&public_case_info(&case.case_details))
         ));
-        rows.push(vec![i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "fbunlock_btn_quote_case",
-            "💬 Báo giá case",
+        rows.push(vec![InlineKeyboardButton::callback(
+            format!("💬 Báo giá #{}", number),
             format!("fbunlock:quote:{}", case.id),
         )]);
     }
@@ -656,7 +915,7 @@ async fn accept_quote(
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(pay_quote_keyboard(lang, &quote.id))
+        .reply_markup(pay_quote_keyboard(&ctx, lang, &quote.id, &quote.case_id))
         .await?;
 
     notify_worker_quote_accepted(&ctx, &quote).await;
@@ -705,6 +964,23 @@ async fn pay_accepted_quote(
 
     let now = Utc::now().to_rfc3339();
     let mut tx = ctx.pool.begin().await?;
+    let updated = sqlx::query(
+        "UPDATE facebook_unlock_cases
+         SET status = 'paid_in_progress', amount = ?, worker_user_id = ?, paid_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'quoted_accepted'",
+    )
+    .bind(quote.amount)
+    .bind(quote.worker_user_id)
+    .bind(&now)
+    .bind(&now)
+    .bind(&case.id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        tx.rollback().await?;
+        ctx.bot.send_message(chat_id, "Case này không còn ở trạng thái chờ thanh toán.").await?;
+        return Ok(());
+    }
     let balance_after = wallet_repo::debit_wallet(
         &mut tx,
         user_id,
@@ -712,15 +988,6 @@ async fn pay_accepted_quote(
         &case.id,
         Some("facebook_unlock_escrow"),
     )
-    .await?;
-    sqlx::query(
-        "UPDATE facebook_unlock_cases SET status = 'paid_in_progress', amount = ?, worker_user_id = ?, updated_at = ? WHERE id = ?",
-    )
-    .bind(quote.amount)
-    .bind(quote.worker_user_id)
-    .bind(&now)
-    .bind(&case.id)
-    .execute(&mut *tx)
     .await?;
     sqlx::query("UPDATE facebook_unlock_quotes SET status = 'paid', updated_at = ? WHERE id = ?")
         .bind(&now)
@@ -740,6 +1007,7 @@ async fn pay_accepted_quote(
             ),
         )
         .parse_mode(ParseMode::Html)
+        .reply_markup(customer_case_keyboard(&ctx, lang, &case.id))
         .await?;
 
     notify_worker_case_paid(&ctx, &case, &quote).await;
@@ -747,10 +1015,447 @@ async fn pay_accepted_quote(
     Ok(())
 }
 
+async fn ask_relay_message(ctx: &AppContext, chat_id: ChatId, case_id: &str, target: &str) -> Result<()> {
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "Nhập nội dung cần nhắn cho {} trong case <code>{}</code>.",
+                target,
+                html_escape(case_id)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    Ok(())
+}
+
+async fn relay_worker_message(
+    ctx: Arc<AppContext>,
+    msg: &Message,
+    case_id: &str,
+    text: &str,
+) -> Result<()> {
+    let Some(user) = msg.from() else {
+        return Ok(());
+    };
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.worker_user_id != Some(user.id.0 as i64) || case.status != "paid_in_progress" {
+        ctx.bot.send_message(msg.chat.id, "Bạn chưa có quyền nhắn khách trong case này.").await?;
+        return Ok(());
+    }
+    save_relay_message(&ctx.pool, case_id, "worker", user.id.0 as i64, text).await?;
+    ctx.bot
+        .send_message(
+            ChatId(case.chat_id),
+            format!(
+                "💬 Tin nhắn từ người dịch vụ cho case <code>{}</code>:\n\n{}",
+                html_escape(case_id),
+                html_escape(text)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(customer_case_keyboard(&ctx, "vi", case_id))
+        .await?;
+    ctx.bot.send_message(msg.chat.id, "Đã chuyển tin nhắn cho khách.").await?;
+    Ok(())
+}
+
+async fn relay_customer_message(
+    ctx: Arc<AppContext>,
+    msg: &Message,
+    case_id: &str,
+    text: &str,
+) -> Result<()> {
+    let Some(user) = msg.from() else {
+        return Ok(());
+    };
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.user_id != user.id.0 as i64 || case.status != "paid_in_progress" {
+        ctx.bot.send_message(msg.chat.id, "Bạn chưa có quyền nhắn dịch vụ trong case này.").await?;
+        return Ok(());
+    }
+    let Some(quote_id) = case.accepted_quote_id.as_deref() else {
+        ctx.bot.send_message(msg.chat.id, "Case chưa có worker được chọn.").await?;
+        return Ok(());
+    };
+    let Some(quote) = load_quote(&ctx.pool, quote_id).await? else {
+        ctx.bot.send_message(msg.chat.id, "Không tìm thấy worker của case.").await?;
+        return Ok(());
+    };
+    save_relay_message(&ctx.pool, case_id, "customer", user.id.0 as i64, text).await?;
+    ctx.bot
+        .send_message(
+            ChatId(quote.worker_chat_id),
+            format!(
+                "💬 Tin nhắn từ khách cho case <code>{}</code>:\n\n{}",
+                html_escape(case_id),
+                html_escape(text)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(worker_paid_case_keyboard(&ctx, "vi", case_id))
+        .await?;
+    ctx.bot.send_message(msg.chat.id, "Đã chuyển tin nhắn cho dịch vụ.").await?;
+    Ok(())
+}
+
+async fn worker_mark_done(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    worker_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.worker_user_id != Some(worker_user_id) || case.status != "paid_in_progress" {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền hoàn tất case này.").await?;
+        return Ok(());
+    }
+    ctx.bot.send_message(chat_id, "Đã báo khách xác nhận kết quả.").await?;
+    ctx.bot
+        .send_message(
+            ChatId(case.chat_id),
+            format!(
+                "✅ Người dịch vụ báo đã hoàn tất case <code>{}</code>. Vui lòng kiểm tra và xác nhận.",
+                html_escape(case_id)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(customer_done_keyboard(&ctx, "vi", case_id))
+        .await?;
+    Ok(())
+}
+
+async fn worker_mark_failed(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    worker_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.worker_user_id != Some(worker_user_id) || case.status != "paid_in_progress" {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền báo lỗi case này.").await?;
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    sqlx::query("UPDATE facebook_unlock_cases SET status = 'worker_failed', updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
+    ctx.bot.send_message(chat_id, "Đã báo admin xử lý case không hoàn tất.").await?;
+    notify_admins_worker_failed(&ctx, &case).await;
+    Ok(())
+}
+
+async fn complete_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.user_id != customer_user_id || case.status != "paid_in_progress" {
+        ctx.bot.send_message(chat_id, "Bạn không thể xác nhận case này.").await?;
+        return Ok(());
+    }
+    let Some(worker_user_id) = case.worker_user_id else {
+        ctx.bot.send_message(chat_id, "Case chưa có worker.").await?;
+        return Ok(());
+    };
+    let fee_percent = platform_fee_percent(&ctx);
+    let platform_fee = case.amount * fee_percent / 100;
+    let worker_payout = case.amount - platform_fee;
+    let now = Utc::now().to_rfc3339();
+    let mut tx = ctx.pool.begin().await?;
+    let updated = sqlx::query(
+        "UPDATE facebook_unlock_cases
+         SET status = 'completed', platform_fee = ?, worker_payout = ?, completed_at = ?, payout_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'paid_in_progress'",
+    )
+    .bind(platform_fee)
+    .bind(worker_payout)
+    .bind(&now)
+    .bind(&now)
+    .bind(&now)
+    .bind(&case.id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        tx.rollback().await?;
+        ctx.bot.send_message(chat_id, "Case này không còn ở trạng thái có thể hoàn tất.").await?;
+        return Ok(());
+    }
+    let worker_balance = wallet_repo::credit_wallet(
+        &mut tx,
+        worker_user_id,
+        worker_payout,
+        "facebook_unlock_payout",
+        Some(&case.id),
+        None,
+        Some("facebook_unlock_worker_payout"),
+    )
+    .await?;
+    tx.commit().await?;
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "✅ Case <code>{}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.",
+                html_escape(case_id)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    if let Some(quote_id) = case.accepted_quote_id.as_deref() {
+        if let Some(quote) = load_quote(&ctx.pool, quote_id).await? {
+            let _ = ctx
+                .bot
+                .send_message(
+                    ChatId(quote.worker_chat_id),
+                    format!(
+                        "✅ Case <code>{}</code> đã hoàn tất. Bạn nhận <b>{}</b>. Số dư ví: {}.",
+                        html_escape(case_id),
+                        format_vnd(worker_payout),
+                        format_vnd(worker_balance)
+                    ),
+                )
+                .parse_mode(ParseMode::Html)
+                .await;
+        }
+    }
+    Ok(())
+}
+
+async fn request_cancel_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.user_id != customer_user_id {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền hủy case này.").await?;
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    if case.status == "open" || case.status == "quoted_accepted" {
+        sqlx::query("UPDATE facebook_unlock_cases SET status = 'cancelled', updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(case_id)
+            .execute(&ctx.pool)
+            .await?;
+        ctx.bot.send_message(chat_id, "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.").await?;
+        return Ok(());
+    }
+    if case.status == "paid_in_progress" || case.status == "worker_failed" {
+        sqlx::query("UPDATE facebook_unlock_cases SET status = 'cancel_requested', updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(case_id)
+            .execute(&ctx.pool)
+            .await?;
+        ctx.bot.send_message(chat_id, "Đã gửi yêu cầu hủy/hoàn tiền cho admin.").await?;
+        notify_admins_cancel_requested(&ctx, &case).await;
+        return Ok(());
+    }
+    ctx.bot.send_message(chat_id, "Case hiện không thể hủy.").await?;
+    Ok(())
+}
+
+async fn dispute_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.user_id != customer_user_id || case.status != "paid_in_progress" {
+        ctx.bot.send_message(chat_id, "Bạn không thể khiếu nại case này.").await?;
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    sqlx::query("UPDATE facebook_unlock_cases SET status = 'disputed', updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
+    ctx.bot.send_message(chat_id, "Đã gửi khiếu nại cho admin.").await?;
+    notify_admins_dispute(&ctx, &case).await;
+    Ok(())
+}
+
+async fn admin_refund_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    admin_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    if !is_admin(&ctx, admin_user_id) {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền hoàn tiền.").await?;
+        return Ok(());
+    }
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !matches!(case.status.as_str(), "cancel_requested" | "worker_failed" | "disputed") {
+        ctx.bot.send_message(chat_id, "Case này không ở trạng thái cần hoàn tiền.").await?;
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut tx = ctx.pool.begin().await?;
+    let updated = sqlx::query(
+        "UPDATE facebook_unlock_cases
+         SET status = 'refunded', refunded_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('cancel_requested', 'worker_failed', 'disputed')",
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(&case.id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        tx.rollback().await?;
+        ctx.bot.send_message(chat_id, "Case này không còn ở trạng thái cần hoàn tiền.").await?;
+        return Ok(());
+    }
+    let balance_after = wallet_repo::credit_wallet(
+        &mut tx,
+        case.user_id,
+        case.amount,
+        "facebook_unlock_refund",
+        Some(&case.id),
+        None,
+        Some("facebook_unlock_refund"),
+    )
+    .await?;
+    if let Some(quote_id) = case.accepted_quote_id.as_deref() {
+        sqlx::query("UPDATE facebook_unlock_quotes SET status = 'refunded', updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(quote_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!("Đã hoàn {} cho khách case <code>{}</code>.", format_vnd(case.amount), html_escape(case_id)),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    let _ = ctx
+        .bot
+        .send_message(
+            ChatId(case.chat_id),
+            format!(
+                "✅ Case <code>{}</code> đã được hoàn tiền. Số dư ví hiện tại: {}.",
+                html_escape(case_id),
+                format_vnd(balance_after)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await;
+    Ok(())
+}
+
+async fn admin_reject_refund(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    admin_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    if !is_admin(&ctx, admin_user_id) {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền xử lý hoàn tiền.").await?;
+        return Ok(());
+    }
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.status != "cancel_requested" && case.status != "disputed" {
+        ctx.bot.send_message(chat_id, "Case này không ở trạng thái yêu cầu hoàn.").await?;
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    sqlx::query("UPDATE facebook_unlock_cases SET status = 'paid_in_progress', updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
+    ctx.bot.send_message(chat_id, "Đã từ chối hoàn tiền, case quay lại đang xử lý.").await?;
+    let _ = ctx
+        .bot
+        .send_message(ChatId(case.chat_id), format!("Admin đã từ chối hoàn tiền case <code>{}</code>.", html_escape(case_id)))
+        .parse_mode(ParseMode::Html)
+        .await;
+    Ok(())
+}
+
+async fn admin_reopen_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    admin_user_id: i64,
+    case_id: &str,
+) -> Result<()> {
+    if !is_admin(&ctx, admin_user_id) {
+        ctx.bot.send_message(chat_id, "Bạn không có quyền mở lại case.").await?;
+        return Ok(());
+    }
+    let Some(case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if case.status != "worker_failed" {
+        ctx.bot.send_message(chat_id, "Chỉ mở lại case khi worker báo không xử lý được.").await?;
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "UPDATE facebook_unlock_cases
+         SET status = 'open', accepted_quote_id = NULL, worker_user_id = NULL, updated_at = ?
+         WHERE id = ?",
+    )
+    .bind(&now)
+    .bind(case_id)
+    .execute(&ctx.pool)
+    .await?;
+    sqlx::query("UPDATE facebook_unlock_quotes SET status = 'rejected', updated_at = ? WHERE case_id = ?")
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
+    ctx.bot.send_message(chat_id, "Đã mở lại case để worker khác báo giá.").await?;
+    notify_workers_new_case(&ctx, &case).await;
+    Ok(())
+}
+
 async fn load_case(pool: &SqlitePool, case_id: &str) -> Result<Option<FacebookUnlockCase>> {
     let case = sqlx::query_as::<_, FacebookUnlockCase>(
         "SELECT id, user_id, chat_id, username, issue, COALESCE(case_details, account_info, '') AS case_details,
-                accepted_quote_id, amount, status, created_at
+                accepted_quote_id, worker_user_id, amount, status, created_at
          FROM facebook_unlock_cases WHERE id = ?",
     )
     .bind(case_id)
@@ -773,7 +1478,7 @@ async fn load_quote(pool: &SqlitePool, quote_id: &str) -> Result<Option<Facebook
 async fn list_open_cases(pool: &SqlitePool, limit: i64) -> Result<Vec<FacebookUnlockCase>> {
     let rows = sqlx::query_as::<_, FacebookUnlockCase>(
         "SELECT id, user_id, chat_id, username, issue, COALESCE(case_details, account_info, '') AS case_details,
-                accepted_quote_id, amount, status, created_at
+                accepted_quote_id, worker_user_id, amount, status, created_at
          FROM facebook_unlock_cases
          WHERE status = 'open'
          ORDER BY created_at DESC
@@ -812,17 +1517,24 @@ async fn notify_customer_quote(
 }
 
 async fn notify_workers_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
-    for worker_id in worker_notification_ids(ctx) {
+    let mut worker_ids = approved_worker_chat_ids(&ctx.pool).await.unwrap_or_default();
+    for seed_id in worker_notification_ids(ctx) {
+        if !worker_ids.contains(&seed_id) {
+            worker_ids.push(seed_id);
+        }
+    }
+    for worker_id in worker_ids {
         let text = format!(
             "🔓 <b>CASE MỞ KHÓA FACEBOOK CẦN BÁO GIÁ</b>\n\n\
              Mã case: <code>{}</code>\n\
              Vấn đề: {}\n\
              Thời gian: {}\n\n\
-             <b>Thông tin case:</b>\n<pre>{}</pre>",
+             <b>Thông tin public:</b>\n{}\n\n\
+             Thông tin chi tiết chỉ mở cho worker được khách chọn sau khi khách đã thanh toán.",
             html_escape(&case.id),
             html_escape(&case.issue),
-            html_escape(&case.created_at),
-            html_escape(&case.case_details),
+            html_escape(&format_time(&case.created_at)),
+            html_escape(&public_case_info(&case.case_details)),
         );
         let _ = ctx
             .bot
@@ -844,14 +1556,16 @@ async fn notify_admins_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
              Trạng thái: <code>{}</code>\n\
              Thời gian: {}\n\n\
              <b>Vấn đề:</b>\n{}\n\n\
+             <b>Thông tin public:</b>\n{}\n\n\
              <b>Thông tin case:</b>\n<pre>{}</pre>",
             html_escape(&case.id),
             case.user_id,
             html_escape(case.username.as_deref().unwrap_or("Không có")),
             case.chat_id,
             html_escape(&case.status),
-            html_escape(&case.created_at),
+            html_escape(&format_time(&case.created_at)),
             html_escape(&case.issue),
+            html_escape(&public_case_info(&case.case_details)),
             html_escape(&case.case_details),
         );
         let _ = ctx
@@ -875,7 +1589,7 @@ async fn notify_admins_quote(ctx: &AppContext, case: &FacebookUnlockCase, quote:
                     quote.worker_user_id,
                     format_vnd(quote.amount),
                     html_escape(&quote.status),
-                    html_escape(&quote.created_at)
+                    html_escape(&format_time(&quote.created_at))
                 ),
             )
             .parse_mode(ParseMode::Html)
@@ -924,6 +1638,7 @@ async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, qu
             ),
         )
         .parse_mode(ParseMode::Html)
+        .reply_markup(worker_paid_case_keyboard(ctx, "vi", &case.id))
         .await;
 }
 
@@ -975,6 +1690,7 @@ async fn notify_admins_worker_application(
             .bot
             .send_message(ChatId(admin_id), text)
             .parse_mode(ParseMode::Html)
+            .reply_markup(worker_application_keyboard(ctx, application_id))
             .await;
     }
 }
@@ -1018,12 +1734,150 @@ fn quote_customer_keyboard(quote_id: &str) -> teloxide::types::InlineKeyboardMar
     )]])
 }
 
-fn pay_quote_keyboard(lang: &str, quote_id: &str) -> teloxide::types::InlineKeyboardMarkup {
-    let _ = lang;
-    teloxide::types::InlineKeyboardMarkup::new(vec![vec![teloxide::types::InlineKeyboardButton::callback(
-        "💳 Thanh toán trung gian",
-        format!("fbunlock:pay_quote:{quote_id}"),
-    )]])
+fn pay_quote_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    quote_id: &str,
+    case_id: &str,
+) -> teloxide::types::InlineKeyboardMarkup {
+    teloxide::types::InlineKeyboardMarkup::new(vec![
+        vec![teloxide::types::InlineKeyboardButton::callback(
+            "💳 Thanh toán trung gian",
+            format!("fbunlock:pay_quote:{quote_id}"),
+        )],
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_cancel_case",
+            "❌ Hủy case",
+            format!("fbunlock:cancel_case:{case_id}"),
+        )],
+    ])
+}
+
+fn worker_paid_case_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_message_customer",
+            "💬 Nhắn khách",
+            format!("fbunlock:msg_customer:{case_id}"),
+        )],
+        vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_done",
+                "✅ Báo đã hoàn tất",
+                format!("fbunlock:worker_done:{case_id}"),
+            ),
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_failed",
+                "⚠️ Không xử lý được",
+                format!("fbunlock:worker_failed:{case_id}"),
+            ),
+        ],
+    ])
+}
+
+fn customer_case_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_message_worker",
+            "💬 Nhắn dịch vụ",
+            format!("fbunlock:msg_worker:{case_id}"),
+        )],
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_cancel_case",
+            "❌ Yêu cầu hủy/hoàn tiền",
+            format!("fbunlock:cancel_case:{case_id}"),
+        )],
+    ])
+}
+
+fn customer_done_keyboard(ctx: &AppContext, lang: &str, case_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_confirm_done",
+            "✅ Xác nhận thành công",
+            format!("fbunlock:confirm_done:{case_id}"),
+        )],
+        vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_dispute",
+                "⚠️ Khiếu nại",
+                format!("fbunlock:dispute:{case_id}"),
+            ),
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_message_worker",
+                "💬 Nhắn dịch vụ",
+                format!("fbunlock:msg_worker:{case_id}"),
+            ),
+        ],
+    ])
+}
+
+fn admin_refund_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+    include_reopen: bool,
+) -> InlineKeyboardMarkup {
+    let mut rows = vec![vec![
+        i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_admin_refund",
+            "💸 Hoàn tiền khách",
+            format!("fbunlock:admin_refund:{case_id}"),
+        ),
+        i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_admin_reject_refund",
+            "↩️ Từ chối hoàn",
+            format!("fbunlock:admin_reject_refund:{case_id}"),
+        ),
+    ]];
+    if include_reopen {
+        rows.push(vec![InlineKeyboardButton::callback(
+            "🔁 Mở lại case",
+            format!("fbunlock:admin_reopen:{case_id}"),
+        )]);
+    }
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn worker_application_keyboard(ctx: &AppContext, application_id: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        i18n::inline_button_callback(
+            ctx,
+            "vi",
+            "fbunlock_btn_approve_worker",
+            "✅ Duyệt worker",
+            format!("fbunlock:approve_worker:{application_id}"),
+        ),
+        i18n::inline_button_callback(
+            ctx,
+            "vi",
+            "fbunlock_btn_reject_worker",
+            "❌ Từ chối worker",
+            format!("fbunlock:reject_worker:{application_id}"),
+        ),
+    ]])
 }
 
 fn worker_quote_keyboard(case_id: &str) -> teloxide::types::InlineKeyboardMarkup {
@@ -1031,6 +1885,29 @@ fn worker_quote_keyboard(case_id: &str) -> teloxide::types::InlineKeyboardMarkup
         "💬 Báo giá case",
         format!("fbunlock:quote:{case_id}"),
     )]])
+}
+
+fn format_time(value: &str) -> String {
+    let Ok(dt) = DateTime::parse_from_rfc3339(value) else {
+        return value.to_string();
+    };
+    let vietnam = FixedOffset::east_opt(7 * 3600).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+    dt.with_timezone(&vietnam).format("%d/%m/%Y %H:%M").to_string()
+}
+
+fn public_case_info(case_details: &str) -> String {
+    case_details
+        .lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty()
+                && (line.to_ascii_lowercase().contains("uid")
+                    || line.to_ascii_lowercase().contains("facebook")
+                    || line.contains("fb.com"))
+        })
+        .or_else(|| case_details.lines().map(str::trim).find(|line| !line.is_empty()))
+        .unwrap_or("Chưa có thông tin public")
+        .to_string()
 }
 
 fn short_id() -> String {
@@ -1058,6 +1935,120 @@ fn notification_admin_ids(ctx: &AppContext) -> Vec<i64> {
         }
     }
     ids
+}
+
+fn is_admin(ctx: &AppContext, user_id: i64) -> bool {
+    notification_admin_ids(ctx).into_iter().any(|admin_id| admin_id == user_id)
+}
+
+async fn is_approved_worker(pool: &SqlitePool, user_id: i64) -> Result<bool> {
+    let exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(1) FROM facebook_unlock_workers WHERE user_id = ? AND status = 'approved'",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(exists > 0)
+}
+
+async fn approved_worker_chat_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
+    let worker_ids = sqlx::query_scalar::<_, i64>(
+        "SELECT chat_id FROM facebook_unlock_workers WHERE status = 'approved'",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(worker_ids)
+}
+
+async fn load_worker_application(
+    pool: &SqlitePool,
+    application_id: &str,
+) -> Result<Option<FacebookUnlockWorkerApplication>> {
+    let application = sqlx::query_as::<_, FacebookUnlockWorkerApplication>(
+        "SELECT id, user_id, chat_id, username, info
+         FROM facebook_unlock_worker_applications WHERE id = ?",
+    )
+    .bind(application_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(application)
+}
+
+async fn save_relay_message(
+    pool: &SqlitePool,
+    case_id: &str,
+    sender_role: &str,
+    sender_user_id: i64,
+    message: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO facebook_unlock_messages (id, case_id, sender_role, sender_user_id, message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(format!("FBMSG-{}", short_id()))
+    .bind(case_id)
+    .bind(sender_role)
+    .bind(sender_user_id)
+    .bind(message)
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn notify_admins_cancel_requested(ctx: &AppContext, case: &FacebookUnlockCase) {
+    for admin_id in notification_admin_ids(ctx) {
+        let _ = ctx
+            .bot
+            .send_message(
+                ChatId(admin_id),
+                format!(
+                    "⚠️ <b>KHÁCH YÊU CẦU HỦY/HOÀN TIỀN</b>\n\nCase: <code>{}</code>\nSố tiền: <b>{}</b>\nThời gian tạo: {}",
+                    html_escape(&case.id),
+                    format_vnd(case.amount),
+                    html_escape(&format_time(&case.created_at))
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_markup(admin_refund_keyboard(ctx, "vi", &case.id, false))
+            .await;
+    }
+}
+
+async fn notify_admins_worker_failed(ctx: &AppContext, case: &FacebookUnlockCase) {
+    for admin_id in notification_admin_ids(ctx) {
+        let _ = ctx
+            .bot
+            .send_message(
+                ChatId(admin_id),
+                format!(
+                    "⚠️ <b>WORKER BÁO KHÔNG XỬ LÝ ĐƯỢC</b>\n\nCase: <code>{}</code>\nSố tiền: <b>{}</b>",
+                    html_escape(&case.id),
+                    format_vnd(case.amount)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_markup(admin_refund_keyboard(ctx, "vi", &case.id, true))
+            .await;
+    }
+}
+
+async fn notify_admins_dispute(ctx: &AppContext, case: &FacebookUnlockCase) {
+    for admin_id in notification_admin_ids(ctx) {
+        let _ = ctx
+            .bot
+            .send_message(
+                ChatId(admin_id),
+                format!(
+                    "⚠️ <b>KHÁCH KHIẾU NẠI CASE MỞ KHÓA FACEBOOK</b>\n\nCase: <code>{}</code>\nSố tiền: <b>{}</b>",
+                    html_escape(&case.id),
+                    format_vnd(case.amount)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_markup(admin_refund_keyboard(ctx, "vi", &case.id, false))
+            .await;
+    }
 }
 
 fn worker_notification_ids(ctx: &AppContext) -> Vec<i64> {

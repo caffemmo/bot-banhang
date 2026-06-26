@@ -60,7 +60,7 @@
         title: 'Mở khóa Facebook',
         icon: '🔓',
         fields: [
-          { key: 'facebook_unlock_platform_fee_percent', label: 'Phí sàn khi case thành công (%)', value: '20' },
+          { key: 'facebook_unlock_platform_fee_percent', label: 'Phí sàn khi case thành công (%)', value: '10' },
           { key: 'facebook_unlock_worker_ids', label: 'Telegram IDs người dịch vụ nhận case', value: '' },
         ]
       },
