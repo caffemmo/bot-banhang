@@ -21,6 +21,9 @@ use crate::domains::wallet::repo as wallet_repo;
 
 const DEFAULT_PLATFORM_FEE_PERCENT: i64 = 10;
 const DEFAULT_WORKER_MAX_ACTIVE_CASES: i64 = 3;
+const DEFAULT_CUSTOMER_MAX_OPEN_CASES: i64 = 3;
+const DEFAULT_CUSTOMER_CREATE_COOLDOWN_SECONDS: i64 = 120;
+const DEFAULT_CASE_NOTE_MIN_CHARS: usize = 10;
 
 #[derive(Debug, Clone, FromRow)]
 struct FacebookUnlockCase {
@@ -175,6 +178,20 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 customer_username,
             } => {
                 if text.is_empty() {
+                    ask_case_note(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                }
+                let min_chars = case_note_min_chars(&ctx);
+                if text.chars().count() < min_chars {
+                    ctx.bot
+                        .send_message(
+                            msg.chat.id,
+                            format!(
+                                "Thông tin note case quá ngắn. Vui lòng mô tả ít nhất {} ký tự để dịch vụ hiểu case.",
+                                min_chars
+                            ),
+                        )
+                        .await?;
                     ask_case_note(&ctx, msg.chat.id).await?;
                     return Ok(true);
                 }
@@ -634,6 +651,41 @@ fn worker_max_active_cases(ctx: &AppContext) -> i64 {
     .unwrap_or(DEFAULT_WORKER_MAX_ACTIVE_CASES)
 }
 
+fn customer_max_open_cases(ctx: &AppContext) -> i64 {
+    ctx.get_text(
+        "facebook_unlock_customer_max_open_cases",
+        &DEFAULT_CUSTOMER_MAX_OPEN_CASES.to_string(),
+    )
+    .trim()
+    .parse::<i64>()
+    .ok()
+    .filter(|limit| *limit >= 0)
+    .unwrap_or(DEFAULT_CUSTOMER_MAX_OPEN_CASES)
+}
+
+fn customer_create_cooldown_seconds(ctx: &AppContext) -> i64 {
+    ctx.get_text(
+        "facebook_unlock_customer_create_cooldown_seconds",
+        &DEFAULT_CUSTOMER_CREATE_COOLDOWN_SECONDS.to_string(),
+    )
+    .trim()
+    .parse::<i64>()
+    .ok()
+    .filter(|seconds| *seconds >= 0)
+    .unwrap_or(DEFAULT_CUSTOMER_CREATE_COOLDOWN_SECONDS)
+}
+
+fn case_note_min_chars(ctx: &AppContext) -> usize {
+    ctx.get_text(
+        "facebook_unlock_case_note_min_chars",
+        &DEFAULT_CASE_NOTE_MIN_CHARS.to_string(),
+    )
+    .trim()
+    .parse::<usize>()
+    .ok()
+    .unwrap_or(DEFAULT_CASE_NOTE_MIN_CHARS)
+}
+
 fn button_matches(ctx: &AppContext, lang: &str, key: &str, text: &str) -> bool {
     i18n::button_text_match_variants(&i18n::t(ctx, lang, key, "🔓 Mở khóa Facebook"))
         .iter()
@@ -839,6 +891,33 @@ async fn submit_unlock_case(
             .await?;
         return Ok(());
     };
+    if customer_is_at_open_case_limit(&ctx.pool, &ctx, user.id.0 as i64, msg.chat.id.0).await? {
+        let limit = customer_max_open_cases(&ctx);
+        ctx.bot
+            .send_message(
+                msg.chat.id,
+                format!(
+                    "Bạn đang có tối đa {} case chưa xử lý. Vui lòng hủy/xóa bớt case cũ trước khi tạo case mới.",
+                    limit
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+    if let Some(wait_seconds) =
+        customer_create_cooldown_remaining(&ctx.pool, &ctx, user.id.0 as i64, msg.chat.id.0).await?
+    {
+        ctx.bot
+            .send_message(
+                msg.chat.id,
+                format!(
+                    "Bạn vừa tạo case gần đây. Vui lòng chờ thêm khoảng {} giây rồi tạo case mới.",
+                    wait_seconds
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
 
     let case_id = format!("FBUNLOCK-{}", short_id());
     let now = Utc::now().to_rfc3339();
@@ -2669,6 +2748,74 @@ async fn send_worker_active_limit_message(ctx: &AppContext, chat_id: ChatId) -> 
         )
         .await?;
     Ok(())
+}
+
+async fn customer_open_case_count(
+    pool: &SqlitePool,
+    customer_user_id: i64,
+    customer_chat_id: i64,
+) -> Result<i64> {
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1)
+         FROM facebook_unlock_cases
+         WHERE (user_id = ? OR chat_id = ?)
+           AND COALESCE(customer_hidden, 0) = 0
+           AND status IN ('open', 'quoted_accepted')",
+    )
+    .bind(customer_user_id)
+    .bind(customer_chat_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
+}
+
+async fn customer_is_at_open_case_limit(
+    pool: &SqlitePool,
+    ctx: &AppContext,
+    customer_user_id: i64,
+    customer_chat_id: i64,
+) -> Result<bool> {
+    let limit = customer_max_open_cases(ctx);
+    if limit <= 0 {
+        return Ok(false);
+    }
+    Ok(customer_open_case_count(pool, customer_user_id, customer_chat_id).await? >= limit)
+}
+
+async fn customer_create_cooldown_remaining(
+    pool: &SqlitePool,
+    ctx: &AppContext,
+    customer_user_id: i64,
+    customer_chat_id: i64,
+) -> Result<Option<i64>> {
+    let cooldown = customer_create_cooldown_seconds(ctx);
+    if cooldown <= 0 {
+        return Ok(None);
+    }
+    let Some(created_at) = sqlx::query_scalar::<_, String>(
+        "SELECT created_at
+         FROM facebook_unlock_cases
+         WHERE user_id = ? OR chat_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1",
+    )
+    .bind(customer_user_id)
+    .bind(customer_chat_id)
+    .fetch_optional(pool)
+    .await? else {
+        return Ok(None);
+    };
+    let Ok(created_at) = DateTime::parse_from_rfc3339(&created_at) else {
+        return Ok(None);
+    };
+    let elapsed = Utc::now()
+        .signed_duration_since(created_at.with_timezone(&Utc))
+        .num_seconds();
+    if elapsed >= cooldown {
+        Ok(None)
+    } else {
+        Ok(Some(cooldown - elapsed))
+    }
 }
 
 async fn list_customer_cases(

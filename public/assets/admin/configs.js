@@ -62,6 +62,9 @@
         fields: [
           { key: 'facebook_unlock_platform_fee_percent', label: 'Phí sàn khi case thành công (%)', value: '10' },
           { key: 'facebook_unlock_worker_max_active_cases', label: 'Số case tối đa mỗi dịch vụ đang xử lý (0 = tắt)', value: '3' },
+          { key: 'facebook_unlock_customer_max_open_cases', label: 'Số case mở tối đa mỗi khách (0 = tắt)', value: '3' },
+          { key: 'facebook_unlock_customer_create_cooldown_seconds', label: 'Thời gian chờ tạo case mới của khách, giây (0 = tắt)', value: '120' },
+          { key: 'facebook_unlock_case_note_min_chars', label: 'Số ký tự tối thiểu phần ghi chú case', value: '10' },
           { key: 'facebook_unlock_worker_ids', label: 'Telegram IDs người dịch vụ nhận case', value: '' },
         ]
       },
@@ -241,6 +244,13 @@
           <div class="form-text">Nhập 0 để tắt giới hạn. Mặc định nên để 3.</div>
         `;
       }
+      if (['facebook_unlock_customer_max_open_cases', 'facebook_unlock_customer_create_cooldown_seconds', 'facebook_unlock_case_note_min_chars'].includes(key)) {
+        return `
+          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
+            value="${escapeAttr(value)}" min="0" max="100000" step="1">
+          <div class="form-text">Nhập 0 để tắt giới hạn này.</div>
+        `;
+      }
       const numericKeys = new Set([
         'viameta_getlink_fb_price',
         'viameta_uptick_fb_price',
@@ -329,6 +339,20 @@
           return 'Số case tối đa mỗi dịch vụ phải là số nguyên từ 0 đến 100.';
         }
         payload.facebook_unlock_worker_max_active_cases = String(value);
+      }
+
+      const customerLimitRules = [
+        ['facebook_unlock_customer_max_open_cases', 'Số case mở tối đa mỗi khách', 100],
+        ['facebook_unlock_customer_create_cooldown_seconds', 'Thời gian chờ tạo case mới', 86400],
+        ['facebook_unlock_case_note_min_chars', 'Số ký tự tối thiểu phần ghi chú case', 1000],
+      ];
+      for (const [key, label, max] of customerLimitRules) {
+        if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+        const value = Number(String(payload[key] || '').trim());
+        if (!Number.isInteger(value) || value < 0 || value > max) {
+          return `${label} phải là số nguyên từ 0 đến ${max}.`;
+        }
+        payload[key] = String(value);
       }
 
       return null;
