@@ -363,6 +363,10 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 send_worker_case_list(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
                 dialogue.update(State::Idle).await?;
             }
+            "fbunlock:worker_paid_cases" => {
+                send_worker_paid_cases(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
+                dialogue.update(State::Idle).await?;
+            }
             "fbunlock:worker_my_cases" => {
                 send_worker_my_cases(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
                 dialogue.update(State::Idle).await?;
@@ -745,6 +749,7 @@ async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
             "reply_markup": {
                 "inline_keyboard": [
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_cases", "📋 Xem case cần báo giá", "fbunlock:worker_cases")],
+                    [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_paid_cases", "💰 Danh sách khách đã chuyển khoản", "fbunlock:worker_paid_cases")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_my_cases", "🧾 Case của tôi", "fbunlock:worker_my_cases")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_apply", "📝 Đăng ký làm dịch vụ", "fbunlock:worker_apply")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_back", "⬅️ Quay lại", "fbunlock:menu")]
@@ -1365,6 +1370,103 @@ async fn send_worker_my_cases(
     Ok(())
 }
 
+async fn send_worker_paid_cases(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    worker_user_id: i64,
+    lang: &str,
+) -> Result<()> {
+    if !is_approved_worker(&ctx.pool, worker_user_id).await? {
+        ctx.bot
+            .send_message(
+                chat_id,
+                "Bạn cần đăng ký và được admin duyệt trước khi xem danh sách khách đã chuyển khoản.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_apply",
+                "📝 Đăng ký làm dịch vụ",
+                "fbunlock:worker_apply",
+            )]]))
+            .await?;
+        return Ok(());
+    }
+
+    let cases = list_worker_paid_cases(&ctx.pool, worker_user_id, chat_id.0, 20).await?;
+    if cases.is_empty() {
+        ctx.bot
+            .send_message(
+                chat_id,
+                i18n::t(
+                    ctx,
+                    lang,
+                    "fbunlock_worker_paid_cases_empty",
+                    "Chưa có khách nào chuyển khoản cho case của bạn.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let mut lines = vec![i18n::t(
+        ctx,
+        lang,
+        "fbunlock_worker_paid_cases_title",
+        "💰 <b>KHÁCH ĐÃ CHUYỂN KHOẢN</b>",
+    )];
+    let mut rows = Vec::new();
+    for (index, case) in cases.iter().enumerate() {
+        let number = index + 1;
+        lines.push(format!(
+            "\n╭─ 💰 #{} · <code>{}</code>\n├ Khách đã chuyển: <b>{}</b>\n├ Telegram khách: {}\n├ Vấn đề: {}\n├ Ghi chú: <i>{}</i>\n├ Thời gian: {}\n╰────────────────",
+            number,
+            html_escape(&case.id),
+            format_vnd(case.amount),
+            html_escape(&case_customer_username(case)),
+            html_escape(&case.issue),
+            html_escape(&case_note_info(&case.case_details)),
+            html_escape(&format_short_time(&case.created_at))
+        ));
+        rows.push(vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_message_customer",
+                &format!("💬 Nhắn khách #{}", number),
+                format!("fbunlock:msg_customer:{}", case.id),
+            ),
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_done",
+                &format!("✅ Hoàn tất #{}", number),
+                format!("fbunlock:worker_done:{}", case.id),
+            ),
+        ]);
+    }
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_back",
+        "⬅️ Quay lại",
+        "fbunlock:worker",
+    )]);
+
+    chat_ui::send_clean_menu_payload(
+        ctx,
+        chat_id,
+        json!({
+            "chat_id": chat_id.0,
+            "text": lines.join("\n"),
+            "parse_mode": "HTML",
+            "reply_markup": { "inline_keyboard": rows }
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn send_customer_my_cases(
     ctx: &AppContext,
     chat_id: ChatId,
@@ -1870,7 +1972,9 @@ async fn pay_accepted_quote(
         .reply_markup(customer_case_keyboard(&ctx, lang, &case.id, &quote))
         .await?;
 
-    notify_worker_case_paid(&ctx, &case, &quote).await;
+    if let Err(err) = notify_worker_case_paid(&ctx, &case, &quote).await {
+        tracing::error!("send Facebook unlock paid notification to worker failed: {err}");
+    }
     notify_admins_case_paid(&ctx, &case, &quote).await;
     Ok(())
 }
@@ -2699,6 +2803,36 @@ async fn list_worker_in_progress_cases(
     Ok(rows)
 }
 
+async fn list_worker_paid_cases(
+    pool: &SqlitePool,
+    worker_user_id: i64,
+    worker_chat_id: i64,
+    limit: i64,
+) -> Result<Vec<FacebookUnlockCase>> {
+    let rows = sqlx::query_as::<_, FacebookUnlockCase>(
+        "SELECT c.id, c.user_id, c.chat_id, c.username, c.issue,
+                COALESCE(c.case_details, c.account_info, '') AS case_details,
+                c.accepted_quote_id, c.worker_user_id, c.amount, c.status, c.created_at
+         FROM facebook_unlock_cases c
+         LEFT JOIN facebook_unlock_quotes q ON q.id = c.accepted_quote_id
+         WHERE c.status = 'paid_in_progress'
+           AND (
+                c.worker_user_id = ?
+                OR q.worker_user_id = ?
+                OR q.worker_chat_id = ?
+           )
+         ORDER BY c.paid_at DESC, c.updated_at DESC, c.created_at DESC
+         LIMIT ?",
+    )
+    .bind(worker_user_id)
+    .bind(worker_user_id)
+    .bind(worker_chat_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 async fn worker_active_case_count(
     pool: &SqlitePool,
     worker_user_id: i64,
@@ -3048,12 +3182,12 @@ async fn notify_workers_case_cancel_requested(ctx: &AppContext, case: &FacebookU
     }
 }
 
-async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, quote: &FacebookUnlockQuote) {
+async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, quote: &FacebookUnlockQuote) -> Result<()> {
     let lang = "vi";
     let fee_percent = platform_fee_percent(ctx);
     let platform_fee = quote.amount * fee_percent / 100;
     let worker_receive = quote.amount - platform_fee;
-    let _ = ctx
+    ctx
         .bot
         .send_message(
             ChatId(quote.worker_chat_id),
@@ -3081,7 +3215,8 @@ async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, qu
             &case.id,
             &case_customer_username(case),
         ))
-        .await;
+        .await?;
+    Ok(())
 }
 
 async fn notify_admins_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, quote: &FacebookUnlockQuote) {
