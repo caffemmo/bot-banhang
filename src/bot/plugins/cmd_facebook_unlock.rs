@@ -993,7 +993,7 @@ async fn send_worker_my_cases(
         return Ok(());
     }
 
-    let cases = list_worker_active_cases(&ctx.pool, worker_user_id, chat_id.0, 10).await?;
+    let cases = list_worker_in_progress_cases(&ctx.pool, worker_user_id, chat_id.0, 10).await?;
     if cases.is_empty() {
         ctx.bot
             .send_message(chat_id, "Bạn chưa có case nào đang xử lý.")
@@ -1026,7 +1026,7 @@ async fn send_worker_my_cases(
                 ctx,
                 lang,
                 "fbunlock_btn_worker_done",
-                "✅ Báo đã hoàn tất",
+                &format!("✅ Báo đã hoàn tất #{}", number),
                 format!("fbunlock:worker_done:{}", case.id),
             ),
         ]);
@@ -1034,7 +1034,7 @@ async fn send_worker_my_cases(
             ctx,
             lang,
             "fbunlock_btn_worker_failed",
-            "⚠️ Không xử lý được",
+            &format!("⚠️ Không xử lý được #{}", number),
             format!("fbunlock:worker_failed:{}", case.id),
         )]);
     }
@@ -1243,10 +1243,16 @@ async fn relay_worker_message(
         ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.status != "paid_in_progress"
-        || !worker_can_handle_case(&ctx.pool, &case, user.id.0 as i64, msg.chat.id.0).await?
-    {
-        ctx.bot.send_message(msg.chat.id, "Bạn chưa có quyền nhắn khách trong case này.").await?;
+    if case.status != "paid_in_progress" {
+        ctx.bot
+            .send_message(msg.chat.id, "Case này không còn ở trạng thái đang xử lý.")
+            .await?;
+        return Ok(());
+    }
+    if !worker_can_handle_case(&ctx.pool, &case, user.id.0 as i64, msg.chat.id.0).await? {
+        ctx.bot
+            .send_message(msg.chat.id, "Bạn chưa được gắn với case này.")
+            .await?;
         return Ok(());
     }
     save_relay_message(&ctx.pool, case_id, "worker", user.id.0 as i64, text).await?;
@@ -1318,10 +1324,14 @@ async fn worker_mark_done(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.status != "paid_in_progress"
-        || !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await?
-    {
-        ctx.bot.send_message(chat_id, "Bạn không có quyền hoàn tất case này.").await?;
+    if case.status != "paid_in_progress" {
+        ctx.bot
+            .send_message(chat_id, "Case này không còn ở trạng thái đang xử lý nên không thể báo hoàn tất.")
+            .await?;
+        return Ok(());
+    }
+    if !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await? {
+        ctx.bot.send_message(chat_id, "Bạn chưa được gắn với case này.").await?;
         return Ok(());
     }
     ctx.bot.send_message(chat_id, "Đã báo khách xác nhận kết quả.").await?;
@@ -1349,10 +1359,14 @@ async fn worker_mark_failed(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.status != "paid_in_progress"
-        || !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await?
-    {
-        ctx.bot.send_message(chat_id, "Bạn không có quyền báo lỗi case này.").await?;
+    if case.status != "paid_in_progress" {
+        ctx.bot
+            .send_message(chat_id, "Case này không còn ở trạng thái đang xử lý nên không thể báo không xử lý được.")
+            .await?;
+        return Ok(());
+    }
+    if !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await? {
+        ctx.bot.send_message(chat_id, "Bạn chưa được gắn với case này.").await?;
         return Ok(());
     }
     let now = Utc::now().to_rfc3339();
@@ -1696,7 +1710,7 @@ async fn list_open_cases(pool: &SqlitePool, limit: i64) -> Result<Vec<FacebookUn
     Ok(rows)
 }
 
-async fn list_worker_active_cases(
+async fn list_worker_in_progress_cases(
     pool: &SqlitePool,
     worker_user_id: i64,
     worker_chat_id: i64,
@@ -1708,7 +1722,7 @@ async fn list_worker_active_cases(
                 c.accepted_quote_id, c.worker_user_id, c.amount, c.status, c.created_at
          FROM facebook_unlock_cases c
          LEFT JOIN facebook_unlock_quotes q ON q.id = c.accepted_quote_id
-         WHERE c.status IN ('paid_in_progress', 'worker_failed', 'cancel_requested', 'disputed')
+         WHERE c.status = 'paid_in_progress'
            AND (
                 c.worker_user_id = ?
                 OR q.worker_user_id = ?
