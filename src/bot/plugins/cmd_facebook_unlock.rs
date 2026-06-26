@@ -838,7 +838,7 @@ async fn send_worker_case_list(
             format!("fbunlock:quote:{}", case.id),
         )]);
     }
-    rows.push(vec![i18n::inline_button_callback_json(
+    rows.push(vec![i18n::inline_button_callback(
         ctx,
         lang,
         "fbunlock_btn_back",
