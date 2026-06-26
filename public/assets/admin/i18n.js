@@ -56,6 +56,10 @@
         title: 'Ví & nạp tiền',
         match: key => key.startsWith('wallet_') || key.startsWith('topup_'),
       },
+      {
+        title: 'Mở khóa Facebook',
+        match: key => key.startsWith('fbunlock_'),
+      },
     ];
 
     function groupForI18nKey(key) {

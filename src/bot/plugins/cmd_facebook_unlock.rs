@@ -234,7 +234,7 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                     return Ok(true);
                 }
                 chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
-                submit_worker_application(ctx.clone(), &msg, telegram_username, services, text.to_string()).await?;
+                submit_worker_application(ctx.clone(), &msg, telegram_username, services, text.to_string(), &lang).await?;
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
@@ -628,12 +628,12 @@ fn button_matches(ctx: &AppContext, lang: &str, key: &str, text: &str) -> bool {
 }
 
 async fn send_unlock_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
-    let text = "🔓 <b>MỞ KHÓA FACEBOOK</b>\n\n\
+    let text = i18n::t(ctx, lang, "fbunlock_menu_text", "🔓 <b>MỞ KHÓA FACEBOOK</b>\n\n\
         Bot là trung gian giữa khách và người làm dịch vụ.\n\n\
         • Khách tạo case miễn phí để nhận báo giá.\n\
         • Nhiều người dịch vụ có thể cùng báo giá một case.\n\
         • Khách chọn giá phù hợp rồi thanh toán cho bot giữ tiền trung gian.\n\
-        • Khi case đã thanh toán, người dịch vụ mới nhận case để xử lý.";
+        • Khi case đã thanh toán, người dịch vụ mới nhận case để xử lý.");
     chat_ui::send_clean_menu_payload(
         ctx,
         chat_id,
@@ -657,12 +657,18 @@ async fn send_unlock_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
 
 async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
     let fee_percent = platform_fee_percent(ctx);
-    let text = format!(
+    let text = i18n::tr(
+        ctx,
+        lang,
+        "fbunlock_worker_menu_text",
         "🧑‍💻 <b>KHU NGƯỜI LÀM DỊCH VỤ</b>\n\n\
          Bạn có thể xem các case đang chờ báo giá và gửi giá xử lý cho khách.\n\n\
          Phí sàn nội bộ: <b>{fee_percent}%</b> trên case thành công.\n\
-         Ví dụ báo giá 300.000đ, phí sàn {fee_percent}%, bạn nhận dự kiến {} sau khi hoàn tất.",
-        format_vnd(300_000 - (300_000 * fee_percent / 100))
+         Ví dụ báo giá 300.000đ, phí sàn {fee_percent}%, bạn nhận dự kiến {sample_payout} sau khi hoàn tất.",
+        &[
+            ("fee_percent", fee_percent.to_string()),
+            ("sample_payout", format_vnd(300_000 - (300_000 * fee_percent / 100))),
+        ],
     );
     chat_ui::send_clean_menu_payload(
         ctx,
@@ -686,87 +692,99 @@ async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
 }
 
 async fn ask_issue(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            "📌 Tài khoản Facebook của bạn đang bị vấn đề gì?\n\nVí dụ: checkpoint, khóa 956, két sắt, xác minh danh tính, mất 2FA...",
+            i18n::t(ctx, &lang, "fbunlock_prompt_issue", "📌 Tài khoản Facebook của bạn đang bị vấn đề gì?\n\nVí dụ: checkpoint, khóa 956, két sắt, xác minh danh tính, mất 2FA..."),
         )
         .await?;
     Ok(())
 }
 
 async fn ask_customer_telegram_username(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            "Vui lòng nhập user Telegram của bạn:\nVD: @tencuaban\n\nLưu ý: phải đúng username của tài khoản Telegram đang dùng bot.",
+            i18n::t(ctx, &lang, "fbunlock_prompt_customer_username", "Vui lòng nhập user Telegram của bạn:\nVD: @tencuaban\n\nLưu ý: phải đúng username của tài khoản Telegram đang dùng bot."),
         )
         .await?;
     Ok(())
 }
 
 async fn ask_account_ownership(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            "Tài khoản của bạn có chính chủ không?",
+            i18n::t(ctx, &lang, "fbunlock_prompt_ownership", "Tài khoản của bạn có chính chủ không?"),
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback("Có", "fbunlock:owned_yes"),
-            InlineKeyboardButton::callback("Không", "fbunlock:owned_no"),
+            i18n::inline_button_callback(ctx, &lang, "fbunlock_btn_owned_yes", "Có", "fbunlock:owned_yes"),
+            i18n::inline_button_callback(ctx, &lang, "fbunlock_btn_owned_no", "Không", "fbunlock:owned_no"),
         ]]))
         .await?;
     Ok(())
 }
 
 async fn ask_locked_duration(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
-        .send_message(chat_id, "Tài khoản bạn bị khóa bao nhiêu lâu?")
+        .send_message(chat_id, i18n::t(ctx, &lang, "fbunlock_prompt_locked_duration", "Tài khoản bạn bị khóa bao nhiêu lâu?"))
         .await?;
     Ok(())
 }
 
 async fn ask_case_note(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            "Bạn muốn mô tả tiêu đề cho CASE của bạn cho dịch vụ xem như nào?\n\nVD: acc em bị khóa 956, nhưng mà có đầy đủ giấy tờ, ai mở được thì nhận case nha!",
+            i18n::t(ctx, &lang, "fbunlock_prompt_case_note", "Bạn muốn mô tả tiêu đề cho CASE của bạn cho dịch vụ xem như nào?\n\nVD: acc em bị khóa 956, nhưng mà có đầy đủ giấy tờ, ai mở được thì nhận case nha!"),
         )
         .await?;
     Ok(())
 }
 
 async fn ask_worker_telegram_username(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            "Vui lòng nhập user Telegram của bạn:\nVD: @tencuaban\n\nLưu ý: phải đúng username của tài khoản Telegram đang dùng bot.",
+            i18n::t(ctx, &lang, "fbunlock_prompt_worker_username", "Vui lòng nhập user Telegram của bạn:\nVD: @tencuaban\n\nLưu ý: phải đúng username của tài khoản Telegram đang dùng bot."),
         )
         .await?;
     Ok(())
 }
 
 async fn ask_worker_services(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
-        .send_message(chat_id, "Dịch vụ xử lý được:\nVD: 282, 956, FAQ")
+        .send_message(chat_id, i18n::t(ctx, &lang, "fbunlock_prompt_worker_services", "Dịch vụ xử lý được:\nVD: 282, 956, FAQ"))
         .await?;
     Ok(())
 }
 
 async fn ask_worker_rate(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
-        .send_message(chat_id, "Tỉ lệ nhận case:\nVD: 100%")
+        .send_message(chat_id, i18n::t(ctx, &lang, "fbunlock_prompt_worker_rate", "Tỉ lệ nhận case:\nVD: 100%"))
         .await?;
     Ok(())
 }
 
 async fn ask_quote_amount(ctx: &AppContext, chat_id: ChatId, case_id: &str) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "💬 Nhập báo giá cho case <code>{}</code>.\n\nVí dụ: <code>300000</code> hoặc <code>300000 | Có thể xử lý trong 24h</code>",
-                html_escape(case_id)
+            i18n::tr(
+                ctx,
+                &lang,
+                "fbunlock_prompt_quote_amount",
+                "💬 Nhập báo giá cho case <code>{case_id}</code>.\n\nVí dụ: <code>300000</code> hoặc <code>300000 | Có thể xử lý trong 24h</code>",
+                &[("case_id", html_escape(case_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -775,12 +793,16 @@ async fn ask_quote_amount(ctx: &AppContext, chat_id: ChatId, case_id: &str) -> R
 }
 
 async fn ask_dispute_reason(ctx: &AppContext, chat_id: ChatId, case_id: &str) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "⚠️ Vui lòng nhập lý do khiếu nại cho case <code>{}</code>.\n\nVD: Dịch vụ báo xong nhưng tài khoản vẫn chưa mở.",
-                html_escape(case_id)
+            i18n::tr(
+                ctx,
+                &lang,
+                "fbunlock_prompt_dispute_reason",
+                "⚠️ Vui lòng nhập lý do khiếu nại cho case <code>{case_id}</code>.\n\nVD: Dịch vụ báo xong nhưng tài khoản vẫn chưa mở.",
+                &[("case_id", html_escape(case_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -836,9 +858,12 @@ async fn submit_unlock_case(
     ctx.bot
         .send_message(
             msg.chat.id,
-            format!(
-                "✅ Đã tạo case mở khóa Facebook.\n\nMã case: <code>{}</code>\nTrạng thái: chờ người dịch vụ báo giá.\n\nBạn chưa bị trừ tiền. Khi có báo giá, bot sẽ gửi để bạn chọn và thanh toán.",
-                case_id
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_case_created",
+                "✅ Đã tạo case mở khóa Facebook.\n\nMã case: <code>{case_id}</code>\nTrạng thái: chờ người dịch vụ báo giá.\n\nBạn chưa bị trừ tiền. Khi có báo giá, bot sẽ gửi để bạn chọn và thanh toán.",
+                &[("case_id", html_escape(&case_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -859,6 +884,7 @@ async fn submit_worker_application(
     telegram_username: String,
     services: String,
     receive_rate: String,
+    lang: &str,
 ) -> Result<()> {
     let Some(user) = msg.from() else {
         ctx.bot.send_message(msg.chat.id, "Không xác định được user.").await?;
@@ -893,9 +919,12 @@ async fn submit_worker_application(
     ctx.bot
         .send_message(
             msg.chat.id,
-            format!(
-                "✅ Đã nhận đăng ký làm dịch vụ.\nMã đăng ký: <code>{}</code>\n\nAdmin sẽ kiểm tra và liên hệ khi cần.",
-                application_id
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_worker_registered_pending",
+                "✅ Đã nhận đăng ký làm dịch vụ.\nMã đăng ký: <code>{application_id}</code>\n\nAdmin sẽ kiểm tra và liên hệ khi cần.",
+                &[("application_id", html_escape(&application_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -1057,10 +1086,15 @@ async fn submit_quote(
     ctx.bot
         .send_message(
             msg.chat.id,
-            format!(
-                "✅ Đã gửi báo giá cho case <code>{}</code>.\nGiá: <b>{}</b>\nBot sẽ gửi báo giá này cho khách chọn.",
-                html_escape(case_id),
-                format_vnd(amount)
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_quote_sent_worker",
+                "✅ Đã gửi báo giá cho case <code>{case_id}</code>.\nGiá: <b>{amount}</b>\nBot sẽ gửi báo giá này cho khách chọn.",
+                &[
+                    ("case_id", html_escape(case_id)),
+                    ("amount", format_vnd(amount)),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -1100,12 +1134,12 @@ async fn send_worker_case_list(
     let cases = list_open_cases(&ctx.pool, 8).await?;
     if cases.is_empty() {
         ctx.bot
-            .send_message(chat_id, "Hiện chưa có case nào đang chờ báo giá.")
+            .send_message(chat_id, i18n::t(ctx, lang, "fbunlock_worker_cases_empty", "Hiện chưa có case nào đang chờ báo giá."))
             .await?;
         return Ok(());
     }
 
-    let mut lines = vec!["🔓 <b>CASE CHỜ DỊCH VỤ</b>".to_string()];
+    let mut lines = vec![i18n::t(ctx, lang, "fbunlock_worker_cases_title", "🔓 <b>CASE CHỜ DỊCH VỤ</b>")];
     let mut rows = Vec::new();
     for (index, case) in cases.iter().enumerate() {
         let number = index + 1;
@@ -1119,7 +1153,7 @@ async fn send_worker_case_list(
             html_escape(&format_short_time(&case.created_at))
         ));
         rows.push(vec![InlineKeyboardButton::callback(
-            format!("💬 Báo giá #{}", number),
+            i18n::button_tr(ctx, lang, "fbunlock_btn_quote_case_number", "💬 Báo giá #{number}", &[("number", number.to_string())]),
             format!("fbunlock:quote:{}", case.id),
         )]);
     }
@@ -1171,12 +1205,12 @@ async fn send_worker_my_cases(
     let cases = list_worker_in_progress_cases(&ctx.pool, worker_user_id, chat_id.0, 10).await?;
     if cases.is_empty() {
         ctx.bot
-            .send_message(chat_id, "Bạn chưa có case nào đang xử lý.")
+            .send_message(chat_id, i18n::t(ctx, lang, "fbunlock_worker_my_cases_empty", "Bạn chưa có case nào đang xử lý."))
             .await?;
         return Ok(());
     }
 
-    let mut lines = vec!["🧾 <b>CASE CỦA TÔI</b>".to_string()];
+    let mut lines = vec![i18n::t(ctx, lang, "fbunlock_worker_my_cases_title", "🧾 <b>CASE CỦA TÔI</b>")];
     let mut rows = Vec::new();
     for (index, case) in cases.iter().enumerate() {
         let number = index + 1;
@@ -1244,12 +1278,12 @@ async fn send_customer_my_cases(
     let cases = list_customer_cases(&ctx.pool, customer_user_id, chat_id.0, 10).await?;
     if cases.is_empty() {
         ctx.bot
-            .send_message(chat_id, "Bạn chưa có case mở khóa Facebook nào.")
+            .send_message(chat_id, i18n::t(ctx, lang, "fbunlock_customer_my_cases_empty", "Bạn chưa có case mở khóa Facebook nào."))
             .await?;
         return Ok(());
     }
 
-    let mut lines = vec!["🧾 <b>CASE CỦA TÔI</b>".to_string()];
+    let mut lines = vec![i18n::t(ctx, lang, "fbunlock_customer_my_cases_title", "🧾 <b>CASE CỦA TÔI</b>")];
     let mut rows = Vec::new();
     for (index, case) in cases.iter().enumerate() {
         let number = index + 1;
@@ -1264,13 +1298,10 @@ async fn send_customer_my_cases(
         ));
     }
     rows.push(vec![
-        InlineKeyboardButton::callback("🗑 Xóa case", "fbunlock:customer_delete_menu"),
-        InlineKeyboardButton::callback("❌ Yêu cầu hủy", "fbunlock:customer_cancel_menu"),
+        i18n::inline_button_callback(ctx, lang, "fbunlock_btn_delete_case", "🗑 Xóa case", "fbunlock:customer_delete_menu"),
+        i18n::inline_button_callback(ctx, lang, "fbunlock_btn_cancel_request", "❌ Yêu cầu hủy", "fbunlock:customer_cancel_menu"),
     ]);
-    rows.push(vec![InlineKeyboardButton::callback(
-        "💬 Nhắn tin",
-        "fbunlock:customer_message_menu",
-    )]);
+    rows.push(vec![i18n::inline_button_callback(ctx, lang, "fbunlock_btn_message", "💬 Nhắn tin", "fbunlock:customer_message_menu")]);
     rows.push(vec![i18n::inline_button_callback(
         ctx,
         lang,
@@ -1303,18 +1334,18 @@ async fn send_customer_case_action_menu(
     let cases = list_customer_cases(&ctx.pool, customer_user_id, chat_id.0, 10).await?;
     let (title, empty_text) = match action {
         "delete" => (
-            "🗑 <b>CHỌN CASE MUỐN XÓA/ẨN</b>",
-            "Không có case nào có thể xóa hoặc ẩn.",
+            i18n::t(ctx, lang, "fbunlock_customer_action_delete_title", "🗑 <b>CHỌN CASE MUỐN XÓA/ẨN</b>"),
+            i18n::t(ctx, lang, "fbunlock_customer_action_delete_empty", "Không có case nào có thể xóa hoặc ẩn."),
         ),
         "cancel" => (
-            "❌ <b>CHỌN CASE MUỐN YÊU CẦU HỦY</b>",
-            "Không có case nào có thể yêu cầu hủy.",
+            i18n::t(ctx, lang, "fbunlock_customer_action_cancel_title", "❌ <b>CHỌN CASE MUỐN YÊU CẦU HỦY</b>"),
+            i18n::t(ctx, lang, "fbunlock_customer_action_cancel_empty", "Không có case nào có thể yêu cầu hủy."),
         ),
         "message" => (
-            "💬 <b>CHỌN CASE MUỐN NHẮN TIN</b>",
-            "Không có case nào đang ở trạng thái có thể nhắn dịch vụ.",
+            i18n::t(ctx, lang, "fbunlock_customer_action_message_title", "💬 <b>CHỌN CASE MUỐN NHẮN TIN</b>"),
+            i18n::t(ctx, lang, "fbunlock_customer_action_message_empty", "Không có case nào đang ở trạng thái có thể nhắn dịch vụ."),
         ),
-        _ => ("🧾 <b>CHỌN CASE</b>", "Không có case phù hợp."),
+        _ => ("🧾 <b>CHỌN CASE</b>".to_string(), "Không có case phù hợp.".to_string()),
     };
 
     let mut rows = Vec::new();
@@ -1365,7 +1396,7 @@ async fn send_customer_case_action_menu(
     let text = if rows.is_empty() {
         format!("{}\n\n{}", title, empty_text)
     } else {
-        format!("{}\n\nBấm đúng số case bạn muốn thao tác.", title)
+        format!("{}\n\n{}", title, i18n::t(ctx, lang, "fbunlock_customer_action_hint", "Bấm đúng số case bạn muốn thao tác."))
     };
     rows.push(vec![i18n::inline_button_callback(
         ctx,
@@ -1418,9 +1449,12 @@ async fn confirm_customer_delete_case(
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "Bạn chắc chắn muốn xóa case <code>{}</code>?\nCase sẽ biến mất khỏi danh sách và không gửi cho dịch vụ nữa.",
-                html_escape(case_id)
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_confirm_delete_case",
+                "Bạn chắc chắn muốn xóa case <code>{case_id}</code>?\nCase sẽ biến mất khỏi danh sách và không gửi cho dịch vụ nữa.",
+                &[("case_id", html_escape(case_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -1450,6 +1484,7 @@ async fn customer_delete_case(
     customer_user_id: i64,
     case_id: &str,
 ) -> Result<()> {
+    let lang = i18n::user_lang_by_id(&ctx, chat_id.0).await;
     let Some(case) = load_case(&ctx.pool, case_id).await? else {
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
@@ -1497,7 +1532,13 @@ async fn customer_delete_case(
     ctx.bot
         .send_message(
             chat_id,
-            format!("Đã xóa case <code>{}</code> khỏi danh sách.", html_escape(case_id)),
+            i18n::tr(
+                &ctx,
+                &lang,
+                "fbunlock_delete_case_done",
+                "Đã xóa case <code>{case_id}</code> khỏi danh sách.",
+                &[("case_id", html_escape(case_id))]
+            ),
         )
         .parse_mode(ParseMode::Html)
         .await?;
@@ -1510,6 +1551,7 @@ async fn customer_hide_case(
     customer_user_id: i64,
     case_id: &str,
 ) -> Result<()> {
+    let lang = i18n::user_lang_by_id(&ctx, chat_id.0).await;
     let Some(case) = load_case(&ctx.pool, case_id).await? else {
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
@@ -1538,7 +1580,13 @@ async fn customer_hide_case(
     ctx.bot
         .send_message(
             chat_id,
-            format!("Đã ẩn case <code>{}</code> khỏi danh sách của bạn.", html_escape(case_id)),
+            i18n::tr(
+                &ctx,
+                &lang,
+                "fbunlock_hide_case_done",
+                "Đã ẩn case <code>{case_id}</code> khỏi danh sách của bạn.",
+                &[("case_id", html_escape(case_id))]
+            ),
         )
         .parse_mode(ParseMode::Html)
         .await?;
@@ -1595,10 +1643,15 @@ async fn accept_quote(
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "✅ Bạn đã chọn báo giá <b>{}</b> cho case <code>{}</code>.\n\nBấm thanh toán để bot giữ tiền trung gian, sau đó người dịch vụ mới nhận case xử lý.",
-                format_vnd(quote.amount),
-                html_escape(&quote.case_id)
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_quote_accepted_customer",
+                "✅ Bạn đã chọn báo giá <b>{amount}</b> cho case <code>{case_id}</code>.\n\nBấm thanh toán để bot giữ tiền trung gian, sau đó người dịch vụ mới nhận case xử lý.",
+                &[
+                    ("amount", format_vnd(quote.amount)),
+                    ("case_id", html_escape(&quote.case_id)),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -1692,12 +1745,17 @@ async fn pay_accepted_quote(
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "✅ Đã thanh toán case <code>{}</code>.\nSố tiền bot đang giữ trung gian: <b>{}</b>\nSố dư còn lại: {}\n\nNgười dịch vụ phụ trách: {}\nBạn có thể bấm nút nhắn dịch vụ để trao đổi trực tiếp.",
-                html_escape(&case.id),
-                format_vnd(quote.amount),
-                format_vnd(balance_after),
-                html_escape(&quote_worker_username(&quote))
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_case_paid_customer",
+                "✅ Đã thanh toán case <code>{case_id}</code>.\nSố tiền bot đang giữ trung gian: <b>{amount}</b>\nSố dư còn lại: {balance}\n\nNgười dịch vụ phụ trách: {worker_username}\nBạn có thể bấm nút nhắn dịch vụ để trao đổi trực tiếp.",
+                &[
+                    ("case_id", html_escape(&case.id)),
+                    ("amount", format_vnd(quote.amount)),
+                    ("balance", format_vnd(balance_after)),
+                    ("worker_username", html_escape(&quote_worker_username(&quote))),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -1827,7 +1885,9 @@ async fn send_customer_contact_to_worker(
         return Ok(());
     }
     let username = case_customer_username(&case);
-    if let Some(button) = telegram_contact_button("💬 Mở chat khách", &username) {
+    let lang = i18n::user_lang_by_id(ctx, worker_user_id).await;
+    let label = i18n::button_t(ctx, &lang, "fbunlock_btn_open_customer_chat", "💬 Mở chat khách");
+    if let Some(button) = telegram_contact_button(&label, &username) {
         ctx.bot
             .send_message(
                 chat_id,
@@ -1873,7 +1933,9 @@ async fn send_worker_contact_to_customer(
         return Ok(());
     };
     let username = quote_worker_username(&quote);
-    if let Some(button) = telegram_contact_button("💬 Mở chat dịch vụ", &username) {
+    let lang = i18n::user_lang_by_id(ctx, customer_user_id).await;
+    let label = i18n::button_t(ctx, &lang, "fbunlock_btn_open_worker_chat", "💬 Mở chat dịch vụ");
+    if let Some(button) = telegram_contact_button(&label, &username) {
         ctx.bot
             .send_message(
                 chat_id,
@@ -1920,17 +1982,21 @@ async fn worker_mark_done(
         .bind(case_id)
         .execute(&ctx.pool)
         .await?;
+    let customer_lang = i18n::user_lang_by_id(&ctx, case.user_id).await;
     ctx.bot.send_message(chat_id, "Đã báo khách xác nhận kết quả.").await?;
     ctx.bot
         .send_message(
             ChatId(case.chat_id),
-            format!(
-                "✅ Người dịch vụ báo đã hoàn tất case <code>{}</code>. Vui lòng kiểm tra và xác nhận.",
-                html_escape(case_id)
+            i18n::tr(
+                &ctx,
+                &customer_lang,
+                "fbunlock_worker_done_customer",
+                "✅ Người dịch vụ báo đã hoàn tất case <code>{case_id}</code>. Vui lòng kiểm tra và xác nhận.",
+                &[("case_id", html_escape(case_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(customer_done_keyboard_from_case(&ctx, "vi", &case).await)
+        .reply_markup(customer_done_keyboard_from_case(&ctx, &customer_lang, &case).await)
         .await?;
     Ok(())
 }
@@ -2045,12 +2111,16 @@ async fn complete_case(
     .await?;
     tx.commit().await?;
 
+    let customer_lang = i18n::user_lang_by_id(&ctx, customer_user_id).await;
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "✅ Case <code>{}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.",
-                html_escape(case_id)
+            i18n::tr(
+                &ctx,
+                &customer_lang,
+                "fbunlock_case_completed_customer",
+                "✅ Case <code>{case_id}</code> đã hoàn tất. Cảm ơn bạn đã xác nhận.",
+                &[("case_id", html_escape(case_id))]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -2104,12 +2174,18 @@ async fn request_cancel_case(
         .execute(&ctx.pool)
         .await?;
         notify_workers_case_cancelled(&ctx, &case).await;
+        let lang = i18n::user_lang_by_id(&ctx, customer_user_id).await;
         ctx.bot
             .send_message(
                 chat_id,
-                "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.\n\nBạn có muốn đặt lại case này để dịch vụ khác báo giá không?",
+                i18n::t(
+                    &ctx,
+                    &lang,
+                    "fbunlock_cancel_unpaid_customer",
+                    "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.\n\nBạn có muốn đặt lại case này để dịch vụ khác báo giá không?",
+                ),
             )
-            .reply_markup(repost_cancelled_case_keyboard(case_id))
+            .reply_markup(repost_cancelled_case_keyboard(&ctx, &lang, case_id))
             .await?;
         return Ok(());
     }
@@ -2176,10 +2252,15 @@ async fn repost_cancelled_case(
     ctx.bot
         .send_message(
             chat_id,
-            format!(
-                "✅ Đã đặt lại case.\n\nCase cũ: <code>{}</code>\nCase mới: <code>{}</code>\nTrạng thái: chờ dịch vụ báo giá.",
-                html_escape(case_id),
-                html_escape(&new_case_id)
+            i18n::tr(
+                &ctx,
+                lang,
+                "fbunlock_repost_case_done",
+                "✅ Đã đặt lại case.\n\nCase cũ: <code>{old_case_id}</code>\nCase mới: <code>{new_case_id}</code>\nTrạng thái: chờ dịch vụ báo giá.",
+                &[
+                    ("old_case_id", html_escape(case_id)),
+                    ("new_case_id", html_escape(&new_case_id)),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -2232,8 +2313,12 @@ async fn dispute_case(
         .bind(case_id)
         .execute(&ctx.pool)
         .await?;
+    let lang = i18n::user_lang_by_id(&ctx, user.id.0 as i64).await;
     ctx.bot
-        .send_message(msg.chat.id, "Đã gửi khiếu nại kèm lý do cho admin.")
+        .send_message(
+            msg.chat.id,
+            i18n::t(&ctx, &lang, "fbunlock_dispute_sent_customer", "Đã gửi khiếu nại kèm lý do cho admin."),
+        )
         .await?;
     notify_admins_dispute(&ctx, &case, reason).await;
     Ok(())
@@ -2572,6 +2657,7 @@ async fn notify_customer_quote(
     case: &FacebookUnlockCase,
     quote: &FacebookUnlockQuote,
 ) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, case.user_id).await;
     let note = quote
         .note
         .as_deref()
@@ -2580,15 +2666,20 @@ async fn notify_customer_quote(
     ctx.bot
         .send_message(
             ChatId(case.chat_id),
-            format!(
-                "💬 Case <code>{}</code> có báo giá mới.\n\nGiá xử lý: <b>{}</b>{}\n\nBạn có thể đồng ý báo giá này để tiến hành thanh toán trung gian qua bot.",
-                html_escape(&case.id),
-                format_vnd(quote.amount),
-                note
+            i18n::tr(
+                ctx,
+                &lang,
+                "fbunlock_quote_notify_customer",
+                "💬 Case <code>{case_id}</code> có báo giá mới.\n\nGiá xử lý: <b>{amount}</b>{note}\n\nBạn có thể đồng ý báo giá này để tiến hành thanh toán trung gian qua bot.",
+                &[
+                    ("case_id", html_escape(&case.id)),
+                    ("amount", format_vnd(quote.amount)),
+                    ("note", note),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
-        .reply_markup(quote_customer_keyboard(&quote.id))
+            .reply_markup(quote_customer_keyboard(ctx, &lang, &quote.id))
         .await?;
     Ok(())
 }
@@ -2618,7 +2709,7 @@ async fn notify_workers_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
             .bot
             .send_message(ChatId(worker_id), text)
             .parse_mode(ParseMode::Html)
-            .reply_markup(worker_quote_keyboard(&case.id))
+            .reply_markup(worker_quote_keyboard(ctx, "vi", &case.id))
             .await;
     }
 }
@@ -2731,6 +2822,7 @@ async fn notify_workers_case_cancel_requested(ctx: &AppContext, case: &FacebookU
 }
 
 async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, quote: &FacebookUnlockQuote) {
+    let lang = "vi";
     let fee_percent = platform_fee_percent(ctx);
     let platform_fee = quote.amount * fee_percent / 100;
     let worker_receive = quote.amount - platform_fee;
@@ -2738,23 +2830,21 @@ async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, qu
         .bot
         .send_message(
             ChatId(quote.worker_chat_id),
-            format!(
-                "💰 <b>CASE ĐÃ THANH TOÁN</b>\n\n\
-                 Case: <code>{}</code>\n\
-                 Khách đã thanh toán: <b>{}</b>\n\
-                 Phí sàn nội bộ: <b>{}%</b> = {}\n\
-                 Bạn nhận dự kiến khi hoàn tất: <b>{}</b>\n\n\
-                 Khách Telegram: {}\n\n\
-                 <b>Vấn đề:</b>\n{}\n\n\
-                 <b>Thông tin case:</b>\n<pre>{}</pre>",
-                html_escape(&case.id),
-                format_vnd(quote.amount),
-                fee_percent,
-                format_vnd(platform_fee),
-                format_vnd(worker_receive),
-                html_escape(&case_customer_username(case)),
-                html_escape(&case.issue),
-                html_escape(&case.case_details),
+            i18n::tr(
+                ctx,
+                lang,
+                "fbunlock_case_paid_worker",
+                "💰 <b>CASE ĐÃ THANH TOÁN</b>\n\nCase: <code>{case_id}</code>\nKhách đã thanh toán: <b>{amount}</b>\nPhí sàn nội bộ: <b>{fee_percent}%</b> = {platform_fee}\nBạn nhận dự kiến khi hoàn tất: <b>{worker_receive}</b>\n\nKhách Telegram: {customer_username}\n\n<b>Vấn đề:</b>\n{issue}\n\n<b>Thông tin case:</b>\n<pre>{case_details}</pre>",
+                &[
+                    ("case_id", html_escape(&case.id)),
+                    ("amount", format_vnd(quote.amount)),
+                    ("fee_percent", fee_percent.to_string()),
+                    ("platform_fee", format_vnd(platform_fee)),
+                    ("worker_receive", format_vnd(worker_receive)),
+                    ("customer_username", html_escape(&case_customer_username(case))),
+                    ("issue", html_escape(&case.issue)),
+                    ("case_details", html_escape(&case.case_details)),
+                ]
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -2854,8 +2944,15 @@ fn case_created_keyboard(ctx: &AppContext, lang: &str) -> teloxide::types::Inlin
     )]])
 }
 
-fn quote_customer_keyboard(quote_id: &str) -> teloxide::types::InlineKeyboardMarkup {
-    teloxide::types::InlineKeyboardMarkup::new(vec![vec![teloxide::types::InlineKeyboardButton::callback(
+fn quote_customer_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    quote_id: &str,
+) -> teloxide::types::InlineKeyboardMarkup {
+    teloxide::types::InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_accept_quote",
         "✅ Đồng ý báo giá",
         format!("fbunlock:accept_quote:{quote_id}"),
     )]])
@@ -2868,7 +2965,10 @@ fn pay_quote_keyboard(
     case_id: &str,
 ) -> teloxide::types::InlineKeyboardMarkup {
     teloxide::types::InlineKeyboardMarkup::new(vec![
-        vec![teloxide::types::InlineKeyboardButton::callback(
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_pay_quote",
             "💳 Thanh toán trung gian",
             format!("fbunlock:pay_quote:{quote_id}"),
         )],
@@ -2882,13 +2982,23 @@ fn pay_quote_keyboard(
     ])
 }
 
-fn repost_cancelled_case_keyboard(case_id: &str) -> teloxide::types::InlineKeyboardMarkup {
+fn repost_cancelled_case_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+) -> teloxide::types::InlineKeyboardMarkup {
     teloxide::types::InlineKeyboardMarkup::new(vec![
-        vec![teloxide::types::InlineKeyboardButton::callback(
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_repost_case",
             "🔁 Đặt lại case này",
             format!("fbunlock:repost_case:{case_id}"),
         )],
-        vec![teloxide::types::InlineKeyboardButton::callback(
+        vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_customer_my_cases",
             "🧾 Case của tôi",
             "fbunlock:customer_my_cases",
         )],
@@ -2902,7 +3012,8 @@ fn worker_paid_case_keyboard(
     customer_username: &str,
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
-    if let Some(button) = telegram_contact_button("💬 Nhắn khách", customer_username) {
+    let label = i18n::button_t(ctx, lang, "fbunlock_btn_message_customer", "💬 Nhắn khách");
+    if let Some(button) = telegram_contact_button(&label, customer_username) {
         rows.push(vec![button]);
     }
     rows.push(vec![
@@ -2957,7 +3068,8 @@ fn customer_case_keyboard(
     quote: &FacebookUnlockQuote,
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
-    if let Some(button) = telegram_contact_button("💬 Nhắn dịch vụ", &quote_worker_username(quote)) {
+    let label = i18n::button_t(ctx, lang, "fbunlock_btn_message_worker", "💬 Nhắn dịch vụ");
+    if let Some(button) = telegram_contact_button(&label, &quote_worker_username(quote)) {
         rows.push(vec![button]);
     }
     rows.push(vec![i18n::inline_button_callback(
@@ -2997,7 +3109,8 @@ fn customer_done_keyboard(
         "⚠️ Khiếu nại",
         format!("fbunlock:dispute:{case_id}"),
     )];
-    if let Some(button) = telegram_contact_button("💬 Nhắn dịch vụ", &quote_worker_username(quote)) {
+    let label = i18n::button_t(ctx, lang, "fbunlock_btn_message_worker", "💬 Nhắn dịch vụ");
+    if let Some(button) = telegram_contact_button(&label, &quote_worker_username(quote)) {
         second_row.push(button);
     }
     InlineKeyboardMarkup::new(vec![
@@ -3058,7 +3171,10 @@ fn admin_refund_keyboard(
         ),
     ]];
     if include_reopen {
-        rows.push(vec![InlineKeyboardButton::callback(
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_reopen_case",
             "🔁 Mở lại case",
             format!("fbunlock:admin_reopen:{case_id}"),
         )]);
@@ -3089,8 +3205,15 @@ fn worker_application_keyboard(ctx: &AppContext, application_id: &str) -> Inline
     ]])
 }
 
-fn worker_quote_keyboard(case_id: &str) -> teloxide::types::InlineKeyboardMarkup {
-    teloxide::types::InlineKeyboardMarkup::new(vec![vec![teloxide::types::InlineKeyboardButton::callback(
+fn worker_quote_keyboard(
+    ctx: &AppContext,
+    lang: &str,
+    case_id: &str,
+) -> teloxide::types::InlineKeyboardMarkup {
+    teloxide::types::InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_quote_case",
         "💬 Báo giá case",
         format!("fbunlock:quote:{case_id}"),
     )]])
