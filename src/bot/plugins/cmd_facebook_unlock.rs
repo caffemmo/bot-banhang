@@ -24,6 +24,7 @@ const DEFAULT_WORKER_MAX_ACTIVE_CASES: i64 = 3;
 const DEFAULT_CUSTOMER_MAX_OPEN_CASES: i64 = 3;
 const DEFAULT_CUSTOMER_CREATE_COOLDOWN_SECONDS: i64 = 120;
 const DEFAULT_CASE_NOTE_MIN_CHARS: usize = 10;
+const DEFAULT_MIN_QUOTE_AMOUNT: i64 = 10_000;
 const REMINDER_DISABLED_FOREVER: &str = "forever";
 
 #[derive(Debug, Clone, FromRow)]
@@ -271,6 +272,24 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                     ask_quote_amount(&ctx, msg.chat.id, &case_id).await?;
                     return Ok(true);
                 };
+                let min_amount = min_quote_amount(&ctx);
+                if amount < min_amount {
+                    ctx.bot
+                        .send_message(
+                            msg.chat.id,
+                            i18n::tr(
+                                &ctx,
+                                &lang,
+                                "fbunlock_quote_amount_too_low",
+                                "⚠️ Giá báo quá thấp.\nGiá tối thiểu để báo case là <b>{min_amount}</b>.\n\nVí dụ hợp lệ: <code>10k</code>, <code>30k</code>, <code>100000</code>",
+                                &[("min_amount", format_vnd(min_amount))],
+                            ),
+                        )
+                        .parse_mode(ParseMode::Html)
+                        .await?;
+                    ask_quote_amount(&ctx, msg.chat.id, &case_id).await?;
+                    return Ok(true);
+                }
                 chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
                 ask_quote_note(&ctx, msg.chat.id, &case_id, amount).await?;
                 dialogue
@@ -750,6 +769,18 @@ fn case_note_min_chars(ctx: &AppContext) -> usize {
     .parse::<usize>()
     .ok()
     .unwrap_or(DEFAULT_CASE_NOTE_MIN_CHARS)
+}
+
+fn min_quote_amount(ctx: &AppContext) -> i64 {
+    ctx.get_text(
+        "facebook_unlock_min_quote_amount",
+        &DEFAULT_MIN_QUOTE_AMOUNT.to_string(),
+    )
+    .trim()
+    .parse::<i64>()
+    .ok()
+    .filter(|amount| *amount > 0)
+    .unwrap_or(DEFAULT_MIN_QUOTE_AMOUNT)
 }
 
 fn button_matches(ctx: &AppContext, lang: &str, key: &str, text: &str) -> bool {
@@ -3142,16 +3173,17 @@ async fn notify_customer_quote(
                 ctx,
                 &lang,
                 "fbunlock_quote_notify_customer",
-                "💬 Case <code>{case_id}</code> có báo giá mới.\n\nGiá xử lý: <b>{amount}</b>{note}\n\nBạn có thể đồng ý báo giá này để tiến hành thanh toán trung gian qua bot.",
+                "💬 Case <code>{case_id}</code> có báo giá mới.\n\nNgười báo giá: {worker_username}\nGiá xử lý: <b>{amount}</b>{note}\n\nBạn có thể đồng ý báo giá này để tiến hành thanh toán trung gian qua bot.\nLưu ý: Chỉ thanh toán qua bot để được giữ tiền trung gian.",
                 &[
                     ("case_id", html_escape(&case.id)),
+                    ("worker_username", html_escape(&quote_worker_username(quote))),
                     ("amount", format_vnd(quote.amount)),
                     ("note", note),
                 ]
             ),
         )
         .parse_mode(ParseMode::Html)
-            .reply_markup(quote_customer_keyboard(ctx, &lang, &quote.id))
+            .reply_markup(quote_customer_keyboard(ctx, &lang, quote))
         .await?;
     Ok(())
 }
@@ -3513,15 +3545,25 @@ fn case_created_keyboard(ctx: &AppContext, lang: &str) -> teloxide::types::Inlin
 fn quote_customer_keyboard(
     ctx: &AppContext,
     lang: &str,
-    quote_id: &str,
+    quote: &FacebookUnlockQuote,
 ) -> teloxide::types::InlineKeyboardMarkup {
-    teloxide::types::InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+    let mut rows = vec![vec![i18n::inline_button_callback(
         ctx,
         lang,
         "fbunlock_btn_accept_quote",
         "✅ Đồng ý báo giá",
-        format!("fbunlock:accept_quote:{quote_id}"),
-    )]])
+        format!("fbunlock:accept_quote:{}", quote.id),
+    )]];
+    let label = i18n::button_t(
+        ctx,
+        lang,
+        "fbunlock_btn_contact_quote_worker",
+        "💬 Liên hệ người báo giá",
+    );
+    if let Some(button) = telegram_contact_button(&label, &quote_worker_username(quote)) {
+        rows.push(vec![button]);
+    }
+    teloxide::types::InlineKeyboardMarkup::new(rows)
 }
 
 fn pay_quote_keyboard(
@@ -3859,7 +3901,11 @@ fn quote_worker_username(quote: &FacebookUnlockQuote) -> String {
 }
 
 fn telegram_contact_button(text: &str, username: &str) -> Option<InlineKeyboardButton> {
-    let username = username.trim().trim_start_matches('@');
+    let username = username.trim();
+    if !username.starts_with('@') {
+        return None;
+    }
+    let username = username.trim_start_matches('@');
     if username.is_empty() || username.chars().any(char::is_whitespace) {
         return None;
     }
