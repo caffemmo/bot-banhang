@@ -61,6 +61,7 @@
         icon: '🔓',
         fields: [
           { key: 'facebook_unlock_platform_fee_percent', label: 'Phí sàn khi case thành công (%)', value: '10' },
+          { key: 'facebook_unlock_worker_max_active_cases', label: 'Số case tối đa mỗi dịch vụ đang xử lý (0 = tắt)', value: '3' },
           { key: 'facebook_unlock_worker_ids', label: 'Telegram IDs người dịch vụ nhận case', value: '' },
         ]
       },
@@ -233,6 +234,13 @@
           <div class="form-text">Độ dài phần random sau prefix, từ 10 đến 16 ký tự.</div>
         `;
       }
+      if (key === 'facebook_unlock_worker_max_active_cases') {
+        return `
+          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
+            value="${escapeAttr(value)}" min="0" max="100" step="1">
+          <div class="form-text">Nhập 0 để tắt giới hạn. Mặc định nên để 3.</div>
+        `;
+      }
       const numericKeys = new Set([
         'viameta_getlink_fb_price',
         'viameta_uptick_fb_price',
@@ -313,6 +321,14 @@
           return 'Phí sàn mở khóa Facebook phải là số nguyên từ 0 đến 100.';
         }
         payload.facebook_unlock_platform_fee_percent = String(value);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(payload, 'facebook_unlock_worker_max_active_cases')) {
+        const value = Number(String(payload.facebook_unlock_worker_max_active_cases || '').trim());
+        if (!Number.isInteger(value) || value < 0 || value > 100) {
+          return 'Số case tối đa mỗi dịch vụ phải là số nguyên từ 0 đến 100.';
+        }
+        payload.facebook_unlock_worker_max_active_cases = String(value);
       }
 
       return null;

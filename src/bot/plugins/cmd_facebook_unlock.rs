@@ -20,6 +20,7 @@ use crate::bot::{BotDialogue, State, chat_ui, i18n};
 use crate::domains::wallet::repo as wallet_repo;
 
 const DEFAULT_PLATFORM_FEE_PERCENT: i64 = 10;
+const DEFAULT_WORKER_MAX_ACTIVE_CASES: i64 = 3;
 
 #[derive(Debug, Clone, FromRow)]
 struct FacebookUnlockCase {
@@ -621,6 +622,18 @@ fn platform_fee_percent(ctx: &AppContext) -> i64 {
     .unwrap_or(DEFAULT_PLATFORM_FEE_PERCENT)
 }
 
+fn worker_max_active_cases(ctx: &AppContext) -> i64 {
+    ctx.get_text(
+        "facebook_unlock_worker_max_active_cases",
+        &DEFAULT_WORKER_MAX_ACTIVE_CASES.to_string(),
+    )
+    .trim()
+    .parse::<i64>()
+    .ok()
+    .filter(|limit| *limit >= 0)
+    .unwrap_or(DEFAULT_WORKER_MAX_ACTIVE_CASES)
+}
+
 fn button_matches(ctx: &AppContext, lang: &str, key: &str, text: &str) -> bool {
     i18n::button_text_match_variants(&i18n::t(ctx, lang, key, "🔓 Mở khóa Facebook"))
         .iter()
@@ -1054,6 +1067,10 @@ async fn submit_quote(
         ctx.bot
             .send_message(msg.chat.id, "Case này không còn nhận báo giá.")
             .await?;
+        return Ok(());
+    }
+    if worker_is_at_active_case_limit(&ctx.pool, &ctx, user.id.0 as i64, msg.chat.id.0).await? {
+        send_worker_active_limit_message(&ctx, msg.chat.id).await?;
         return Ok(());
     }
 
@@ -1618,6 +1635,12 @@ async fn accept_quote(
             .await?;
         return Ok(());
     }
+    if worker_is_at_active_case_limit(&ctx.pool, &ctx, quote.worker_user_id, quote.worker_chat_id).await? {
+        ctx.bot
+            .send_message(chat_id, "Dịch vụ này đang xử lý quá nhiều case. Vui lòng chọn báo giá khác hoặc chờ dịch vụ hoàn tất bớt case.")
+            .await?;
+        return Ok(());
+    }
 
     let now = Utc::now().to_rfc3339();
     sqlx::query(
@@ -1688,6 +1711,12 @@ async fn pay_accepted_quote(
     if case.status != "quoted_accepted" || quote.status != "accepted" {
         ctx.bot
             .send_message(chat_id, "Báo giá này không còn là báo giá đang được chọn.")
+            .await?;
+        return Ok(());
+    }
+    if worker_is_at_active_case_limit(&ctx.pool, &ctx, quote.worker_user_id, quote.worker_chat_id).await? {
+        ctx.bot
+            .send_message(chat_id, "Dịch vụ này đang xử lý quá nhiều case nên chưa thể nhận thêm. Vui lòng chọn báo giá khác hoặc chờ dịch vụ hoàn tất bớt case.")
             .await?;
         return Ok(());
     }
@@ -2589,6 +2618,57 @@ async fn list_worker_in_progress_cases(
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+async fn worker_active_case_count(
+    pool: &SqlitePool,
+    worker_user_id: i64,
+    worker_chat_id: i64,
+) -> Result<i64> {
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1)
+         FROM facebook_unlock_cases c
+         LEFT JOIN facebook_unlock_quotes q ON q.id = c.accepted_quote_id
+         WHERE c.status = 'paid_in_progress'
+           AND (
+                c.worker_user_id = ?
+                OR q.worker_user_id = ?
+                OR q.worker_chat_id = ?
+           )",
+    )
+    .bind(worker_user_id)
+    .bind(worker_user_id)
+    .bind(worker_chat_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
+}
+
+async fn worker_is_at_active_case_limit(
+    pool: &SqlitePool,
+    ctx: &AppContext,
+    worker_user_id: i64,
+    worker_chat_id: i64,
+) -> Result<bool> {
+    let limit = worker_max_active_cases(ctx);
+    if limit <= 0 {
+        return Ok(false);
+    }
+    Ok(worker_active_case_count(pool, worker_user_id, worker_chat_id).await? >= limit)
+}
+
+async fn send_worker_active_limit_message(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let limit = worker_max_active_cases(ctx);
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "Bạn đang xử lý tối đa {} case. Hãy hoàn tất hoặc xử lý bớt case hiện tại trước khi báo giá thêm.",
+                limit
+            ),
+        )
+        .await?;
+    Ok(())
 }
 
 async fn list_customer_cases(
