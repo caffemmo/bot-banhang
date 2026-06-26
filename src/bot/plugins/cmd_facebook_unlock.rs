@@ -1243,7 +1243,7 @@ async fn relay_worker_message(
         ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.status != "paid_in_progress" {
+    if !matches!(case.status.as_str(), "paid_in_progress" | "worker_done") {
         ctx.bot
             .send_message(msg.chat.id, "Case này không còn ở trạng thái đang xử lý.")
             .await?;
@@ -1285,7 +1285,9 @@ async fn relay_customer_message(
         ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.user_id != user.id.0 as i64 || case.status != "paid_in_progress" {
+    if !is_case_customer(&case, user.id.0 as i64, msg.chat.id)
+        || !matches!(case.status.as_str(), "paid_in_progress" | "worker_done")
+    {
         ctx.bot.send_message(msg.chat.id, "Bạn chưa có quyền nhắn dịch vụ trong case này.").await?;
         return Ok(());
     }
@@ -1334,6 +1336,12 @@ async fn worker_mark_done(
         ctx.bot.send_message(chat_id, "Bạn chưa được gắn với case này.").await?;
         return Ok(());
     }
+    let now = Utc::now().to_rfc3339();
+    sqlx::query("UPDATE facebook_unlock_cases SET status = 'worker_done', updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
     ctx.bot.send_message(chat_id, "Đã báo khách xác nhận kết quả.").await?;
     ctx.bot
         .send_message(
@@ -1390,11 +1398,26 @@ async fn complete_case(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.user_id != customer_user_id || case.status != "paid_in_progress" {
+    if !is_case_customer(&case, customer_user_id, chat_id) {
         ctx.bot.send_message(chat_id, "Bạn không thể xác nhận case này.").await?;
         return Ok(());
     }
-    let Some(worker_user_id) = case.worker_user_id else {
+    if !matches!(case.status.as_str(), "paid_in_progress" | "worker_done") {
+        ctx.bot
+            .send_message(chat_id, "Case này không còn ở trạng thái chờ xác nhận.")
+            .await?;
+        return Ok(());
+    }
+    let worker_user_id = if let Some(worker_user_id) = case.worker_user_id {
+        worker_user_id
+    } else if let Some(quote_id) = case.accepted_quote_id.as_deref() {
+        if let Some(quote) = load_quote(&ctx.pool, quote_id).await? {
+            quote.worker_user_id
+        } else {
+            ctx.bot.send_message(chat_id, "Case chưa có worker.").await?;
+            return Ok(());
+        }
+    } else {
         ctx.bot.send_message(chat_id, "Case chưa có worker.").await?;
         return Ok(());
     };
@@ -1406,7 +1429,7 @@ async fn complete_case(
     let updated = sqlx::query(
         "UPDATE facebook_unlock_cases
          SET status = 'completed', platform_fee = ?, worker_payout = ?, completed_at = ?, payout_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'paid_in_progress'",
+         WHERE id = ? AND status IN ('paid_in_progress', 'worker_done')",
     )
     .bind(platform_fee)
     .bind(worker_payout)
@@ -1473,7 +1496,7 @@ async fn request_cancel_case(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.user_id != customer_user_id {
+    if !is_case_customer(&case, customer_user_id, chat_id) {
         ctx.bot.send_message(chat_id, "Bạn không có quyền hủy case này.").await?;
         return Ok(());
     }
@@ -1487,7 +1510,7 @@ async fn request_cancel_case(
         ctx.bot.send_message(chat_id, "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.").await?;
         return Ok(());
     }
-    if case.status == "paid_in_progress" || case.status == "worker_failed" {
+    if case.status == "paid_in_progress" || case.status == "worker_done" || case.status == "worker_failed" {
         sqlx::query("UPDATE facebook_unlock_cases SET status = 'cancel_requested', updated_at = ? WHERE id = ?")
             .bind(&now)
             .bind(case_id)
@@ -1511,8 +1534,14 @@ async fn dispute_case(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.user_id != customer_user_id || case.status != "paid_in_progress" {
+    if !is_case_customer(&case, customer_user_id, chat_id) {
         ctx.bot.send_message(chat_id, "Bạn không thể khiếu nại case này.").await?;
+        return Ok(());
+    }
+    if !matches!(case.status.as_str(), "paid_in_progress" | "worker_done") {
+        ctx.bot
+            .send_message(chat_id, "Case này không còn ở trạng thái có thể khiếu nại.")
+            .await?;
         return Ok(());
     }
     let now = Utc::now().to_rfc3339();
@@ -2234,6 +2263,10 @@ fn notification_admin_ids(ctx: &AppContext) -> Vec<i64> {
 
 fn is_admin(ctx: &AppContext, user_id: i64) -> bool {
     notification_admin_ids(ctx).into_iter().any(|admin_id| admin_id == user_id)
+}
+
+fn is_case_customer(case: &FacebookUnlockCase, user_id: i64, chat_id: ChatId) -> bool {
+    case.user_id == user_id || case.chat_id == chat_id.0
 }
 
 async fn is_approved_worker(pool: &SqlitePool, user_id: i64) -> Result<bool> {
