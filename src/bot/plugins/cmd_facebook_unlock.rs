@@ -318,6 +318,12 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                     .await?;
                 dialogue.update(State::Idle).await?;
             }
+            _ if data.starts_with("fbunlock:repost_case:") => {
+                let case_id = data.trim_start_matches("fbunlock:repost_case:");
+                repost_cancelled_case(ctx.clone(), chat_id, q.from.id.0 as i64, case_id, &lang)
+                    .await?;
+                dialogue.update(State::Idle).await?;
+            }
             "fbunlock:worker" => {
                 send_worker_menu(&ctx, chat_id, &lang).await?;
                 dialogue.update(State::Idle).await?;
@@ -988,7 +994,7 @@ async fn submit_quote(
         ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.status != "open" {
+    if !matches!(case.status.as_str(), "open" | "quoted_accepted") {
         ctx.bot
             .send_message(msg.chat.id, "Case này không còn nhận báo giá.")
             .await?;
@@ -1522,14 +1528,16 @@ async fn accept_quote(
         ctx.bot.send_message(chat_id, "Bạn không có quyền chọn báo giá này.").await?;
         return Ok(());
     }
-    if case.status != "open" {
-        ctx.bot.send_message(chat_id, "Case này không còn nhận báo giá.").await?;
+    if !matches!(case.status.as_str(), "open" | "quoted_accepted") {
+        ctx.bot
+            .send_message(chat_id, "Case này không còn nhận báo giá.")
+            .await?;
         return Ok(());
     }
 
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "UPDATE facebook_unlock_quotes SET status = CASE WHEN id = ? THEN 'accepted' ELSE 'rejected' END, updated_at = ?
+        "UPDATE facebook_unlock_quotes SET status = CASE WHEN id = ? THEN 'accepted' ELSE 'pending' END, updated_at = ?
          WHERE case_id = ?",
     )
     .bind(quote_id)
@@ -1586,6 +1594,12 @@ async fn pay_accepted_quote(
     }
     if case.status == "paid_in_progress" {
         ctx.bot.send_message(chat_id, "Case này đã thanh toán rồi.").await?;
+        return Ok(());
+    }
+    if case.status != "quoted_accepted" || quote.status != "accepted" {
+        ctx.bot
+            .send_message(chat_id, "Báo giá này không còn là báo giá đang được chọn.")
+            .await?;
         return Ok(());
     }
 
@@ -1961,7 +1975,21 @@ async fn request_cancel_case(
             .bind(case_id)
             .execute(&ctx.pool)
             .await?;
-        ctx.bot.send_message(chat_id, "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.").await?;
+        sqlx::query(
+            "UPDATE facebook_unlock_quotes SET status = 'cancelled', updated_at = ? WHERE case_id = ?",
+        )
+        .bind(&now)
+        .bind(case_id)
+        .execute(&ctx.pool)
+        .await?;
+        notify_workers_case_cancelled(&ctx, &case).await;
+        ctx.bot
+            .send_message(
+                chat_id,
+                "Đã hủy case. Bạn chưa bị trừ tiền nên không cần hoàn tiền.\n\nBạn có muốn đặt lại case này để dịch vụ khác báo giá không?",
+            )
+            .reply_markup(repost_cancelled_case_keyboard(case_id))
+            .await?;
         return Ok(());
     }
     if case.status == "paid_in_progress" || case.status == "worker_done" || case.status == "worker_failed" {
@@ -1970,11 +1998,77 @@ async fn request_cancel_case(
             .bind(case_id)
             .execute(&ctx.pool)
             .await?;
+        notify_workers_case_cancel_requested(&ctx, &case).await;
         ctx.bot.send_message(chat_id, "Đã gửi yêu cầu hủy/hoàn tiền cho admin.").await?;
         notify_admins_cancel_requested(&ctx, &case).await;
         return Ok(());
     }
     ctx.bot.send_message(chat_id, "Case hiện không thể hủy.").await?;
+    Ok(())
+}
+
+async fn repost_cancelled_case(
+    ctx: Arc<AppContext>,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    case_id: &str,
+    lang: &str,
+) -> Result<()> {
+    let Some(old_case) = load_case(&ctx.pool, case_id).await? else {
+        ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
+        return Ok(());
+    };
+    if !is_case_customer(&old_case, customer_user_id, chat_id) {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền đặt lại case này.")
+            .await?;
+        return Ok(());
+    }
+    if old_case.status != "cancelled" {
+        ctx.bot
+            .send_message(chat_id, "Chỉ đặt lại được case đã hủy và chưa thanh toán.")
+            .await?;
+        return Ok(());
+    }
+
+    let new_case_id = format!("FBUNLOCK-{}", short_id());
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"
+        INSERT INTO facebook_unlock_cases
+        (id, user_id, chat_id, username, issue, case_details, account_info, amount, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'open', ?, ?)
+        "#,
+    )
+    .bind(&new_case_id)
+    .bind(old_case.user_id)
+    .bind(old_case.chat_id)
+    .bind(old_case.username.clone())
+    .bind(old_case.issue.trim())
+    .bind(old_case.case_details.as_str())
+    .bind(old_case.case_details.as_str())
+    .bind(&now)
+    .bind(&now)
+    .execute(&ctx.pool)
+    .await?;
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "✅ Đã đặt lại case.\n\nCase cũ: <code>{}</code>\nCase mới: <code>{}</code>\nTrạng thái: chờ dịch vụ báo giá.",
+                html_escape(case_id),
+                html_escape(&new_case_id)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(case_created_keyboard(&ctx, lang))
+        .await?;
+
+    if let Some(new_case) = load_case(&ctx.pool, &new_case_id).await? {
+        notify_admins_new_case(&ctx, &new_case).await;
+        notify_workers_new_case(&ctx, &new_case).await;
+    }
     Ok(())
 }
 
@@ -2236,7 +2330,7 @@ async fn list_open_cases(pool: &SqlitePool, limit: i64) -> Result<Vec<FacebookUn
         "SELECT id, user_id, chat_id, username, issue, COALESCE(case_details, account_info, '') AS case_details,
                 accepted_quote_id, worker_user_id, amount, status, created_at
          FROM facebook_unlock_cases
-         WHERE status = 'open'
+         WHERE status IN ('open', 'quoted_accepted')
          ORDER BY created_at DESC
          LIMIT ?",
     )
@@ -2295,6 +2389,16 @@ async fn list_customer_cases(
     .bind(customer_user_id)
     .bind(customer_chat_id)
     .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+async fn quote_worker_chat_ids(pool: &SqlitePool, case_id: &str) -> Result<Vec<i64>> {
+    let rows = sqlx::query_scalar::<_, i64>(
+        "SELECT DISTINCT worker_chat_id FROM facebook_unlock_quotes WHERE case_id = ?",
+    )
+    .bind(case_id)
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -2450,6 +2554,46 @@ async fn notify_worker_quote_accepted(ctx: &AppContext, quote: &FacebookUnlockQu
         .await;
 }
 
+async fn notify_workers_case_cancelled(ctx: &AppContext, case: &FacebookUnlockCase) {
+    let Ok(worker_chat_ids) = quote_worker_chat_ids(&ctx.pool, &case.id).await else {
+        return;
+    };
+    for worker_chat_id in worker_chat_ids {
+        let _ = ctx
+            .bot
+            .send_message(
+                ChatId(worker_chat_id),
+                format!(
+                    "❌ Khách đã hủy case <code>{}</code> trước khi thanh toán.\n\nVấn đề: {}",
+                    html_escape(&case.id),
+                    html_escape(&case.issue)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .await;
+    }
+}
+
+async fn notify_workers_case_cancel_requested(ctx: &AppContext, case: &FacebookUnlockCase) {
+    let Ok(worker_chat_ids) = quote_worker_chat_ids(&ctx.pool, &case.id).await else {
+        return;
+    };
+    for worker_chat_id in worker_chat_ids {
+        let _ = ctx
+            .bot
+            .send_message(
+                ChatId(worker_chat_id),
+                format!(
+                    "⚠️ Khách đã yêu cầu hủy/hoàn tiền case <code>{}</code>.\nAdmin sẽ xử lý tiếp.\n\nVấn đề: {}",
+                    html_escape(&case.id),
+                    html_escape(&case.issue)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .await;
+    }
+}
+
 async fn notify_worker_case_paid(ctx: &AppContext, case: &FacebookUnlockCase, quote: &FacebookUnlockQuote) {
     let fee_percent = platform_fee_percent(ctx);
     let platform_fee = quote.amount * fee_percent / 100;
@@ -2589,6 +2733,19 @@ fn pay_quote_keyboard(
             "fbunlock_btn_cancel_case",
             "❌ Hủy case",
             format!("fbunlock:cancel_case:{case_id}"),
+        )],
+    ])
+}
+
+fn repost_cancelled_case_keyboard(case_id: &str) -> teloxide::types::InlineKeyboardMarkup {
+    teloxide::types::InlineKeyboardMarkup::new(vec![
+        vec![teloxide::types::InlineKeyboardButton::callback(
+            "🔁 Đặt lại case này",
+            format!("fbunlock:repost_case:{case_id}"),
+        )],
+        vec![teloxide::types::InlineKeyboardButton::callback(
+            "🧾 Case của tôi",
+            "fbunlock:customer_my_cases",
         )],
     ])
 }
