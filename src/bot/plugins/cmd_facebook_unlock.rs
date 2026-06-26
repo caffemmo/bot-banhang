@@ -303,6 +303,21 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 send_customer_my_cases(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
                 dialogue.update(State::Idle).await?;
             }
+            "fbunlock:customer_delete_menu" => {
+                send_customer_case_action_menu(&ctx, chat_id, q.from.id.0 as i64, &lang, "delete")
+                    .await?;
+                dialogue.update(State::Idle).await?;
+            }
+            "fbunlock:customer_cancel_menu" => {
+                send_customer_case_action_menu(&ctx, chat_id, q.from.id.0 as i64, &lang, "cancel")
+                    .await?;
+                dialogue.update(State::Idle).await?;
+            }
+            "fbunlock:customer_message_menu" => {
+                send_customer_case_action_menu(&ctx, chat_id, q.from.id.0 as i64, &lang, "message")
+                    .await?;
+                dialogue.update(State::Idle).await?;
+            }
             "fbunlock:worker" => {
                 send_worker_menu(&ctx, chat_id, &lang).await?;
                 dialogue.update(State::Idle).await?;
@@ -1207,55 +1222,15 @@ async fn send_customer_my_cases(
             html_escape(&case_note_info(&case.case_details)),
             html_escape(&format_short_time(&case.created_at))
         ));
-        if case.status == "open" {
-            rows.push(vec![InlineKeyboardButton::callback(
-                format!("#{} 🗑 Xóa case", number),
-                format!("fbunlock:delete_case:{}", case.id),
-            )]);
-        }
-        if case.status == "quoted_accepted" {
-            rows.push(vec![InlineKeyboardButton::callback(
-                format!("#{} ❌ Hủy case", number),
-                format!("fbunlock:cancel_case:{}", case.id),
-            )]);
-        }
-        if case.status == "paid_in_progress" || case.status == "worker_done" {
-            rows.push(vec![
-                InlineKeyboardButton::callback(
-                    format!("#{} 💬 Nhắn dịch vụ", number),
-                    format!("fbunlock:msg_worker:{}", case.id),
-                ),
-                InlineKeyboardButton::callback(
-                    format!("#{} ❌ Yêu cầu hủy", number),
-                    format!("fbunlock:cancel_case:{}", case.id),
-                ),
-            ]);
-        }
-        if case.status == "worker_failed" {
-            rows.push(vec![InlineKeyboardButton::callback(
-                format!("#{} ❌ Yêu cầu hủy", number),
-                format!("fbunlock:cancel_case:{}", case.id),
-            )]);
-        }
-        if case.status == "worker_done" {
-            rows.push(vec![
-                InlineKeyboardButton::callback(
-                    format!("#{} ✅ Xác nhận", number),
-                    format!("fbunlock:confirm_done:{}", case.id),
-                ),
-                InlineKeyboardButton::callback(
-                    format!("#{} ⚠️ Khiếu nại", number),
-                    format!("fbunlock:dispute:{}", case.id),
-                ),
-            ]);
-        }
-        if matches!(case.status.as_str(), "cancelled" | "completed" | "refunded") {
-            rows.push(vec![InlineKeyboardButton::callback(
-                format!("#{} 🧹 Ẩn case", number),
-                format!("fbunlock:hide_case:{}", case.id),
-            )]);
-        }
     }
+    rows.push(vec![
+        InlineKeyboardButton::callback("🗑 Xóa case", "fbunlock:customer_delete_menu"),
+        InlineKeyboardButton::callback("❌ Yêu cầu hủy", "fbunlock:customer_cancel_menu"),
+    ]);
+    rows.push(vec![InlineKeyboardButton::callback(
+        "💬 Nhắn tin",
+        "fbunlock:customer_message_menu",
+    )]);
     rows.push(vec![i18n::inline_button_callback(
         ctx,
         lang,
@@ -1270,6 +1245,93 @@ async fn send_customer_my_cases(
         json!({
             "chat_id": chat_id.0,
             "text": lines.join("\n"),
+            "parse_mode": "HTML",
+            "reply_markup": { "inline_keyboard": rows }
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn send_customer_case_action_menu(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    customer_user_id: i64,
+    lang: &str,
+    action: &str,
+) -> Result<()> {
+    let cases = list_customer_cases(&ctx.pool, customer_user_id, chat_id.0, 10).await?;
+    let (title, empty_text) = match action {
+        "delete" => (
+            "🗑 <b>CHỌN CASE MUỐN XÓA/ẨN</b>",
+            "Không có case nào có thể xóa hoặc ẩn.",
+        ),
+        "cancel" => (
+            "❌ <b>CHỌN CASE MUỐN YÊU CẦU HỦY</b>",
+            "Không có case nào có thể yêu cầu hủy.",
+        ),
+        "message" => (
+            "💬 <b>CHỌN CASE MUỐN NHẮN TIN</b>",
+            "Không có case nào đang ở trạng thái có thể nhắn dịch vụ.",
+        ),
+        _ => ("🧾 <b>CHỌN CASE</b>", "Không có case phù hợp."),
+    };
+
+    let mut rows = Vec::new();
+    for (index, case) in cases.iter().enumerate() {
+        let number = index + 1;
+        let issue = short_button_text(&case.issue, 24);
+        if action == "delete" && case.status == "open" {
+            rows.push(vec![InlineKeyboardButton::callback(
+                format!("#{} · Xóa · {}", number, issue),
+                format!("fbunlock:delete_case:{}", case.id),
+            )]);
+        } else if action == "delete"
+            && matches!(case.status.as_str(), "cancelled" | "completed" | "refunded")
+        {
+            rows.push(vec![InlineKeyboardButton::callback(
+                format!("#{} · Ẩn · {}", number, issue),
+                format!("fbunlock:hide_case:{}", case.id),
+            )]);
+        } else if action == "cancel"
+            && matches!(
+                case.status.as_str(),
+                "quoted_accepted" | "paid_in_progress" | "worker_done" | "worker_failed"
+            )
+        {
+            rows.push(vec![InlineKeyboardButton::callback(
+                format!("#{} · Hủy · {}", number, issue),
+                format!("fbunlock:cancel_case:{}", case.id),
+            )]);
+        } else if action == "message"
+            && matches!(case.status.as_str(), "paid_in_progress" | "worker_done")
+        {
+            rows.push(vec![InlineKeyboardButton::callback(
+                format!("#{} · Nhắn · {}", number, issue),
+                format!("fbunlock:msg_worker:{}", case.id),
+            )]);
+        }
+    }
+
+    let text = if rows.is_empty() {
+        format!("{}\n\n{}", title, empty_text)
+    } else {
+        format!("{}\n\nBấm đúng số case bạn muốn thao tác.", title)
+    };
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_back",
+        "⬅️ Quay lại",
+        "fbunlock:customer_my_cases",
+    )]);
+
+    chat_ui::send_clean_menu_payload(
+        ctx,
+        chat_id,
+        json!({
+            "chat_id": chat_id.0,
+            "text": text,
             "parse_mode": "HTML",
             "reply_markup": { "inline_keyboard": rows }
         }),
@@ -2741,6 +2803,19 @@ fn customer_status_label(status: &str) -> &str {
         "refunded" => "Đã hoàn tiền",
         "cancelled" => "Đã hủy",
         other => other,
+    }
+}
+
+fn short_button_text(value: &str, max_chars: usize) -> String {
+    let value = value.trim();
+    let mut text = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        text.push_str("...");
+    }
+    if text.is_empty() {
+        "case".to_string()
+    } else {
+        text
     }
 }
 
