@@ -11,6 +11,7 @@ use tracing::{error, info};
 
 use crate::app::AppContext;
 use crate::bot::i18n;
+use crate::bot::plugins::cmd_facebook_unlock;
 use crate::domains::crypto_pay::binance_worker;
 use crate::domains::crypto_pay::repo as crypto_repo;
 use crate::domains::crypto_pay::worker as crypto_worker;
@@ -24,10 +25,21 @@ const ORDER_RETENTION_DAYS: i64 = 7;
 
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut cleanup_ticker = time::interval(time::Duration::from_secs(60));
+    let mut facebook_unlock_reminder_ticker = time::interval(time::Duration::from_secs(30 * 60));
+    facebook_unlock_reminder_ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    facebook_unlock_reminder_ticker.reset();
 
     loop {
-        cleanup_ticker.tick().await;
-        run_cleanup_tick(&ctx).await;
+        tokio::select! {
+            _ = cleanup_ticker.tick() => {
+                run_cleanup_tick(&ctx).await;
+            }
+            _ = facebook_unlock_reminder_ticker.tick() => {
+                if let Err(err) = cmd_facebook_unlock::send_open_case_reminders(&ctx).await {
+                    error!("facebook unlock open case reminder tick failed: {err}");
+                }
+            }
+        }
     }
 }
 

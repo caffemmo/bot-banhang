@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::json;
 use sqlx::{FromRow, SqlitePool};
-use teloxide::payloads::SendMessageSetters;
+use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::prelude::Requester;
 use teloxide::types::{
     BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
@@ -24,6 +24,7 @@ const DEFAULT_WORKER_MAX_ACTIVE_CASES: i64 = 3;
 const DEFAULT_CUSTOMER_MAX_OPEN_CASES: i64 = 3;
 const DEFAULT_CUSTOMER_CREATE_COOLDOWN_SECONDS: i64 = 120;
 const DEFAULT_CASE_NOTE_MIN_CHARS: usize = 10;
+const REMINDER_DISABLED_FOREVER: &str = "forever";
 
 #[derive(Debug, Clone, FromRow)]
 struct FacebookUnlockCase {
@@ -63,6 +64,11 @@ struct FacebookUnlockWorkerApplication {
 }
 
 pub struct FacebookUnlockCommandPlugin;
+
+enum ReminderMute {
+    OneDay,
+    Forever,
+}
 
 #[async_trait::async_trait]
 impl AppPlugin for FacebookUnlockCommandPlugin {
@@ -504,6 +510,30 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 admin_delete_customer_cases(ctx.clone(), chat_id, q.from.id.0 as i64, case_id).await?;
                 dialogue.update(State::Idle).await?;
             }
+            "fbunlock:remind_mute_1d" => {
+                mute_worker_reminders(&ctx, q.from.id.0 as i64, chat_id.0, ReminderMute::OneDay).await?;
+                ctx.bot
+                    .send_message(chat_id, "Đã tắt nhắc case mở khóa Facebook trong 1 ngày.")
+                    .await?;
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text("Đã tắt nhắc case mở khóa Facebook trong 1 ngày.")
+                    .await;
+                dialogue.update(State::Idle).await?;
+            }
+            "fbunlock:remind_disable" => {
+                mute_worker_reminders(&ctx, q.from.id.0 as i64, chat_id.0, ReminderMute::Forever).await?;
+                ctx.bot
+                    .send_message(chat_id, "Đã tắt hẳn nhắc case mở khóa Facebook.")
+                    .await?;
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text("Đã tắt hẳn nhắc case mở khóa Facebook.")
+                    .await;
+                dialogue.update(State::Idle).await?;
+            }
             _ => {}
         }
 
@@ -622,6 +652,21 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
             sender_user_id INTEGER NOT NULL,
             message TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS facebook_unlock_worker_reminder_settings (
+            worker_user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            muted_until TEXT,
+            disabled INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(worker_user_id, chat_id)
         )
         "#,
     )
@@ -1084,6 +1129,13 @@ async fn approve_worker_application(
             ChatId(application.chat_id),
             "✅ Admin đã duyệt bạn làm dịch vụ mở khóa Facebook. Bạn có thể xem case và báo giá.",
         )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+            &ctx,
+            "vi",
+            "fbunlock_btn_worker_cases",
+            "📋 Xem case cần báo giá",
+            "fbunlock:worker_cases",
+        )]]))
         .await;
     Ok(())
 }
@@ -2783,6 +2835,21 @@ async fn list_open_cases(pool: &SqlitePool, limit: i64) -> Result<Vec<FacebookUn
     Ok(rows)
 }
 
+async fn list_unsupported_open_cases(pool: &SqlitePool, limit: i64) -> Result<Vec<FacebookUnlockCase>> {
+    let rows = sqlx::query_as::<_, FacebookUnlockCase>(
+        "SELECT id, user_id, chat_id, username, issue, COALESCE(case_details, account_info, '') AS case_details,
+                accepted_quote_id, worker_user_id, amount, status, created_at
+         FROM facebook_unlock_cases
+         WHERE status = 'open'
+         ORDER BY created_at DESC
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 async fn list_worker_in_progress_cases(
     pool: &SqlitePool,
     worker_user_id: i64,
@@ -3083,6 +3150,55 @@ async fn notify_workers_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
             .reply_markup(worker_quote_keyboard(ctx, "vi", &case.id))
             .await;
     }
+}
+
+pub async fn send_open_case_reminders(ctx: &AppContext) -> Result<()> {
+    ensure_schema(&ctx.pool).await?;
+    let cases = list_unsupported_open_cases(&ctx.pool, 8).await?;
+    if cases.is_empty() {
+        return Ok(());
+    }
+
+    for (worker_user_id, worker_chat_id) in approved_worker_recipients(&ctx.pool).await? {
+        if worker_reminder_is_muted(&ctx.pool, worker_user_id, worker_chat_id).await? {
+            continue;
+        }
+        let mut lines = vec!["🔔 <b>CÒN CASE CHƯA ĐƯỢC HỖ TRỢ</b>".to_string()];
+        for (index, case) in cases.iter().enumerate() {
+            lines.push(format!(
+                "\n╭─ 🧾 #{} · <code>{}</code>\n├ Vấn đề: {}\n├ Ghi chú: <i>{}</i>\n├ Thời gian: {}\n╰────────────────",
+                index + 1,
+                html_escape(&case.id),
+                html_escape(&case.issue),
+                html_escape(&case_note_info(&case.case_details)),
+                html_escape(&format_short_time(&case.created_at))
+            ));
+        }
+        let rows = vec![
+            vec![i18n::inline_button_callback(
+                ctx,
+                "vi",
+                "fbunlock_btn_worker_cases",
+                "📋 Xem case cần báo giá",
+                "fbunlock:worker_cases",
+            )],
+            vec![
+                InlineKeyboardButton::callback("🔕 Tắt tạm 1 ngày", "fbunlock:remind_mute_1d"),
+                InlineKeyboardButton::callback("🚫 Tắt luôn", "fbunlock:remind_disable"),
+            ],
+        ];
+        if let Err(err) = ctx
+            .bot
+            .send_message(ChatId(worker_chat_id), lines.join("\n"))
+            .parse_mode(ParseMode::Html)
+            .reply_markup(InlineKeyboardMarkup::new(rows))
+            .await
+        {
+            tracing::warn!("send facebook unlock open case reminder to {worker_chat_id} failed: {err}");
+        }
+    }
+
+    Ok(())
 }
 
 async fn notify_admins_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
@@ -3875,6 +3991,74 @@ async fn approved_worker_chat_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
     .fetch_all(pool)
     .await?;
     Ok(worker_ids)
+}
+
+async fn approved_worker_recipients(pool: &SqlitePool) -> Result<Vec<(i64, i64)>> {
+    let rows = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT user_id, chat_id FROM facebook_unlock_workers WHERE status = 'approved'",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+async fn mute_worker_reminders(
+    ctx: &AppContext,
+    worker_user_id: i64,
+    chat_id: i64,
+    mute: ReminderMute,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let (muted_until, disabled) = match mute {
+        ReminderMute::OneDay => (Some((Utc::now() + chrono::Duration::days(1)).to_rfc3339()), 0),
+        ReminderMute::Forever => (Some(REMINDER_DISABLED_FOREVER.to_string()), 1),
+    };
+    sqlx::query(
+        "INSERT INTO facebook_unlock_worker_reminder_settings
+         (worker_user_id, chat_id, muted_until, disabled, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(worker_user_id, chat_id) DO UPDATE SET
+            muted_until = excluded.muted_until,
+            disabled = excluded.disabled,
+            updated_at = excluded.updated_at",
+    )
+    .bind(worker_user_id)
+    .bind(chat_id)
+    .bind(muted_until)
+    .bind(disabled)
+    .bind(now)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(())
+}
+
+async fn worker_reminder_is_muted(
+    pool: &SqlitePool,
+    worker_user_id: i64,
+    chat_id: i64,
+) -> Result<bool> {
+    let row = sqlx::query_as::<_, (Option<String>, i64)>(
+        "SELECT muted_until, disabled
+         FROM facebook_unlock_worker_reminder_settings
+         WHERE worker_user_id = ? AND chat_id = ?",
+    )
+    .bind(worker_user_id)
+    .bind(chat_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((muted_until, disabled)) = row else {
+        return Ok(false);
+    };
+    if disabled != 0 {
+        return Ok(true);
+    }
+    let Some(muted_until) = muted_until else {
+        return Ok(false);
+    };
+    let Ok(until) = DateTime::parse_from_rfc3339(&muted_until) else {
+        return Ok(false);
+    };
+    Ok(until.with_timezone(&Utc) > Utc::now())
 }
 
 async fn load_worker_application(
