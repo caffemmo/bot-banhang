@@ -84,6 +84,10 @@ pub enum State {
     FacebookUnlockQuote {
         case_id: String,
     },
+    FacebookUnlockQuoteNote {
+        case_id: String,
+        amount: i64,
+    },
     FacebookUnlockWorkerMessage {
         case_id: String,
     },

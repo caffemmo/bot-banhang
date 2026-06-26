@@ -4528,6 +4528,7 @@ impl AppPlugin for ShopCommandPlugin {
             State::FacebookUnlockWorkerServices { .. } => {}
             State::FacebookUnlockWorkerRate { .. } => {}
             State::FacebookUnlockQuote { .. } => {}
+            State::FacebookUnlockQuoteNote { .. } => {}
             State::FacebookUnlockWorkerMessage { .. } => {}
             State::FacebookUnlockCustomerMessage { .. } => {}
             State::FacebookUnlockDisputeReason { .. } => {}

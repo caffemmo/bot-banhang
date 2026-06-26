@@ -267,7 +267,24 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                     ask_quote_amount(&ctx, msg.chat.id, &case_id).await?;
                     return Ok(true);
                 }
-                submit_quote(ctx.clone(), &msg, &case_id, text, &lang).await?;
+                let Some(amount) = parse_quote_amount(text) else {
+                    ask_quote_amount(&ctx, msg.chat.id, &case_id).await?;
+                    return Ok(true);
+                };
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                ask_quote_note(&ctx, msg.chat.id, &case_id, amount).await?;
+                dialogue
+                    .update(State::FacebookUnlockQuoteNote { case_id, amount })
+                    .await?;
+                Ok(true)
+            }
+            State::FacebookUnlockQuoteNote { case_id, amount } => {
+                if text.is_empty() {
+                    ask_quote_note(&ctx, msg.chat.id, &case_id, amount).await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                submit_quote(ctx.clone(), &msg, &case_id, amount, parse_quote_note(text), &lang).await?;
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
@@ -898,8 +915,29 @@ async fn ask_quote_amount(ctx: &AppContext, chat_id: ChatId, case_id: &str) -> R
                 ctx,
                 &lang,
                 "fbunlock_prompt_quote_amount",
-                "💬 Nhập báo giá cho case <code>{case_id}</code>.\n\nVí dụ: <code>300000</code> hoặc <code>300000 | Có thể xử lý trong 24h</code>",
+                "💬 Nhập báo giá cho case <code>{case_id}</code>.\n\nVí dụ: <code>300000</code>, <code>30k</code> = 30000, <code>1m</code> = 1000000",
                 &[("case_id", html_escape(case_id))]
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
+    Ok(())
+}
+
+async fn ask_quote_note(ctx: &AppContext, chat_id: ChatId, case_id: &str, amount: i64) -> Result<()> {
+    let lang = i18n::user_lang_by_id(ctx, chat_id.0).await;
+    ctx.bot
+        .send_message(
+            chat_id,
+            i18n::tr(
+                ctx,
+                &lang,
+                "fbunlock_prompt_quote_note",
+                "Bạn muốn nhập thêm nội dung khác không?\n\nCase: <code>{case_id}</code>\nGiá: <b>{amount}</b>\n\nVD: bao về luôn nhé hoặc có giấy tờ thì nhận\n\nNếu không có, nhập: <code>không</code>",
+                &[
+                    ("case_id", html_escape(case_id)),
+                    ("amount", format_vnd(amount)),
+                ],
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -1180,7 +1218,8 @@ async fn submit_quote(
     ctx: Arc<AppContext>,
     msg: &Message,
     case_id: &str,
-    raw_text: &str,
+    amount: i64,
+    note: Option<String>,
     lang: &str,
 ) -> Result<()> {
     let Some(user) = msg.from() else {
@@ -1209,11 +1248,6 @@ async fn submit_quote(
         send_worker_active_limit_message(&ctx, msg.chat.id).await?;
         return Ok(());
     }
-
-    let Some((amount, note)) = parse_quote(raw_text) else {
-        ask_quote_amount(&ctx, msg.chat.id, case_id).await?;
-        return Ok(());
-    };
 
     let quote_id = format!("FBQUOTE-{}", short_id());
     let now = Utc::now().to_rfc3339();
@@ -3400,20 +3434,64 @@ async fn notify_admins_worker_application(
     }
 }
 
-fn parse_quote(raw: &str) -> Option<(i64, Option<String>)> {
-    let mut parts = raw.splitn(2, '|');
-    let amount_raw = parts
+fn parse_quote_amount(raw: &str) -> Option<i64> {
+    let amount = raw
+        .split('|')
         .next()?
-        .chars()
-        .filter(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    let amount = amount_raw.parse::<i64>().ok().filter(|amount| *amount > 0)?;
-    let note = parts
-        .next()
-        .map(str::trim)
-        .filter(|note| !note.is_empty())
-        .map(str::to_string);
-    Some((amount, note))
+        .split_whitespace()
+        .next()?
+        .trim()
+        .to_lowercase()
+        .replace('_', "");
+    if amount.is_empty() {
+        return None;
+    }
+
+    let (number, multiplier) = match amount.chars().last()? {
+        'k' => (&amount[..amount.len() - 1], 1_000.0),
+        'm' => (&amount[..amount.len() - 1], 1_000_000.0),
+        _ => (amount.as_str(), 1.0),
+    };
+    if number.is_empty() {
+        return None;
+    }
+
+    let normalized = if multiplier > 1.0 {
+        number.replace(',', ".")
+    } else {
+        number
+            .chars()
+            .filter(|ch| ch.is_ascii_digit())
+            .collect::<String>()
+    };
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let parsed = if multiplier > 1.0 {
+        normalized.parse::<f64>().ok()? * multiplier
+    } else {
+        normalized.parse::<f64>().ok()? * multiplier
+    };
+    if !parsed.is_finite() || parsed <= 0.0 {
+        return None;
+    }
+    Some(parsed.round() as i64).filter(|amount| *amount > 0)
+}
+
+fn parse_quote_note(raw: &str) -> Option<String> {
+    let note = raw.trim();
+    if note.is_empty() {
+        return None;
+    }
+    let normalized = note.to_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "khong" | "không" | "ko" | "k" | "no" | "skip" | "bo qua" | "bỏ qua" | "0"
+    ) {
+        return None;
+    }
+    Some(note.to_string())
 }
 
 fn topup_keyboard(ctx: &AppContext, lang: &str) -> teloxide::types::InlineKeyboardMarkup {
