@@ -4520,6 +4520,9 @@ impl AppPlugin for ShopCommandPlugin {
             State::ViametaCollectingImage { .. } => {}
             State::FacebookUnlockIssue => {}
             State::FacebookUnlockDetails { .. } => {}
+            State::FacebookUnlockOwnership { .. } => {}
+            State::FacebookUnlockLockedDuration { .. } => {}
+            State::FacebookUnlockCaseNote { .. } => {}
             State::FacebookUnlockWorkerApply => {}
             State::FacebookUnlockQuote { .. } => {}
             State::FacebookUnlockWorkerMessage { .. } => {}

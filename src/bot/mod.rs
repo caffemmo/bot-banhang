@@ -59,6 +59,18 @@ pub enum State {
     FacebookUnlockDetails {
         issue: String,
     },
+    FacebookUnlockOwnership {
+        issue: String,
+    },
+    FacebookUnlockLockedDuration {
+        issue: String,
+        ownership: String,
+    },
+    FacebookUnlockCaseNote {
+        issue: String,
+        ownership: String,
+        locked_duration: String,
+    },
     FacebookUnlockWorkerApply,
     FacebookUnlockQuote {
         case_id: String,

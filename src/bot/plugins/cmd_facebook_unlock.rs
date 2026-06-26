@@ -107,20 +107,69 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 }
                 chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
                 dialogue
-                    .update(State::FacebookUnlockDetails {
+                    .update(State::FacebookUnlockOwnership {
                         issue: text.to_string(),
                     })
                     .await?;
-                ask_case_details(&ctx, msg.chat.id).await?;
+                ask_account_ownership(&ctx, msg.chat.id).await?;
                 Ok(true)
             }
             State::FacebookUnlockDetails { issue } => {
                 if text.is_empty() {
-                    ask_case_details(&ctx, msg.chat.id).await?;
+                    ask_account_ownership(&ctx, msg.chat.id).await?;
                     return Ok(true);
                 }
                 chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
-                submit_unlock_case(ctx.clone(), &msg, issue, text.to_string(), &lang).await?;
+                dialogue
+                    .update(State::FacebookUnlockOwnership { issue })
+                    .await?;
+                ask_account_ownership(&ctx, msg.chat.id).await?;
+                Ok(true)
+            }
+            State::FacebookUnlockOwnership { issue } => {
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                ask_account_ownership(&ctx, msg.chat.id).await?;
+                dialogue
+                    .update(State::FacebookUnlockOwnership { issue })
+                    .await?;
+                Ok(true)
+            }
+            State::FacebookUnlockLockedDuration { issue, ownership } => {
+                if text.is_empty() {
+                    ask_locked_duration(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                dialogue
+                    .update(State::FacebookUnlockCaseNote {
+                        issue,
+                        ownership,
+                        locked_duration: text.to_string(),
+                    })
+                    .await?;
+                ask_case_note(&ctx, msg.chat.id).await?;
+                Ok(true)
+            }
+            State::FacebookUnlockCaseNote {
+                issue,
+                ownership,
+                locked_duration,
+            } => {
+                if text.is_empty() {
+                    ask_case_note(&ctx, msg.chat.id).await?;
+                    return Ok(true);
+                }
+                chat_ui::delete_message(&ctx, msg.chat.id, msg.id).await;
+                submit_unlock_case(
+                    ctx.clone(),
+                    &msg,
+                    issue,
+                    ownership,
+                    locked_duration,
+                    text.to_string(),
+                    &lang,
+                )
+                .await?;
                 dialogue.update(State::Idle).await?;
                 Ok(true)
             }
@@ -207,6 +256,33 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
             "fbunlock:worker_cases" => {
                 send_worker_case_list(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
                 dialogue.update(State::Idle).await?;
+            }
+            "fbunlock:owned_yes" | "fbunlock:owned_no" => {
+                let Some(State::FacebookUnlockOwnership { issue }) = dialogue.get().await? else {
+                    ask_issue(&ctx, chat_id).await?;
+                    dialogue.update(State::FacebookUnlockIssue).await?;
+                    return Ok(true);
+                };
+                let ownership = if data == "fbunlock:owned_yes" {
+                    "Có"
+                } else {
+                    "Không"
+                }
+                .to_string();
+                if let Some(message) = &q.message {
+                    let _ = ctx
+                        .bot
+                        .edit_message_text(
+                            chat_id,
+                            message.id(),
+                            format!("Tài khoản của bạn có chính chủ không?\n\nĐã chọn: {ownership}"),
+                        )
+                        .await;
+                }
+                ask_locked_duration(&ctx, chat_id).await?;
+                dialogue
+                    .update(State::FacebookUnlockLockedDuration { issue, ownership })
+                    .await?;
             }
             _ if data.starts_with("fbunlock:approve_worker:") => {
                 let application_id = data.trim_start_matches("fbunlock:approve_worker:");
@@ -492,11 +568,32 @@ async fn ask_issue(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     Ok(())
 }
 
-async fn ask_case_details(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+async fn ask_account_ownership(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     ctx.bot
         .send_message(
             chat_id,
-            "🔐 Vui lòng gửi thông tin theo mẫu:\n\nUID hoặc link Facebook:\nTình trạng tài khoản:\nẢnh chụp lỗi nếu có:\nGhi chú thêm:\n\nLưu ý: Không gửi mật khẩu, mã 2FA hoặc mã khôi phục. Người dịch vụ sẽ hướng dẫn bạn thao tác qua bot.",
+            "Tài khoản của bạn có chính chủ không?",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback("Có", "fbunlock:owned_yes"),
+            InlineKeyboardButton::callback("Không", "fbunlock:owned_no"),
+        ]]))
+        .await?;
+    Ok(())
+}
+
+async fn ask_locked_duration(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    ctx.bot
+        .send_message(chat_id, "Tài khoản bạn bị khóa bao nhiêu lâu?")
+        .await?;
+    Ok(())
+}
+
+async fn ask_case_note(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    ctx.bot
+        .send_message(
+            chat_id,
+            "Bạn muốn mô tả tiêu đề cho CASE của bạn cho dịch vụ xem như nào?\n\nVD: acc em bị khóa 956, nhưng mà có đầy đủ giấy tờ, ai mở được thì nhận case nha!",
         )
         .await?;
     Ok(())
@@ -530,7 +627,9 @@ async fn submit_unlock_case(
     ctx: Arc<AppContext>,
     msg: &Message,
     issue: String,
-    case_details: String,
+    ownership: String,
+    locked_duration: String,
+    case_note: String,
     lang: &str,
 ) -> Result<()> {
     let Some(user) = msg.from() else {
@@ -542,6 +641,12 @@ async fn submit_unlock_case(
 
     let case_id = format!("FBUNLOCK-{}", short_id());
     let now = Utc::now().to_rfc3339();
+    let case_details = format!(
+        "Tài khoản chính chủ: {}\nThời gian bị khóa: {}\nThông tin khách note case: {}",
+        ownership.trim(),
+        locked_duration.trim(),
+        case_note.trim()
+    );
     sqlx::query(
         r#"
         INSERT INTO facebook_unlock_cases
@@ -554,8 +659,8 @@ async fn submit_unlock_case(
     .bind(msg.chat.id.0)
     .bind(user.username.clone())
     .bind(issue.trim())
-    .bind(case_details.trim())
-    .bind(case_details.trim())
+    .bind(case_details.as_str())
+    .bind(case_details.as_str())
     .bind(&now)
     .bind(&now)
     .execute(&ctx.pool)
@@ -826,12 +931,12 @@ async fn send_worker_case_list(
     for (index, case) in cases.iter().enumerate() {
         let number = index + 1;
         lines.push(format!(
-            "\n#{} | Mã case: <code>{}</code>\nVấn đề: {}\nThời gian: {}\nThông tin public: {}",
+            "\n#{} | Mã case: <code>{}</code>\nTrạng thái: chờ dịch vụ nhận case\nThời gian: {}\n\nFacebook này đang bị vấn đề:\n{}\n\nThông tin khách note case:\n{}",
             number,
             html_escape(&case.id),
-            html_escape(&case.issue),
             html_escape(&format_time(&case.created_at)),
-            html_escape(&public_case_info(&case.case_details))
+            html_escape(&case.issue),
+            html_escape(&case_note_info(&case.case_details))
         ));
         rows.push(vec![InlineKeyboardButton::callback(
             format!("💬 Báo giá #{}", number),
@@ -1525,16 +1630,16 @@ async fn notify_workers_new_case(ctx: &AppContext, case: &FacebookUnlockCase) {
     }
     for worker_id in worker_ids {
         let text = format!(
-            "🔓 <b>CASE MỞ KHÓA FACEBOOK CẦN BÁO GIÁ</b>\n\n\
-             Mã case: <code>{}</code>\n\
-             Vấn đề: {}\n\
+            "🔓<b>CÓ CASE MỞ KHÓA FACEBOOK MỚI!</b>\n\n\
+             Mã case: <code>{}</code>\n\n\
+             Trạng thái: chờ dịch vụ nhận case\n\
              Thời gian: {}\n\n\
-             <b>Thông tin public:</b>\n{}\n\n\
-             Thông tin chi tiết chỉ mở cho worker được khách chọn sau khi khách đã thanh toán.",
+             Facebook này đang bị vấn đề:\n{}\n\n\
+             Thông tin khách note case:\n{}",
             html_escape(&case.id),
-            html_escape(&case.issue),
             html_escape(&format_time(&case.created_at)),
-            html_escape(&public_case_info(&case.case_details)),
+            html_escape(&case.issue),
+            html_escape(&case_note_info(&case.case_details)),
         );
         let _ = ctx
             .bot
@@ -1908,6 +2013,24 @@ fn public_case_info(case_details: &str) -> String {
         .or_else(|| case_details.lines().map(str::trim).find(|line| !line.is_empty()))
         .unwrap_or("Chưa có thông tin public")
         .to_string()
+}
+
+fn case_note_info(case_details: &str) -> String {
+    case_details
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Thông tin khách note case:"))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            case_details
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .next_back()
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Khách chưa ghi note case.".to_string())
 }
 
 fn short_id() -> String {
