@@ -257,6 +257,10 @@ impl AppPlugin for FacebookUnlockCommandPlugin {
                 send_worker_case_list(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
                 dialogue.update(State::Idle).await?;
             }
+            "fbunlock:worker_my_cases" => {
+                send_worker_my_cases(&ctx, chat_id, q.from.id.0 as i64, &lang).await?;
+                dialogue.update(State::Idle).await?;
+            }
             "fbunlock:owned_yes" | "fbunlock:owned_no" => {
                 let Some(State::FacebookUnlockOwnership { issue }) = dialogue.get().await? else {
                     ask_issue(&ctx, chat_id).await?;
@@ -548,6 +552,7 @@ async fn send_worker_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resu
             "reply_markup": {
                 "inline_keyboard": [
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_cases", "📋 Xem case cần báo giá", "fbunlock:worker_cases")],
+                    [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_my_cases", "🧾 Case của tôi", "fbunlock:worker_my_cases")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_worker_apply", "📝 Đăng ký làm dịch vụ", "fbunlock:worker_apply")],
                     [i18n::inline_button_callback_json(ctx, lang, "fbunlock_btn_back", "⬅️ Quay lại", "fbunlock:menu")]
                 ]
@@ -965,6 +970,96 @@ async fn send_worker_case_list(
     Ok(())
 }
 
+async fn send_worker_my_cases(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    worker_user_id: i64,
+    lang: &str,
+) -> Result<()> {
+    if !is_approved_worker(&ctx.pool, worker_user_id).await? {
+        ctx.bot
+            .send_message(
+                chat_id,
+                "Bạn cần đăng ký và được admin duyệt trước khi xem case của tôi.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_apply",
+                "📝 Đăng ký làm dịch vụ",
+                "fbunlock:worker_apply",
+            )]]))
+            .await?;
+        return Ok(());
+    }
+
+    let cases = list_worker_active_cases(&ctx.pool, worker_user_id, chat_id.0, 10).await?;
+    if cases.is_empty() {
+        ctx.bot
+            .send_message(chat_id, "Bạn chưa có case nào đang xử lý.")
+            .await?;
+        return Ok(());
+    }
+
+    let mut lines = vec!["🧾 <b>CASE CỦA TÔI</b>".to_string()];
+    let mut rows = Vec::new();
+    for (index, case) in cases.iter().enumerate() {
+        let number = index + 1;
+        lines.push(format!(
+            "\n#{} | Mã case: <code>{}</code>\nTrạng thái: {}\nThời gian: {}\n\nFacebook này đang bị vấn đề:\n{}\n\nThông tin khách note case:\n{}",
+            number,
+            html_escape(&case.id),
+            html_escape(&case.status),
+            html_escape(&format_time(&case.created_at)),
+            html_escape(&case.issue),
+            html_escape(&case_note_info(&case.case_details))
+        ));
+        rows.push(vec![
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_message_customer",
+                "💬 Nhắn khách",
+                format!("fbunlock:msg_customer:{}", case.id),
+            ),
+            i18n::inline_button_callback(
+                ctx,
+                lang,
+                "fbunlock_btn_worker_done",
+                "✅ Báo đã hoàn tất",
+                format!("fbunlock:worker_done:{}", case.id),
+            ),
+        ]);
+        rows.push(vec![i18n::inline_button_callback(
+            ctx,
+            lang,
+            "fbunlock_btn_worker_failed",
+            "⚠️ Không xử lý được",
+            format!("fbunlock:worker_failed:{}", case.id),
+        )]);
+    }
+    rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "fbunlock_btn_back",
+        "⬅️ Quay lại",
+        "fbunlock:worker",
+    )]);
+
+    chat_ui::send_clean_menu_payload(
+        ctx,
+        chat_id,
+        json!({
+            "chat_id": chat_id.0,
+            "text": lines.join("\n"),
+            "parse_mode": "HTML",
+            "reply_markup": { "inline_keyboard": rows }
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn accept_quote(
     ctx: Arc<AppContext>,
     chat_id: ChatId,
@@ -1148,7 +1243,9 @@ async fn relay_worker_message(
         ctx.bot.send_message(msg.chat.id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.worker_user_id != Some(user.id.0 as i64) || case.status != "paid_in_progress" {
+    if case.status != "paid_in_progress"
+        || !worker_can_handle_case(&ctx.pool, &case, user.id.0 as i64, msg.chat.id.0).await?
+    {
         ctx.bot.send_message(msg.chat.id, "Bạn chưa có quyền nhắn khách trong case này.").await?;
         return Ok(());
     }
@@ -1221,7 +1318,9 @@ async fn worker_mark_done(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.worker_user_id != Some(worker_user_id) || case.status != "paid_in_progress" {
+    if case.status != "paid_in_progress"
+        || !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await?
+    {
         ctx.bot.send_message(chat_id, "Bạn không có quyền hoàn tất case này.").await?;
         return Ok(());
     }
@@ -1250,7 +1349,9 @@ async fn worker_mark_failed(
         ctx.bot.send_message(chat_id, "Không tìm thấy case.").await?;
         return Ok(());
     };
-    if case.worker_user_id != Some(worker_user_id) || case.status != "paid_in_progress" {
+    if case.status != "paid_in_progress"
+        || !worker_can_handle_case(&ctx.pool, &case, worker_user_id, chat_id.0).await?
+    {
         ctx.bot.send_message(chat_id, "Bạn không có quyền báo lỗi case này.").await?;
         return Ok(());
     }
@@ -1593,6 +1694,63 @@ async fn list_open_cases(pool: &SqlitePool, limit: i64) -> Result<Vec<FacebookUn
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+async fn list_worker_active_cases(
+    pool: &SqlitePool,
+    worker_user_id: i64,
+    worker_chat_id: i64,
+    limit: i64,
+) -> Result<Vec<FacebookUnlockCase>> {
+    let rows = sqlx::query_as::<_, FacebookUnlockCase>(
+        "SELECT c.id, c.user_id, c.chat_id, c.username, c.issue,
+                COALESCE(c.case_details, c.account_info, '') AS case_details,
+                c.accepted_quote_id, c.worker_user_id, c.amount, c.status, c.created_at
+         FROM facebook_unlock_cases c
+         LEFT JOIN facebook_unlock_quotes q ON q.id = c.accepted_quote_id
+         WHERE c.status IN ('paid_in_progress', 'worker_failed', 'cancel_requested', 'disputed')
+           AND (
+                c.worker_user_id = ?
+                OR q.worker_user_id = ?
+                OR q.worker_chat_id = ?
+           )
+         ORDER BY c.updated_at DESC, c.created_at DESC
+         LIMIT ?",
+    )
+    .bind(worker_user_id)
+    .bind(worker_user_id)
+    .bind(worker_chat_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+async fn worker_can_handle_case(
+    pool: &SqlitePool,
+    case: &FacebookUnlockCase,
+    worker_user_id: i64,
+    worker_chat_id: i64,
+) -> Result<bool> {
+    if case.worker_user_id == Some(worker_user_id) {
+        return Ok(true);
+    }
+    let Some(quote_id) = case.accepted_quote_id.as_deref() else {
+        return Ok(false);
+    };
+    let allowed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(1)
+         FROM facebook_unlock_quotes
+         WHERE id = ?
+           AND (worker_user_id = ? OR worker_chat_id = ?)
+           AND status IN ('accepted', 'paid')",
+    )
+    .bind(quote_id)
+    .bind(worker_user_id)
+    .bind(worker_chat_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(allowed > 0)
 }
 
 async fn notify_customer_quote(
