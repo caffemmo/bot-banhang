@@ -25,22 +25,14 @@ const ORDER_RETENTION_DAYS: i64 = 7;
 
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut cleanup_ticker = time::interval(time::Duration::from_secs(60));
-    let mut facebook_unlock_reminder_ticker = time::interval(time::Duration::from_secs(30 * 60));
     let mut facebook_unlock_daily_promo_ticker = time::interval(time::Duration::from_secs(10 * 60));
-    facebook_unlock_reminder_ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
     facebook_unlock_daily_promo_ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-    facebook_unlock_reminder_ticker.reset();
     facebook_unlock_daily_promo_ticker.reset();
 
     loop {
         tokio::select! {
             _ = cleanup_ticker.tick() => {
                 run_cleanup_tick(&ctx).await;
-            }
-            _ = facebook_unlock_reminder_ticker.tick() => {
-                if let Err(err) = cmd_facebook_unlock::send_open_case_reminders(&ctx).await {
-                    error!("facebook unlock open case reminder tick failed: {err}");
-                }
             }
             _ = facebook_unlock_daily_promo_ticker.tick() => {
                 if let Err(err) = cmd_facebook_unlock::send_daily_facebook_promos(&ctx).await {
