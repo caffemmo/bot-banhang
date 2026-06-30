@@ -54,6 +54,7 @@ pub struct GoldenHourDeal {
     pub notified_at: Option<String>,
     pub announced_at: Option<String>,
     pub started_at: Option<String>,
+    pub ended_at: Option<String>,
     pub created_at: String,
 }
 
@@ -419,6 +420,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
             notified_at TEXT,
             announced_at TEXT,
             started_at TEXT,
+            ended_at TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )"#,
     )
@@ -435,6 +437,15 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     }
     if let Err(err) =
         sqlx::query("ALTER TABLE sale_hunt_golden_hour_deals ADD COLUMN started_at TEXT")
+            .execute(pool)
+            .await
+    {
+        if !err.to_string().to_lowercase().contains("duplicate column") {
+            return Err(err.into());
+        }
+    }
+    if let Err(err) =
+        sqlx::query("ALTER TABLE sale_hunt_golden_hour_deals ADD COLUMN ended_at TEXT")
             .execute(pool)
             .await
     {
@@ -498,6 +509,17 @@ pub async fn run_golden_hour_tick(ctx: &AppContext) -> Result<()> {
             .execute(&ctx.pool)
             .await?;
         info!("sent golden hour deal {} started notification", deal.id);
+    }
+
+    if deal.ended_at.is_none() && datetime_before_or_equal(&deal.ends_at, &now) {
+        broadcast_golden_hour_ended(ctx, &deal).await?;
+        sqlx::query("UPDATE sale_hunt_golden_hour_deals SET ended_at = ? WHERE id = ?")
+            .bind(Utc::now().to_rfc3339())
+            .bind(deal.id)
+            .execute(&ctx.pool)
+            .await?;
+        info!("sent golden hour deal {} ended notification", deal.id);
+        return Ok(());
     }
 
     if deal.notified_at.is_some()
@@ -616,6 +638,40 @@ async fn broadcast_golden_hour_started(ctx: &AppContext, deal: &GoldenHourDeal) 
     Ok(())
 }
 
+async fn broadcast_golden_hour_ended(ctx: &AppContext, deal: &GoldenHourDeal) -> Result<()> {
+    let subscribers = users_repo::list_subscribers(&ctx.pool).await?;
+    for subscriber in subscribers {
+        if subscriber.is_bot.unwrap_or(0) != 0 {
+            continue;
+        }
+        let lang = i18n::user_lang_by_id(ctx, subscriber.user_id).await;
+        let text = golden_hour_ended_text(ctx, &lang, deal);
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                tl(ctx, &lang, "golden_hour_btn_sale_hunt", "🔥 Vào săn sale"),
+                "salehunt:menu",
+            ),
+            InlineKeyboardButton::callback(
+                tl(ctx, &lang, "start_btn_shop", "🛒 Shop"),
+                "start:shop",
+            ),
+        ]]);
+        if let Err(err) = ctx
+            .bot
+            .send_message(ChatId(subscriber.chat_id), text)
+            .reply_markup(keyboard)
+            .await
+        {
+            warn!(
+                "failed to send ended golden hour deal {} to user {}: {err}",
+                deal.id, subscriber.user_id
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    }
+    Ok(())
+}
+
 async fn expire_old_deals(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "UPDATE sale_hunt_deals SET status = 'expired' WHERE status = 'active' AND datetime(expires_at) <= datetime(?)",
@@ -703,14 +759,19 @@ fn active_deal_line(ctx: &AppContext, lang: &str, deal: &SaleHuntDeal) -> String
 async fn ensure_next_golden_hour(pool: &SqlitePool) -> Result<GoldenHourDeal> {
     ensure_schema(pool).await?;
     let now = Utc::now().to_rfc3339();
+    let today_key = Utc::now()
+        .with_timezone(&vietnam_offset())
+        .format("%Y-%m-%d")
+        .to_string();
     if let Some(deal) = sqlx::query_as::<_, GoldenHourDeal>(
-        r#"SELECT id, deal_date, starts_at, ends_at, notify_at, discount_percent, notified_at, announced_at, started_at, created_at
+        r#"SELECT id, deal_date, starts_at, ends_at, notify_at, discount_percent, notified_at, announced_at, started_at, ended_at, created_at
            FROM sale_hunt_golden_hour_deals
-           WHERE datetime(ends_at) > datetime(?)
+           WHERE datetime(ends_at) > datetime(?) OR (deal_date = ? AND ended_at IS NULL)
            ORDER BY datetime(starts_at) ASC, id ASC
            LIMIT 1"#,
     )
     .bind(&now)
+    .bind(&today_key)
     .fetch_optional(pool)
     .await?
     {
@@ -720,10 +781,6 @@ async fn ensure_next_golden_hour(pool: &SqlitePool) -> Result<GoldenHourDeal> {
         }
     }
 
-    let today_key = Utc::now()
-        .with_timezone(&vietnam_offset())
-        .format("%Y-%m-%d")
-        .to_string();
     let has_today_deal = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(1) FROM sale_hunt_golden_hour_deals WHERE deal_date = ?",
     )
@@ -747,7 +804,7 @@ async fn ensure_next_golden_hour(pool: &SqlitePool) -> Result<GoldenHourDeal> {
     .await?;
 
     let deal = sqlx::query_as::<_, GoldenHourDeal>(
-        r#"SELECT id, deal_date, starts_at, ends_at, notify_at, discount_percent, notified_at, announced_at, started_at, created_at
+        r#"SELECT id, deal_date, starts_at, ends_at, notify_at, discount_percent, notified_at, announced_at, started_at, ended_at, created_at
            FROM sale_hunt_golden_hour_deals
            WHERE deal_date = ?
            LIMIT 1"#,
@@ -910,7 +967,7 @@ fn golden_hour_notify_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) 
         ctx,
         lang,
         "golden_hour_notify_text",
-        "🔥 DEAL GIỜ VÀNG SẮP MỞ\n\nTừ {start_time} đến {end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nKhi thanh toán, hệ thống tự lấy deal cao nhất cho bạn.",
+        "🔥 DEAL GIỜ VÀNG SẮP MỞ\n\nTừ {start_time} đến {end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nKhông cần bấm săn sale. Đến giờ chỉ cần vào shop mua hàng, hệ thống tự áp dụng deal cao nhất.",
         &[
             ("date_label", golden_hour_date_label(ctx, lang, deal)),
             ("start_time", format_vietnam_hhmm(&deal.starts_at)),
@@ -932,7 +989,7 @@ fn golden_hour_announce_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal
         ctx,
         lang,
         "golden_hour_announce_text",
-        "🔥 DEAL GIỜ VÀNG HÔM NAY\n\nKhung giờ: {start_time}-{end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nBot sẽ nhắc lại trước khi deal mở.",
+        "🔥 DEAL GIỜ VÀNG HÔM NAY\n\nKhung giờ: {start_time}-{end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nKhông cần bấm săn sale. Đến giờ chỉ cần vào shop mua hàng, hệ thống tự áp dụng deal cao nhất.",
         &[
             ("date_label", golden_hour_date_label(ctx, lang, deal)),
             ("start_time", format_vietnam_hhmm(&deal.starts_at)),
@@ -954,7 +1011,7 @@ fn golden_hour_started_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal)
         ctx,
         lang,
         "golden_hour_started_text",
-        "🔥 DEAL GIỜ VÀNG ĐANG MỞ\n\nTừ bây giờ đến {end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nVào shop săn đơn ngay.",
+        "🔥 DEAL GIỜ VÀNG ĐANG MỞ\n\nTừ bây giờ đến {end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nKhông cần bấm săn sale. Vào shop mua hàng ngay, deal sẽ tự áp dụng khi tạo đơn.",
         &[
             ("date_label", golden_hour_date_label(ctx, lang, deal)),
             ("end_time", format_vietnam_hhmm(&deal.ends_at)),
@@ -967,6 +1024,20 @@ fn golden_hour_started_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal)
     } else {
         format!("{text}\n{rule}")
     }
+}
+
+fn golden_hour_ended_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) -> String {
+    trl(
+        ctx,
+        lang,
+        "golden_hour_ended_text",
+        "⏳ DEAL GIỜ VÀNG ĐÃ KẾT THÚC\n\nKhung {start_time}-{end_time} {date_label} đã hết.\nCảm ơn bạn đã săn sale, hẹn bạn ở deal tiếp theo.",
+        &[
+            ("date_label", golden_hour_date_label(ctx, lang, deal)),
+            ("start_time", format_vietnam_hhmm(&deal.starts_at)),
+            ("end_time", format_vietnam_hhmm(&deal.ends_at)),
+        ],
+    )
 }
 
 fn golden_hour_rule_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) -> String {
