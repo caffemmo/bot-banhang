@@ -1,21 +1,31 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 use rand::{Rng, distributions::Alphanumeric};
 use serde::Serialize;
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::*;
-use teloxide::types::{BotCommand, CallbackQuery, ChatId, InlineKeyboardMarkup, Message};
+use teloxide::types::{
+    BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+};
+use tracing::{info, warn};
 
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State, i18n};
+use crate::domains::users::repo as users_repo;
 
 const DEAL_TTL_MINUTES: i64 = 30;
 const DAILY_CLAIM_LIMIT: i64 = 1;
 const DISCOUNT_CHOICES: [i64; 8] = [5, 5, 7, 7, 10, 10, 12, 15];
+const GOLDEN_HOUR_DURATION_MINUTES: i64 = 30;
+const GOLDEN_HOUR_NOTIFY_BEFORE_MINUTES: i64 = 60;
+const GOLDEN_HOUR_START_MINUTE: i64 = 9 * 60;
+const GOLDEN_HOUR_END_START_MINUTE: i64 = 22 * 60 + 30;
+const GOLDEN_HOUR_SLOT_MINUTES: i64 = 30;
+const GOLDEN_HOUR_DISCOUNTS: [i64; 6] = [7, 10, 10, 12, 15, 20];
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct SaleHuntDeal {
@@ -29,6 +39,18 @@ pub struct SaleHuntDeal {
     pub order_id: Option<String>,
     pub created_at: String,
     pub used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct GoldenHourDeal {
+    pub id: i64,
+    pub deal_date: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub notify_at: String,
+    pub discount_percent: i64,
+    pub notified_at: Option<String>,
+    pub created_at: String,
 }
 
 pub struct SaleHuntCommandPlugin;
@@ -107,6 +129,7 @@ pub async fn show_sale_hunt(
 ) -> Result<()> {
     ensure_schema(&ctx.pool).await?;
     expire_old_deals(&ctx.pool).await?;
+    let golden_hour = ensure_next_golden_hour(&ctx.pool).await?;
     let active = active_deal_for_user(&ctx.pool, user_id).await?;
     let claims_today = count_claims_today(&ctx.pool, user_id).await?;
     let deal_line = active
@@ -120,6 +143,7 @@ pub async fn show_sale_hunt(
                 "Bạn chưa có deal đang hoạt động.",
             )
         });
+    let golden_hour_line = render_golden_hour_line(&ctx, lang, &golden_hour);
     let text = trl(
         &ctx,
         lang,
@@ -127,6 +151,7 @@ pub async fn show_sale_hunt(
         "🔥 SĂN SALE HÔM NAY\n\nMỗi tài khoản săn được 1 deal/ngày. Deal áp dụng tự động cho đơn tiếp theo và hết hạn sau {ttl} phút.\n\n{deal_line}\n\nLượt hôm nay: {used}/{limit}",
         &[
             ("ttl", DEAL_TTL_MINUTES.to_string()),
+            ("golden_hour_line", golden_hour_line),
             ("deal_line", deal_line),
             ("used", claims_today.min(DAILY_CLAIM_LIMIT).to_string()),
             ("limit", DAILY_CLAIM_LIMIT.to_string()),
@@ -157,6 +182,17 @@ pub async fn active_deal_for_user(
     .fetch_optional(pool)
     .await?;
     Ok(deal)
+}
+
+pub async fn active_golden_hour_deal(pool: &SqlitePool) -> Result<Option<GoldenHourDeal>> {
+    ensure_schema(pool).await?;
+    let deal = ensure_next_golden_hour(pool).await?;
+    let now = Utc::now().to_rfc3339();
+    if datetime_before_or_equal(&deal.starts_at, &now) && datetime_before(&now, &deal.ends_at) {
+        Ok(Some(deal))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn discount_amount(amount: i64, discount_percent: i64) -> i64 {
@@ -315,6 +351,82 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS sale_hunt_golden_hour_deals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deal_date TEXT NOT NULL UNIQUE,
+            starts_at TEXT NOT NULL,
+            ends_at TEXT NOT NULL,
+            notify_at TEXT NOT NULL,
+            discount_percent INTEGER NOT NULL,
+            notified_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_sale_hunt_golden_hour_notify ON sale_hunt_golden_hour_deals (notify_at, notified_at)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_sale_hunt_golden_hour_window ON sale_hunt_golden_hour_deals (starts_at, ends_at)",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn run_golden_hour_tick(ctx: &AppContext) -> Result<()> {
+    ensure_schema(&ctx.pool).await?;
+    let deal = ensure_next_golden_hour(&ctx.pool).await?;
+    let now = Utc::now().to_rfc3339();
+    if deal.notified_at.is_some()
+        || datetime_before(&now, &deal.notify_at)
+        || !datetime_before(&now, &deal.starts_at)
+    {
+        return Ok(());
+    }
+
+    let subscribers = users_repo::list_subscribers(&ctx.pool).await?;
+    let sent_at = Utc::now().to_rfc3339();
+    for subscriber in subscribers {
+        if subscriber.is_bot.unwrap_or(0) != 0 {
+            continue;
+        }
+        let lang = i18n::user_lang_by_id(ctx, subscriber.user_id).await;
+        let text = golden_hour_notify_text(ctx, &lang, &deal);
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                tl(ctx, &lang, "golden_hour_btn_sale_hunt", "🔥 Vào săn sale"),
+                "salehunt:menu",
+            ),
+            InlineKeyboardButton::callback(
+                tl(ctx, &lang, "start_btn_shop", "🛒 Shop"),
+                "start:shop",
+            ),
+        ]]);
+        if let Err(err) = ctx
+            .bot
+            .send_message(ChatId(subscriber.chat_id), text)
+            .reply_markup(keyboard)
+            .await
+        {
+            warn!(
+                "failed to notify user {} about golden hour deal {}: {err}",
+                subscriber.user_id, deal.id
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    }
+
+    sqlx::query("UPDATE sale_hunt_golden_hour_deals SET notified_at = ? WHERE id = ?")
+        .bind(sent_at)
+        .bind(deal.id)
+        .execute(&ctx.pool)
+        .await?;
+    info!("sent golden hour deal {} notification", deal.id);
     Ok(())
 }
 
@@ -400,6 +512,213 @@ fn active_deal_line(ctx: &AppContext, lang: &str, deal: &SaleHuntDeal) -> String
             ("expires_at", deal.expires_at.clone()),
         ],
     )
+}
+
+async fn ensure_next_golden_hour(pool: &SqlitePool) -> Result<GoldenHourDeal> {
+    ensure_schema(pool).await?;
+    let now = Utc::now().to_rfc3339();
+    if let Some(deal) = sqlx::query_as::<_, GoldenHourDeal>(
+        r#"SELECT id, deal_date, starts_at, ends_at, notify_at, discount_percent, notified_at, created_at
+           FROM sale_hunt_golden_hour_deals
+           WHERE datetime(ends_at) > datetime(?)
+           ORDER BY datetime(starts_at) ASC, id ASC
+           LIMIT 1"#,
+    )
+    .bind(&now)
+    .fetch_optional(pool)
+    .await?
+    {
+        return Ok(deal);
+    }
+
+    let today_key = Utc::now()
+        .with_timezone(&vietnam_offset())
+        .format("%Y-%m-%d")
+        .to_string();
+    let has_today_deal = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM sale_hunt_golden_hour_deals WHERE deal_date = ?",
+    )
+    .bind(today_key)
+    .fetch_one(pool)
+    .await?
+        > 0;
+
+    let new_deal = build_random_golden_hour_deal(has_today_deal);
+    sqlx::query(
+        "INSERT OR IGNORE INTO sale_hunt_golden_hour_deals (deal_date, starts_at, ends_at, notify_at, discount_percent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&new_deal.deal_date)
+    .bind(&new_deal.starts_at)
+    .bind(&new_deal.ends_at)
+    .bind(&new_deal.notify_at)
+    .bind(new_deal.discount_percent)
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await?;
+
+    let deal = sqlx::query_as::<_, GoldenHourDeal>(
+        r#"SELECT id, deal_date, starts_at, ends_at, notify_at, discount_percent, notified_at, created_at
+           FROM sale_hunt_golden_hour_deals
+           WHERE deal_date = ?
+           LIMIT 1"#,
+    )
+    .bind(new_deal.deal_date)
+    .fetch_one(pool)
+    .await?;
+    Ok(deal)
+}
+
+struct NewGoldenHourDeal {
+    deal_date: String,
+    starts_at: String,
+    ends_at: String,
+    notify_at: String,
+    discount_percent: i64,
+}
+
+fn build_random_golden_hour_deal(skip_today: bool) -> NewGoldenHourDeal {
+    let offset = vietnam_offset();
+    let now_local = Utc::now().with_timezone(&offset);
+    let today = now_local.date_naive();
+    let earliest_start = now_local + Duration::minutes(GOLDEN_HOUR_NOTIFY_BEFORE_MINUTES);
+    let tomorrow = today.checked_add_signed(Duration::days(1)).unwrap_or(today);
+    let start_local = if skip_today {
+        random_golden_hour_start(tomorrow, None).unwrap()
+    } else {
+        random_golden_hour_start(today, Some(earliest_start))
+            .unwrap_or_else(|| random_golden_hour_start(tomorrow, None).unwrap())
+    };
+    let end_local = start_local + Duration::minutes(GOLDEN_HOUR_DURATION_MINUTES);
+    let notify_local = start_local - Duration::minutes(GOLDEN_HOUR_NOTIFY_BEFORE_MINUTES);
+    let discount_percent =
+        GOLDEN_HOUR_DISCOUNTS[rand::thread_rng().gen_range(0..GOLDEN_HOUR_DISCOUNTS.len())];
+
+    NewGoldenHourDeal {
+        deal_date: start_local.format("%Y-%m-%d").to_string(),
+        starts_at: start_local.with_timezone(&Utc).to_rfc3339(),
+        ends_at: end_local.with_timezone(&Utc).to_rfc3339(),
+        notify_at: notify_local.with_timezone(&Utc).to_rfc3339(),
+        discount_percent,
+    }
+}
+
+fn random_golden_hour_start(
+    date: NaiveDate,
+    earliest_start: Option<DateTime<FixedOffset>>,
+) -> Option<DateTime<FixedOffset>> {
+    let offset = vietnam_offset();
+    let slots: Vec<_> = (GOLDEN_HOUR_START_MINUTE..=GOLDEN_HOUR_END_START_MINUTE)
+        .step_by(GOLDEN_HOUR_SLOT_MINUTES as usize)
+        .filter_map(|minute| {
+            let hour = (minute / 60) as u32;
+            let minute = (minute % 60) as u32;
+            let local = offset
+                .from_local_datetime(&date.and_hms_opt(hour, minute, 0)?)
+                .single()?;
+            if earliest_start.as_ref().map_or(true, |min| local >= min.clone()) {
+                Some(local)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if slots.is_empty() {
+        return None;
+    }
+    let index = rand::thread_rng().gen_range(0..slots.len());
+    Some(slots[index])
+}
+
+fn render_golden_hour_line(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) -> String {
+    trl(
+        ctx,
+        lang,
+        "golden_hour_line",
+        "⏰ Deal giờ vàng: {date_label} {start_time}-{end_time}, giảm {percent}% ({status})",
+        &[
+            ("date_label", golden_hour_date_label(ctx, lang, deal)),
+            ("start_time", format_vietnam_hhmm(&deal.starts_at)),
+            ("end_time", format_vietnam_hhmm(&deal.ends_at)),
+            ("percent", deal.discount_percent.to_string()),
+            ("status", golden_hour_status(ctx, lang, deal)),
+        ],
+    )
+}
+
+fn golden_hour_notify_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) -> String {
+    trl(
+        ctx,
+        lang,
+        "golden_hour_notify_text",
+        "🔥 DEAL GIỜ VÀNG SẮP MỞ\n\nTừ {start_time} đến {end_time} {date_label}\nGiảm {percent}% toàn shop trong 30 phút.\n\nKhi thanh toán, hệ thống tự lấy deal cao nhất cho bạn.",
+        &[
+            ("date_label", golden_hour_date_label(ctx, lang, deal)),
+            ("start_time", format_vietnam_hhmm(&deal.starts_at)),
+            ("end_time", format_vietnam_hhmm(&deal.ends_at)),
+            ("percent", deal.discount_percent.to_string()),
+        ],
+    )
+}
+
+fn golden_hour_status(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) -> String {
+    let now = Utc::now().to_rfc3339();
+    if datetime_before(&now, &deal.starts_at) {
+        tl(ctx, lang, "golden_hour_status_upcoming", "sắp mở")
+    } else if datetime_before(&now, &deal.ends_at) {
+        tl(ctx, lang, "golden_hour_status_active", "đang mở")
+    } else {
+        tl(ctx, lang, "golden_hour_status_ended", "đã kết thúc")
+    }
+}
+
+fn golden_hour_date_label(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) -> String {
+    let offset = vietnam_offset();
+    let today = Utc::now().with_timezone(&offset).format("%Y-%m-%d").to_string();
+    let tomorrow = (Utc::now().with_timezone(&offset) + Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    if deal.deal_date == today {
+        tl(ctx, lang, "golden_hour_date_today", "hôm nay")
+    } else if deal.deal_date == tomorrow {
+        tl(ctx, lang, "golden_hour_date_tomorrow", "ngày mai")
+    } else {
+        deal.deal_date.clone()
+    }
+}
+
+fn format_vietnam_hhmm(value: &str) -> String {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| {
+            dt.with_timezone(&vietnam_offset())
+                .format("%H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.to_string())
+}
+
+fn datetime_before(left: &str, right: &str) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(left),
+        DateTime::parse_from_rfc3339(right),
+    ) {
+        (Ok(left), Ok(right)) => left < right,
+        _ => left < right,
+    }
+}
+
+fn datetime_before_or_equal(left: &str, right: &str) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(left),
+        DateTime::parse_from_rfc3339(right),
+    ) {
+        (Ok(left), Ok(right)) => left <= right,
+        _ => left <= right,
+    }
+}
+
+fn vietnam_offset() -> FixedOffset {
+    FixedOffset::east_opt(7 * 60 * 60).expect("Vietnam timezone offset is valid")
 }
 
 fn random_discount_percent() -> i64 {

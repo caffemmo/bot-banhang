@@ -2054,13 +2054,20 @@ async fn process_order(
         product.price * requested_qty
     };
     let sale_deal = cmd_sale_hunt::active_deal_for_user(&ctx.pool, user_id).await?;
-    let sale_discount = sale_deal
+    let golden_hour_deal = cmd_sale_hunt::active_golden_hour_deal(&ctx.pool).await?;
+    let personal_discount_percent = sale_deal
         .as_ref()
-        .map(|deal| {
-            cmd_sale_hunt::discount_amount(original_amount, deal.discount_percent)
-                .min(original_amount.saturating_sub(1))
-        })
+        .map(|deal| deal.discount_percent)
         .unwrap_or(0);
+    let golden_hour_discount_percent = golden_hour_deal
+        .as_ref()
+        .map(|deal| deal.discount_percent)
+        .unwrap_or(0);
+    let use_personal_deal =
+        personal_discount_percent > 0 && personal_discount_percent > golden_hour_discount_percent;
+    let sale_discount_percent = personal_discount_percent.max(golden_hour_discount_percent);
+    let sale_discount = cmd_sale_hunt::discount_amount(original_amount, sale_discount_percent)
+        .min(original_amount.saturating_sub(1));
     let amount = original_amount - sale_discount;
     let qty = order_qty_for_delivery_type(&delivery_type, requested_qty, plan_months);
     let memo = generate_memo(&ctx).await?;
@@ -2113,8 +2120,10 @@ async fn process_order(
         order.reservation_mode = reservation_mode;
         let mut tx = ctx.pool.begin().await?;
         repo::insert_order_tx(&mut tx, &order).await?;
-        if let Some(deal) = &sale_deal {
-            cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal.id, &order.id).await?;
+        if use_personal_deal {
+            if let Some(deal) = &sale_deal {
+                cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal.id, &order.id).await?;
+            }
         }
         if let Some(reason) = risk_reason {
             let window_started_at =
@@ -2154,8 +2163,10 @@ async fn process_order(
         order.delivered_data = Some(format!("plan: {plan_desc}\ninfo: {info}"));
         let mut tx = ctx.pool.begin().await?;
         repo::insert_order_tx(&mut tx, &order).await?;
-        if let Some(deal) = &sale_deal {
-            cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal.id, &order.id).await?;
+        if use_personal_deal {
+            if let Some(deal) = &sale_deal {
+                cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal.id, &order.id).await?;
+            }
         }
         tx.commit().await?;
     }
