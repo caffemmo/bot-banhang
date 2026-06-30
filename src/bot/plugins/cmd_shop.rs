@@ -2972,12 +2972,16 @@ async fn send_product_usage_instructions(
 
     let product_name = repo::get_product(&ctx.pool, product_id)
         .await?
-        .map(|product| product.name)
+        .map(|product| display_product_name(ctx.as_ref(), &product.name))
         .unwrap_or_else(|| format!("#{product_id}"));
     let text = format!("📘 Hướng dẫn sử dụng\n\nSản phẩm: {product_name}\n\n{content}");
     ctx.bot.send_message(chat_id, text).await?;
 
     Ok(())
+}
+
+fn display_product_name(ctx: &AppContext, name: &str) -> String {
+    i18n::rich_text_for_key(ctx, "", name).text
 }
 
 fn quantity_keyboard(

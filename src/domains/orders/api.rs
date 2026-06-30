@@ -414,7 +414,7 @@ pub async fn send_product_file(
                 "✅ Payment successful {memo}! ❤️\n\nProduct: {product}\nOrder ID: {order_id}\nQuantity: {qty}\nAmount: {amount} VND\n\nProduct files are sent below.",
                 &[
                     ("memo", owp.order.bank_memo.clone()),
-                    ("product", owp.product.name.clone()),
+                    ("product", display_product_name(ctx, &owp.product.name)),
                     ("order_id", owp.order.id.clone()),
                     ("qty", owp.order.qty.to_string()),
                     ("amount", owp.order.amount.to_string()),
@@ -471,7 +471,7 @@ pub async fn send_product_file(
             "✅ Payment successful {memo}! ❤️\n\nProduct: {product}\nOrder ID: {order_id}\nQuantity: {qty}\nAmount: {amount} VND\nFile: {file_name}\n\nProduct file is sent below.",
             &[
                 ("memo", owp.order.bank_memo.clone()),
-                ("product", owp.product.name.clone()),
+                ("product", display_product_name(ctx, &owp.product.name)),
                 ("order_id", owp.order.id.clone()),
                 ("qty", owp.order.qty.to_string()),
                 ("amount", owp.order.amount.to_string()),
@@ -515,7 +515,7 @@ pub async fn send_product_file(
         &[
             ("order_id", owp.order.id.clone()),
             ("memo", owp.order.bank_memo.clone()),
-            ("product", owp.product.name.clone()),
+            ("product", display_product_name(ctx, &owp.product.name)),
             ("plan", plan_label),
             ("qty", owp.order.qty.to_string()),
             ("amount", owp.order.amount.to_string()),
@@ -543,6 +543,10 @@ pub async fn send_product_file(
         .await?;
 
     Ok(())
+}
+
+fn display_product_name(ctx: &AppContext, name: &str) -> String {
+    i18n::rich_text_for_key(ctx, "", name).text
 }
 
 pub fn product_delivery_type(product: &Product) -> &str {

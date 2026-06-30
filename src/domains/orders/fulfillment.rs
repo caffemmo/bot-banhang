@@ -7,6 +7,7 @@ use teloxide::types::ChatId;
 use tracing::{error, warn};
 
 use crate::app::AppContext;
+use crate::bot::i18n;
 use crate::domains::orders::admin_notify::notify_admins_order_paid;
 use crate::domains::orders::api::{is_order_expired, parse_reserved_ids, send_product_file};
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
@@ -210,13 +211,17 @@ async fn send_usage_instructions(
 
     let text = format!(
         "📘 Hướng dẫn sử dụng\n\nSản phẩm: {}\n\n{}",
-        order.product.name, content
+        display_product_name(ctx, &order.product.name), content
     );
     ctx.bot
         .send_message(ChatId(order.order.chat_id), text)
         .await?;
 
     Ok(())
+}
+
+fn display_product_name(ctx: &AppContext, name: &str) -> String {
+    i18n::rich_text_for_key(ctx, "", name).text
 }
 
 async fn credit_paid_order_to_wallet(
