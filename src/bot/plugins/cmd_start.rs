@@ -13,6 +13,7 @@ use crate::app::AppContext;
 use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
 use crate::bot::plugins::cmd_orders;
+use crate::bot::plugins::cmd_sale_hunt;
 use crate::bot::plugins::cmd_shop;
 use crate::bot::plugins::cmd_wallet;
 use crate::bot::texts::BotTexts;
@@ -37,6 +38,7 @@ enum StartMenuAction {
     Wallet,
     Orders,
     TopupHistory,
+    SaleHunt,
     ApiIntegration,
     Help,
     Language,
@@ -302,6 +304,7 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
             ],
+            [i18n::inline_button_callback_json(ctx, lang, "start_btn_sale_hunt", "🔥 Săn sale", "salehunt:menu")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
@@ -340,6 +343,10 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
                 "start:wallet".to_string(),
             ),
         ],
+        vec![(
+            texts.get_lang("start_btn_sale_hunt", lang, "🔥 Săn sale"),
+            "salehunt:menu".to_string(),
+        )],
         vec![
             (
                 texts.get_lang("start_btn_purchased", lang, "📦 Purchased"),
@@ -445,6 +452,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
             vec![
                 vec![json!({"text": "🛒 Shop"})],
                 vec![json!({"text": "💰 Top up"}), json!({"text": "💳 Wallet"})],
+                vec![json!({"text": "🔥 Săn sale"})],
                 vec![
                     json!({"text": "📦 Purchased"}),
                     json!({"text": "📜 Top-up history"}),
@@ -464,6 +472,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "start:shop" => "start_btn_shop",
         "wallet:topup" => "start_btn_topup",
         "start:wallet" => "start_btn_wallet",
+        "salehunt:menu" => "start_btn_sale_hunt",
         "start:orders" => "start_btn_purchased",
         "wallet:topup_history" => "start_btn_topup_history",
         "shop_api" => "start_btn_api_integration",
@@ -624,6 +633,10 @@ fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuActio
             texts.get_lang("start_btn_topup", lang, "💰 Top up"),
         ),
         (
+            StartMenuAction::SaleHunt,
+            texts.get_lang("start_btn_sale_hunt", lang, "🔥 Săn sale"),
+        ),
+        (
             StartMenuAction::Wallet,
             texts.get_lang("start_btn_wallet", lang, "💳 Wallet"),
         ),
@@ -702,6 +715,26 @@ impl AppPlugin for StartCommandPlugin {
                     if msg.from().is_some() {
                         cmd_wallet::prompt_topup_amount(&ctx, msg.chat.id, dialogue.clone(), &lang)
                             .await?;
+                    } else {
+                        send_message_with_start_reply_keyboard(
+                            &ctx,
+                            msg.chat.id,
+                            "user_unknown",
+                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
+                            &lang,
+                        )
+                        .await?;
+                    }
+                }
+                StartMenuAction::SaleHunt => {
+                    if let Some(user) = msg.from() {
+                        cmd_sale_hunt::show_sale_hunt(
+                            ctx.clone(),
+                            msg.chat.id,
+                            user.id.0 as i64,
+                            &lang,
+                        )
+                        .await?;
                     } else {
                         send_message_with_start_reply_keyboard(
                             &ctx,
@@ -1165,6 +1198,7 @@ mod tests {
                     ("start_btn_shop".to_string(), "🛒 Xem sản phẩm".to_string()),
                     ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
                     ("start_btn_wallet".to_string(), "💳 Ví tiền".to_string()),
+                    ("start_btn_sale_hunt".to_string(), "🔥 Săn sale".to_string()),
                     ("start_btn_purchased".to_string(), "📦 Đã mua".to_string()),
                     (
                         "start_btn_topup_history".to_string(),
@@ -1207,6 +1241,7 @@ mod tests {
                     ("💰 Nạp tiền".to_string(), "wallet:topup".to_string()),
                     ("💳 Ví tiền".to_string(), "start:wallet".to_string()),
                 ],
+                vec![("🔥 Săn sale".to_string(), "salehunt:menu".to_string())],
                 vec![
                     ("📦 Đã mua".to_string(), "start:orders".to_string()),
                     (
@@ -1289,6 +1324,7 @@ mod tests {
             vec![
                 vec!["🛒 Xem sản phẩm".to_string()],
                 vec!["💰 Nạp tiền".to_string(), "💳 Ví tiền".to_string()],
+                vec!["🔥 Săn sale".to_string()],
                 vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
                 vec!["🔌 Tích hợp API".to_string(), "Hướng dẫn".to_string()],
                 vec!["✅ Dịch vụ tích xanh".to_string(), "📚 TUT".to_string()],
@@ -1347,6 +1383,7 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([
                     ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
+                    ("start_btn_sale_hunt".to_string(), "🔥 Săn sale".to_string()),
                     (
                         "start_btn_topup_history".to_string(),
                         "📜 Lịch sử nạp".to_string(),
@@ -1367,6 +1404,10 @@ mod tests {
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "💰 Nạp tiền"),
             Some(StartMenuAction::Topup)
+        );
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "🔥 Săn sale"),
+            Some(StartMenuAction::SaleHunt)
         );
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "📜 Lịch sử nạp"),
