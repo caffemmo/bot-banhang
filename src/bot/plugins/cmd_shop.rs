@@ -2054,7 +2054,8 @@ async fn process_order(
         product.price * requested_qty
     };
     let sale_deal = cmd_sale_hunt::active_deal_for_user(&ctx.pool, user_id).await?;
-    let golden_hour_deal = cmd_sale_hunt::active_golden_hour_deal(&ctx.pool).await?;
+    let golden_hour_deal =
+        cmd_sale_hunt::active_golden_hour_deal_for_user(&ctx.pool, user_id).await?;
     let personal_discount_percent = sale_deal
         .as_ref()
         .map(|deal| deal.discount_percent)
@@ -2065,6 +2066,9 @@ async fn process_order(
         .unwrap_or(0);
     let use_personal_deal =
         personal_discount_percent > 0 && personal_discount_percent > golden_hour_discount_percent;
+    let use_golden_hour_deal =
+        golden_hour_discount_percent > 0
+            && golden_hour_discount_percent >= personal_discount_percent;
     let sale_discount_percent = personal_discount_percent.max(golden_hour_discount_percent);
     let sale_discount = cmd_sale_hunt::discount_amount(original_amount, sale_discount_percent)
         .min(original_amount.saturating_sub(1));
@@ -2125,6 +2129,18 @@ async fn process_order(
                 cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal.id, &order.id).await?;
             }
         }
+        if use_golden_hour_deal {
+            if let Some(deal) = &golden_hour_deal {
+                cmd_sale_hunt::mark_golden_hour_used_tx(
+                    &mut tx,
+                    deal,
+                    user_id,
+                    chat_id.0,
+                    &order.id,
+                )
+                .await?;
+            }
+        }
         if let Some(reason) = risk_reason {
             let window_started_at =
                 (Utc::now() - Duration::hours(NO_RESERVE_WINDOW_HOURS)).to_rfc3339();
@@ -2166,6 +2182,18 @@ async fn process_order(
         if use_personal_deal {
             if let Some(deal) = &sale_deal {
                 cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal.id, &order.id).await?;
+            }
+        }
+        if use_golden_hour_deal {
+            if let Some(deal) = &golden_hour_deal {
+                cmd_sale_hunt::mark_golden_hour_used_tx(
+                    &mut tx,
+                    deal,
+                    user_id,
+                    chat_id.0,
+                    &order.id,
+                )
+                .await?;
             }
         }
         tx.commit().await?;
