@@ -143,6 +143,7 @@
   "golden_hour_date_today": "hôm nay",
   "golden_hour_date_tomorrow": "ngày mai",
   "golden_hour_line": "⏰ Deal giờ vàng: {date_label} {start_time}-{end_time}, giảm {percent}% - {rule} ({status})",
+  "golden_hour_announce_text": "🔥 DEAL GIỜ VÀNG HÔM NAY\n\nKhung giờ: {start_time}-{end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nBot sẽ nhắc lại trước khi deal mở.",
   "golden_hour_notify_text": "🔥 DEAL GIỜ VÀNG SẮP MỞ\n\nTừ {start_time} đến {end_time} {date_label}\nGiảm {percent}% toàn shop.\n{rule}\n\nKhi thanh toán, hệ thống tự lấy deal cao nhất cho bạn.",
   "golden_hour_rule_flash": "Flash sale 5 phút, mỗi user dùng được 1 đơn.",
   "golden_hour_rule_regular": "Áp dụng mọi đơn trong 30 phút.",
