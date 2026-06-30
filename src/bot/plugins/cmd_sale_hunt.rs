@@ -144,7 +144,7 @@ pub async fn show_sale_hunt(
             )
         });
     let golden_hour_line = render_golden_hour_line(&ctx, lang, &golden_hour);
-    let text = trl(
+    let mut text = trl(
         &ctx,
         lang,
         "sale_hunt_menu_text",
@@ -157,6 +157,14 @@ pub async fn show_sale_hunt(
             ("limit", DAILY_CLAIM_LIMIT.to_string()),
         ],
     );
+    if !text.contains(&golden_hour_line) {
+        let marker = deal_line.as_str();
+        text = if text.contains(marker) {
+            text.replacen(marker, &format!("{golden_hour_line}\n\n{marker}"), 1)
+        } else {
+            format!("{golden_hour_line}\n\n{text}")
+        };
+    }
     ctx.bot
         .send_message(chat_id, text)
         .reply_markup(sale_hunt_keyboard(&ctx, lang, claims_today < DAILY_CLAIM_LIMIT && active.is_none()))
