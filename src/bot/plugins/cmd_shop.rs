@@ -2061,7 +2061,7 @@ async fn process_order(
         .unwrap_or(0);
     let golden_hour_discount_percent = golden_hour_deal
         .as_ref()
-        .map(|deal| deal.discount_percent)
+        .map(cmd_sale_hunt::golden_hour_discount_percent)
         .unwrap_or(0);
     let use_personal_deal =
         personal_discount_percent > 0 && personal_discount_percent > golden_hour_discount_percent;

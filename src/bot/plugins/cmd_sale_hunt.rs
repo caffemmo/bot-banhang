@@ -25,7 +25,8 @@ const GOLDEN_HOUR_NOTIFY_BEFORE_MINUTES: i64 = 60;
 const GOLDEN_HOUR_START_MINUTE: i64 = 9 * 60;
 const GOLDEN_HOUR_END_START_MINUTE: i64 = 22 * 60 + 30;
 const GOLDEN_HOUR_SLOT_MINUTES: i64 = 30;
-const GOLDEN_HOUR_DISCOUNTS: [i64; 6] = [7, 10, 10, 12, 15, 20];
+const GOLDEN_HOUR_MAX_DISCOUNT: i64 = 7;
+const GOLDEN_HOUR_DISCOUNTS: [i64; 5] = [3, 5, 5, 7, 7];
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct SaleHuntDeal {
@@ -201,6 +202,10 @@ pub async fn active_golden_hour_deal(pool: &SqlitePool) -> Result<Option<GoldenH
     } else {
         Ok(None)
     }
+}
+
+pub fn golden_hour_discount_percent(deal: &GoldenHourDeal) -> i64 {
+    deal.discount_percent.clamp(0, GOLDEN_HOUR_MAX_DISCOUNT)
 }
 
 pub fn discount_amount(amount: i64, discount_percent: i64) -> i64 {
@@ -536,7 +541,7 @@ async fn ensure_next_golden_hour(pool: &SqlitePool) -> Result<GoldenHourDeal> {
     .fetch_optional(pool)
     .await?
     {
-        return Ok(deal);
+        return cap_golden_hour_deal(pool, deal).await;
     }
 
     let today_key = Utc::now()
@@ -574,6 +579,22 @@ async fn ensure_next_golden_hour(pool: &SqlitePool) -> Result<GoldenHourDeal> {
     .bind(new_deal.deal_date)
     .fetch_one(pool)
     .await?;
+    cap_golden_hour_deal(pool, deal).await
+}
+
+async fn cap_golden_hour_deal(
+    pool: &SqlitePool,
+    mut deal: GoldenHourDeal,
+) -> Result<GoldenHourDeal> {
+    let capped = golden_hour_discount_percent(&deal);
+    if deal.discount_percent != capped {
+        sqlx::query("UPDATE sale_hunt_golden_hour_deals SET discount_percent = ? WHERE id = ?")
+            .bind(capped)
+            .bind(deal.id)
+            .execute(pool)
+            .await?;
+        deal.discount_percent = capped;
+    }
     Ok(deal)
 }
 
@@ -648,7 +669,7 @@ fn render_golden_hour_line(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) 
             ("date_label", golden_hour_date_label(ctx, lang, deal)),
             ("start_time", format_vietnam_hhmm(&deal.starts_at)),
             ("end_time", format_vietnam_hhmm(&deal.ends_at)),
-            ("percent", deal.discount_percent.to_string()),
+            ("percent", golden_hour_discount_percent(deal).to_string()),
             ("status", golden_hour_status(ctx, lang, deal)),
         ],
     )
@@ -664,7 +685,7 @@ fn golden_hour_notify_text(ctx: &AppContext, lang: &str, deal: &GoldenHourDeal) 
             ("date_label", golden_hour_date_label(ctx, lang, deal)),
             ("start_time", format_vietnam_hhmm(&deal.starts_at)),
             ("end_time", format_vietnam_hhmm(&deal.ends_at)),
-            ("percent", deal.discount_percent.to_string()),
+            ("percent", golden_hour_discount_percent(deal).to_string()),
         ],
     )
 }
