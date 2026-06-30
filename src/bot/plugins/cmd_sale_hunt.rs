@@ -369,7 +369,7 @@ async fn send_deal_result(
         &[
             ("percent", deal.discount_percent.to_string()),
             ("code", deal.code.clone()),
-            ("expires_at", deal.expires_at.clone()),
+            ("expires_at", format_vietnam_expiry(&deal.expires_at)),
         ],
     );
     ctx.bot
@@ -637,7 +637,7 @@ fn active_deal_line(ctx: &AppContext, lang: &str, deal: &SaleHuntDeal) -> String
         &[
             ("percent", deal.discount_percent.to_string()),
             ("code", deal.code.clone()),
-            ("expires_at", deal.expires_at.clone()),
+            ("expires_at", format_vietnam_expiry(&deal.expires_at)),
         ],
     )
 }
@@ -940,6 +940,24 @@ fn format_vietnam_hhmm(value: &str) -> String {
             dt.with_timezone(&vietnam_offset())
                 .format("%H:%M")
                 .to_string()
+        })
+        .unwrap_or_else(|_| value.to_string())
+}
+
+fn format_vietnam_expiry(value: &str) -> String {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| {
+            let local = dt.with_timezone(&vietnam_offset());
+            let today = Utc::now().with_timezone(&vietnam_offset()).date_naive();
+            let date = local.date_naive();
+            let time = local.format("%H:%M").to_string();
+            if date == today {
+                format!("{time} hôm nay")
+            } else if date == today.checked_add_signed(Duration::days(1)).unwrap_or(today) {
+                format!("{time} ngày mai")
+            } else {
+                local.format("%H:%M %d/%m").to_string()
+            }
         })
         .unwrap_or_else(|_| value.to_string())
 }
