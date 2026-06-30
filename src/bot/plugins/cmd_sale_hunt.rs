@@ -153,8 +153,8 @@ pub async fn show_sale_hunt(
         "🔥 SĂN SALE HÔM NAY\n\nMỗi tài khoản săn được 1 deal/ngày. Deal áp dụng tự động cho đơn tiếp theo và hết hạn sau {ttl} phút.\n\n{deal_line}\n\nLượt hôm nay: {used}/{limit}",
         &[
             ("ttl", DEAL_TTL_MINUTES.to_string()),
-            ("golden_hour_line", golden_hour_line),
-            ("deal_line", deal_line),
+            ("golden_hour_line", golden_hour_line.clone()),
+            ("deal_line", deal_line.clone()),
             ("used", claims_today.min(DAILY_CLAIM_LIMIT).to_string()),
             ("limit", DAILY_CLAIM_LIMIT.to_string()),
         ],
