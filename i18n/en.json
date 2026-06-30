@@ -138,6 +138,7 @@
   "golden_hour_line": "⏰ Golden hour deal: {date_label} {start_time}-{end_time}, {percent}% off - {rule} ({status})",
   "golden_hour_announce_text": "🔥 TODAY'S GOLDEN HOUR DEAL\n\nWindow: {start_time}-{end_time} {date_label}\n{percent}% off shop-wide.\n{rule}\n\nThe bot will remind you before the deal opens.",
   "golden_hour_notify_text": "🔥 GOLDEN HOUR DEAL OPENS SOON\n\nFrom {start_time} to {end_time} {date_label}\n{percent}% off shop-wide.\n{rule}\n\nAt checkout, the system automatically uses your highest deal.",
+  "golden_hour_started_text": "🔥 GOLDEN HOUR DEAL IS LIVE\n\nFrom now until {end_time} {date_label}\n{percent}% off shop-wide.\n{rule}\n\nOpen the shop and grab your order now.",
   "golden_hour_rule_flash": "5-minute flash sale, one order per user.",
   "golden_hour_rule_regular": "Applies to every order for 30 minutes.",
   "golden_hour_status_active": "active",
