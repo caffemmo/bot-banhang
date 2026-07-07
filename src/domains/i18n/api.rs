@@ -114,6 +114,15 @@ const FBUNLOCK_I18N_KEYS: &[&str] = &[
     "fbunlock_dispute_sent_customer",
 ];
 
+const REQUIRED_SHOP_TEXT_KEYS: &[&str] = &[
+    "manual_product_plan_prompt",
+    "product_description_line",
+    "product_qty_prompt",
+    "shop_stock_auto",
+    "shop_stock_manual",
+    "uploaded_file_quantity_prompt",
+];
+
 fn required_start_button_default(key: &str) -> Option<&'static str> {
     match key {
         "fbunlock_btn_back" => Some("⬅️ Back"),
@@ -162,6 +171,12 @@ fn required_start_button_default(key: &str) -> Option<&'static str> {
         "start_btn_tut" => Some("📚 TUT"),
         "start_btn_viameta" => Some("✅ Verification service"),
         "start_btn_wallet" => Some("💳 Wallet"),
+        "manual_product_plan_prompt" => Some("✅ You selected {product} - {price}\n{description}ℹ️ This product requires activation information.\n\n📅 Choose a plan/month below:"),
+        "product_description_line" => Some("📝 Description:\n{description}\n\n"),
+        "product_qty_prompt" => Some("✅ You selected {product} - {price}\n📦 Stock left: {stock}\n{description}{requires_input}\n\n⌨️ Enter quantity to buy:"),
+        "shop_stock_auto" => Some("{stock} left"),
+        "shop_stock_manual" => Some("✅ available"),
+        "uploaded_file_quantity_prompt" => Some("✅ You selected {product} - {price}\n📦 File stock left: {stock}\n{description}📎 Product files will be sent automatically after payment.\n\n⌨️ Enter the number of files to buy:"),
         "fbunlock_menu_text" => Some("🔓 <b>UNLOCK FACEBOOK</b>\n\nBot is the middleman between customers and service workers.\n\n• Customers create cases for free to receive quotes.\n• Multiple workers can quote the same case.\n• Customers choose a quote and pay escrow to the bot.\n• After payment, the selected worker handles the case."),
         "fbunlock_worker_menu_text" => Some("🧑‍💻 <b>SERVICE WORKER AREA</b>\n\nYou can view cases waiting for quotes and send your handling price.\n\nPlatform fee: <b>{fee_percent}%</b> on completed cases.\nExample quote 300,000đ, fee {fee_percent}%, expected receive {sample_payout}."),
         "fbunlock_daily_promo_text" => Some("🔓 Need Facebook support?\nCreate a case so multiple service workers can quote.\n\n🧑‍💻 Want to provide Facebook services?\nRegister to receive suitable cases."),
@@ -326,6 +341,7 @@ pub async fn language_detail(
     keys.extend(bot.keys().cloned());
     keys.extend(REQUIRED_START_BUTTON_KEYS.iter().map(|key| (*key).to_string()));
     keys.extend(FBUNLOCK_I18N_KEYS.iter().map(|key| (*key).to_string()));
+    keys.extend(REQUIRED_SHOP_TEXT_KEYS.iter().map(|key| (*key).to_string()));
     let keys: Vec<String> = keys.into_iter().collect();
     let fallback_bot = keys
         .iter()
