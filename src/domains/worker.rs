@@ -11,8 +11,6 @@ use tracing::{error, info};
 
 use crate::app::AppContext;
 use crate::bot::i18n;
-use crate::bot::plugins::cmd_sale_hunt;
-use crate::bot::plugins::cmd_facebook_unlock;
 use crate::domains::crypto_pay::binance_worker;
 use crate::domains::crypto_pay::repo as crypto_repo;
 use crate::domains::crypto_pay::worker as crypto_worker;
@@ -26,29 +24,10 @@ const ORDER_RETENTION_DAYS: i64 = 7;
 
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut cleanup_ticker = time::interval(time::Duration::from_secs(60));
-    let mut golden_hour_ticker = time::interval(time::Duration::from_secs(60));
-    let mut facebook_unlock_daily_promo_ticker = time::interval(time::Duration::from_secs(10 * 60));
-    golden_hour_ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-    golden_hour_ticker.reset();
-    facebook_unlock_daily_promo_ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-    facebook_unlock_daily_promo_ticker.reset();
 
     loop {
-        tokio::select! {
-            _ = cleanup_ticker.tick() => {
-                run_cleanup_tick(&ctx).await;
-            }
-            _ = golden_hour_ticker.tick() => {
-                if let Err(err) = cmd_sale_hunt::run_golden_hour_tick(&ctx).await {
-                    error!("golden hour deal tick failed: {err}");
-                }
-            }
-            _ = facebook_unlock_daily_promo_ticker.tick() => {
-                if let Err(err) = cmd_facebook_unlock::send_daily_facebook_promos(&ctx).await {
-                    error!("facebook unlock daily promo tick failed: {err}");
-                }
-            }
-        }
+        cleanup_ticker.tick().await;
+        run_cleanup_tick(&ctx).await;
     }
 }
 

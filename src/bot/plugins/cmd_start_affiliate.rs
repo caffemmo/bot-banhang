@@ -325,7 +325,6 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
             ],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_sale_hunt", "🔥 Săn sale", "salehunt:menu")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
@@ -338,7 +337,6 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home"),
             ],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_facebook_unlock", "🔓 Mở khóa Facebook", "fbunlock:menu")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", AFFILIATE_REGISTER_CALLBACK),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", CHILD_BOT_GUIDE_CALLBACK),
