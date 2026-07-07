@@ -2415,13 +2415,6 @@ fn build_shop_home_keyboard_json(
     rows.push(vec![i18n::inline_button_callback_json(
         ctx,
         lang,
-        "shop_btn_api_integration",
-        "🔌 Tích hợp API",
-        "shop_api",
-    )]);
-    rows.push(vec![i18n::inline_button_callback_json(
-        ctx,
-        lang,
         "back_btn",
         "⬅️ Quay lại",
         "start:menu",
@@ -3612,8 +3605,8 @@ mod tests {
         assert_eq!(rows[2][1]["callback_data"], "start:help");
         assert_eq!(rows[2][2]["text"], "🔔 Thông báo");
         assert_eq!(rows[2][2]["url"], "https://t.me/announcements");
-        assert_eq!(rows[3][0]["text"], "🔌 Tích hợp API");
-        assert_eq!(rows[3][0]["callback_data"], "shop_api");
+        assert_eq!(rows[3][0]["callback_data"], "start:menu");
+        assert!(!keyboard.to_string().contains("shop_api"));
     }
 
     #[tokio::test]
