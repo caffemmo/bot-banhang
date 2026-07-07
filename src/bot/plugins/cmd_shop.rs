@@ -2493,7 +2493,10 @@ fn build_category_product_keyboard_json(
 fn product_buy_button_json(product: &Product) -> Value {
     let (rendered_name, placeholder_custom_id) =
         render_button_custom_emoji_placeholders(&product.name);
-    let product_name = truncate_button_text(&rendered_name, PRODUCT_BUTTON_NAME_MAX_CHARS);
+    let product_name = truncate_button_text(
+        &strip_leading_product_button_symbols(&rendered_name),
+        PRODUCT_BUTTON_NAME_MAX_CHARS,
+    );
     let text = format!("{} — {}", product_name, format_vnd(product.price));
     let callback_data = format!("buy:{}", product.id);
     if let Some(custom_id) =
@@ -2534,12 +2537,30 @@ fn product_button_json(product: &Product) -> Value {
 fn product_button_label(product: &Product) -> String {
     let (rendered_name, placeholder_custom_id) =
         render_button_custom_emoji_placeholders(&product.name);
-    let product_name = truncate_button_text(&rendered_name, PRODUCT_BUTTON_NAME_MAX_CHARS);
+    let product_name = truncate_button_text(
+        &strip_leading_product_button_symbols(&rendered_name),
+        PRODUCT_BUTTON_NAME_MAX_CHARS,
+    );
     if product_button_custom_emoji_id(product).is_some() || placeholder_custom_id.is_some() {
         product_name
     } else {
         format!("{} {}", product_button_emoji(product), product_name)
     }
+}
+
+fn strip_leading_product_button_symbols(value: &str) -> String {
+    value
+        .trim_start()
+        .trim_start_matches(is_product_button_symbol)
+        .trim_start()
+        .to_string()
+}
+
+fn is_product_button_symbol(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{2600}'..='\u{27BF}' | '\u{1F000}'..='\u{1FAFF}' | '\u{FE0F}'
+    )
 }
 
 fn format_product_list_text(
@@ -3195,6 +3216,41 @@ mod tests {
         assert_eq!(button["text"], "CapCut Pro");
         assert_eq!(button["callback_data"], "buy:42");
         assert_eq!(button["icon_custom_emoji_id"], "5368324170671202286");
+    }
+
+    #[tokio::test]
+    async fn product_button_json_strips_only_leading_title_icon_from_button_text() {
+        let product = Product {
+            id: 42,
+            name: "✨ CapCut Pro".to_string(),
+            price: 5_000,
+            is_active: Some(1),
+            requires_input: Some(0),
+            input_prompt: None,
+            description: None,
+            image_url: None,
+            delivery_type: Some("stock_item".to_string()),
+            file_path: None,
+            file_name: None,
+            file_mime: None,
+            category_id: None,
+            category: Some("Tool".to_string()),
+            category_emoji: None,
+            category_custom_emoji_id: None,
+            button_emoji: Some("🧩".to_string()),
+            button_custom_emoji_id: Some("5368324170671202286".to_string()),
+            created_at: None,
+            sort_order: None,
+            show_sold_count: Some(0),
+        };
+
+        let button = product_button_json(&product);
+        let ctx = test_ctx();
+        let text = format_product_list_text(&ctx, "vi", &[(product, 5)], 0, 0);
+
+        assert_eq!(button["text"], "CapCut Pro");
+        assert_eq!(button["icon_custom_emoji_id"], "5368324170671202286");
+        assert!(text.contains("✨ CapCut Pro"));
     }
 
     #[tokio::test]
