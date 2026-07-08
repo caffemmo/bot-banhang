@@ -142,6 +142,7 @@
   "sale_hunt_no_active_deal": "Bạn chưa có deal đang hoạt động.",
   "sale_hunt_no_deal": "Bạn chưa có deal săn sale đang hoạt động.",
   "sale_hunt_order_total": "{final_total} (đã giảm {discount} từ {original_total})",
+  "inactive_discount_text": "🎁 Lâu rồi bạn chưa ghé shop\n\nBot tặng bạn giảm {percent}% cho 1 đơn bất kỳ.\nMã: {code}\nHết hạn: {expires_at}\n\nDeal sẽ tự áp dụng khi bạn tạo đơn trong shop.",
   "golden_hour_btn_sale_hunt": "🔥 Vào săn sale",
   "golden_hour_date_today": "hôm nay",
   "golden_hour_date_tomorrow": "ngày mai",

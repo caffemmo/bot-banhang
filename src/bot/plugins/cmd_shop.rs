@@ -36,6 +36,7 @@ use crate::domains::wallet::repo as wallet_repo;
 
 use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
+use crate::bot::plugins::cmd_sale_hunt;
 use crate::bot::{BotDialogue, State};
 use teloxide::types::BotCommand;
 
@@ -2052,7 +2053,31 @@ async fn process_order(
     } else {
         product.price * requested_qty
     };
-    let amount = original_amount;
+    let sale_hunt_deal = cmd_sale_hunt::active_deal_for_user(&ctx.pool, user_id).await?;
+    let golden_hour_deal = cmd_sale_hunt::active_golden_hour_deal_for_user(&ctx.pool, user_id).await?;
+    let sale_hunt_percent = sale_hunt_deal.as_ref().map(|deal| deal.discount_percent).unwrap_or(0);
+    let golden_hour_percent = golden_hour_deal
+        .as_ref()
+        .map(cmd_sale_hunt::golden_hour_discount_percent)
+        .unwrap_or(0);
+    let use_sale_hunt_deal = sale_hunt_percent >= golden_hour_percent && sale_hunt_percent > 0;
+    let discount_percent = if use_sale_hunt_deal {
+        sale_hunt_percent
+    } else {
+        golden_hour_percent
+    };
+    let discount = cmd_sale_hunt::discount_amount(original_amount, discount_percent);
+    let amount = (original_amount - discount).max(1);
+    let applied_sale_hunt_deal_id = if use_sale_hunt_deal {
+        sale_hunt_deal.as_ref().map(|deal| deal.id)
+    } else {
+        None
+    };
+    let applied_golden_hour_deal = if !use_sale_hunt_deal {
+        golden_hour_deal.clone()
+    } else {
+        None
+    };
     let qty = order_qty_for_delivery_type(&delivery_type, requested_qty, plan_months);
     let memo = generate_memo(&ctx).await?;
 
@@ -2104,6 +2129,13 @@ async fn process_order(
         order.reservation_mode = reservation_mode;
         let mut tx = ctx.pool.begin().await?;
         repo::insert_order_tx(&mut tx, &order).await?;
+        if let Some(deal_id) = applied_sale_hunt_deal_id {
+            cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal_id, &order.id).await?;
+        }
+        if let Some(deal) = &applied_golden_hour_deal {
+            cmd_sale_hunt::mark_golden_hour_used_tx(&mut tx, deal, user_id, chat_id.0, &order.id)
+                .await?;
+        }
         if let Some(reason) = risk_reason {
             let window_started_at =
                 (Utc::now() - Duration::hours(NO_RESERVE_WINDOW_HOURS)).to_rfc3339();
@@ -2142,6 +2174,13 @@ async fn process_order(
         order.delivered_data = Some(format!("plan: {plan_desc}\ninfo: {info}"));
         let mut tx = ctx.pool.begin().await?;
         repo::insert_order_tx(&mut tx, &order).await?;
+        if let Some(deal_id) = applied_sale_hunt_deal_id {
+            cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal_id, &order.id).await?;
+        }
+        if let Some(deal) = &applied_golden_hour_deal {
+            cmd_sale_hunt::mark_golden_hour_used_tx(&mut tx, deal, user_id, chat_id.0, &order.id)
+                .await?;
+        }
         tx.commit().await?;
     }
 
@@ -2177,7 +2216,21 @@ async fn process_order(
     } else {
         product.price
     };
-    let total_text = format_vnd(amount);
+    let total_text = if discount > 0 {
+        trl(
+            &ctx,
+            &lang,
+            "sale_hunt_order_total",
+            "{final_total} ({discount} off from {original_total})",
+            &[
+                ("final_total", format_vnd(amount)),
+                ("discount", format_vnd(discount)),
+                ("original_total", format_vnd(original_amount)),
+            ],
+        )
+    } else {
+        format_vnd(amount)
+    };
     let confirm_text = trl(
         &ctx,
         &lang,

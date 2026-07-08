@@ -11,6 +11,7 @@ use tracing::{error, info};
 
 use crate::app::AppContext;
 use crate::bot::i18n;
+use crate::bot::plugins::cmd_sale_hunt;
 use crate::domains::crypto_pay::binance_worker;
 use crate::domains::crypto_pay::repo as crypto_repo;
 use crate::domains::crypto_pay::worker as crypto_worker;
@@ -24,10 +25,17 @@ const ORDER_RETENTION_DAYS: i64 = 7;
 
 pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     let mut cleanup_ticker = time::interval(time::Duration::from_secs(60));
+    let mut inactive_discount_ticker = time::interval(time::Duration::from_secs(60 * 60));
 
     loop {
-        cleanup_ticker.tick().await;
-        run_cleanup_tick(&ctx).await;
+        tokio::select! {
+            _ = cleanup_ticker.tick() => run_cleanup_tick(&ctx).await,
+            _ = inactive_discount_ticker.tick() => {
+                if let Err(err) = cmd_sale_hunt::run_inactive_customer_discount_tick(&ctx).await {
+                    error!("inactive customer discount tick failed: {err}");
+                }
+            }
+        }
     }
 }
 

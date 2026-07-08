@@ -135,6 +135,7 @@
   "sale_hunt_no_active_deal": "You do not have an active deal yet.",
   "sale_hunt_no_deal": "You do not have an active sale hunt deal.",
   "sale_hunt_order_total": "{final_total} ({discount} off from {original_total})",
+  "inactive_discount_text": "🎁 We have not seen you in the shop for a while\n\nYou get {percent}% off any next order.\nCode: {code}\nExpires: {expires_at}\n\nThe deal will apply automatically when you create an order in the shop.",
   "golden_hour_btn_sale_hunt": "🔥 Open sale hunt",
   "golden_hour_date_today": "today",
   "golden_hour_date_tomorrow": "tomorrow",

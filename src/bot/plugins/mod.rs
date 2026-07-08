@@ -6,6 +6,7 @@ pub mod cmd_childbot;
 pub mod cmd_group_sales;
 pub mod cmd_help;
 pub mod cmd_orders;
+pub mod cmd_sale_hunt;
 pub mod cmd_shop;
 pub mod cmd_start;
 pub mod cmd_start_affiliate;

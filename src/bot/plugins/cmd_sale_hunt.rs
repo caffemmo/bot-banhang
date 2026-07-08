@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 use rand::{Rng, distributions::Alphanumeric};
 use serde::Serialize;
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
-use teloxide::payloads::AnswerCallbackQuerySetters;
+use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
 use teloxide::prelude::*;
 use teloxide::types::{
     BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
@@ -28,6 +28,10 @@ const GOLDEN_HOUR_START_MINUTE: i64 = 9 * 60;
 const GOLDEN_HOUR_END_START_MINUTE: i64 = 22 * 60 + 30;
 const GOLDEN_HOUR_SLOT_MINUTES: i64 = 30;
 const GOLDEN_HOUR_DISCOUNTS: [i64; 5] = [5, 5, 10, 10, 15];
+const INACTIVE_REMINDER_DAYS: i64 = 7;
+const INACTIVE_DEAL_TTL_DAYS: i64 = 7;
+const INACTIVE_DEAL_PERCENT: i64 = 10;
+const INACTIVE_REMINDER_BATCH_LIMIT: i64 = 100;
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct SaleHuntDeal {
@@ -481,6 +485,141 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS sale_hunt_inactive_reminders (
+            user_id INTEGER PRIMARY KEY,
+            chat_id INTEGER NOT NULL,
+            deal_id INTEGER,
+            sent_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_sale_hunt_inactive_reminders_sent ON sale_hunt_inactive_reminders (sent_at)",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn run_inactive_customer_discount_tick(ctx: &AppContext) -> Result<()> {
+    ensure_schema(&ctx.pool).await?;
+    expire_old_deals(&ctx.pool).await?;
+
+    let now = Utc::now();
+    let inactive_cutoff = (now - Duration::days(INACTIVE_REMINDER_DAYS)).to_rfc3339();
+    let cooldown_cutoff = (now - Duration::days(INACTIVE_REMINDER_DAYS)).to_rfc3339();
+    let now_text = now.to_rfc3339();
+    let candidates = sqlx::query_as::<_, (i64, i64)>(
+        r#"SELECT s.user_id, s.chat_id
+           FROM subscribers s
+           WHERE COALESCE(s.is_bot, 0) = 0
+             AND datetime(COALESCE(s.created_at, s.updated_at, '1970-01-01T00:00:00+00:00')) <= datetime(?)
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM orders o
+                 WHERE o.user_id = s.user_id
+                   AND o.status = 'paid'
+                   AND datetime(COALESCE(o.paid_at, o.created_at)) > datetime(?)
+             )
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM sale_hunt_deals d
+                 WHERE d.user_id = s.user_id
+                   AND d.status = 'active'
+                   AND datetime(d.expires_at) > datetime(?)
+             )
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM sale_hunt_inactive_reminders r
+                 WHERE r.user_id = s.user_id
+                   AND datetime(r.sent_at) > datetime(?)
+             )
+           ORDER BY datetime(COALESCE(s.updated_at, s.created_at, '1970-01-01T00:00:00+00:00')) ASC
+           LIMIT ?"#,
+    )
+    .bind(&inactive_cutoff)
+    .bind(&inactive_cutoff)
+    .bind(&now_text)
+    .bind(&cooldown_cutoff)
+    .bind(INACTIVE_REMINDER_BATCH_LIMIT)
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    let sent_count = candidates.len();
+    for (user_id, chat_id) in candidates {
+        let code = generate_inactive_code();
+        let expires_at = (Utc::now() + Duration::days(INACTIVE_DEAL_TTL_DAYS)).to_rfc3339();
+        let sent_at = Utc::now().to_rfc3339();
+        let mut tx = ctx.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO sale_hunt_deals (user_id, chat_id, code, discount_percent, expires_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(user_id)
+        .bind(chat_id)
+        .bind(&code)
+        .bind(INACTIVE_DEAL_PERCENT)
+        .bind(&expires_at)
+        .bind(&sent_at)
+        .execute(tx.as_mut())
+        .await?;
+        let deal_id = sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
+            .fetch_one(tx.as_mut())
+            .await?;
+        sqlx::query(
+            r#"INSERT INTO sale_hunt_inactive_reminders (user_id, chat_id, deal_id, sent_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                   chat_id = excluded.chat_id,
+                   deal_id = excluded.deal_id,
+                   sent_at = excluded.sent_at,
+                   updated_at = excluded.updated_at"#,
+        )
+        .bind(user_id)
+        .bind(chat_id)
+        .bind(deal_id)
+        .bind(&sent_at)
+        .bind(&sent_at)
+        .execute(tx.as_mut())
+        .await?;
+        tx.commit().await?;
+
+        let lang = i18n::user_lang_by_id(ctx, user_id).await;
+        let text = trl(
+            ctx,
+            &lang,
+            "inactive_discount_text",
+            "Gift for coming back\n\nYou get {percent}% off your next order.\nCode: {code}\nExpires: {expires_at}\n\nThe deal will apply automatically when you create an order in the shop.",
+            &[
+                ("percent", INACTIVE_DEAL_PERCENT.to_string()),
+                ("code", code),
+                ("expires_at", format_vietnam_expiry(&expires_at)),
+            ],
+        );
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+            ctx,
+            &lang,
+            "start_btn_shop",
+            "Shop",
+            "start:shop",
+        )]]);
+        if let Err(err) = ctx
+            .bot
+            .send_message(ChatId(chat_id), text)
+            .reply_markup(keyboard)
+            .await
+        {
+            warn!("failed to send inactive discount to user {user_id}: {err}");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    }
+
+    if sent_count > 0 {
+        info!("sent {sent_count} inactive customer discount reminders");
+    }
     Ok(())
 }
 
@@ -1149,6 +1288,16 @@ fn generate_code(percent: i64) -> String {
         .collect::<String>()
         .to_uppercase();
     format!("HUNT{percent}-{suffix}")
+}
+
+fn generate_inactive_code() -> String {
+    let suffix: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .map(char::from)
+        .take(6)
+        .collect::<String>()
+        .to_uppercase();
+    format!("BACK10-{suffix}")
 }
 
 fn is_sale_hunt_text(ctx: &AppContext, text: &str) -> bool {
