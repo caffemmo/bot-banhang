@@ -14,6 +14,7 @@ use teloxide::types::{
 };
 use tokio::time::{Duration as TokioDuration, sleep};
 use tracing::warn;
+use url::Url;
 
 use crate::app::AppContext;
 use crate::core::qr::vietqr_link;
