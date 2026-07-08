@@ -187,27 +187,51 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                 if let Ok(raw) = serde_json::to_value(&query) {
                     let chat_id = query.message.as_ref().map(|m| m.chat().id.0);
                     let user_id = Some(query.from.id.0 as i64);
-                    let _ = chat_repo::insert_update_log(
-                        &ctx.pool,
-                        chat_id,
-                        user_id,
-                        "callback_query",
-                        &raw,
-                    )
-                    .await;
+                    let pool = ctx.pool.clone();
+                    tokio::spawn(async move {
+                        if let Err(err) = chat_repo::insert_update_log(
+                            &pool,
+                            chat_id,
+                            user_id,
+                            "callback_query",
+                            &raw,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to write callback update log: {err}");
+                        }
+                    });
                 }
 
+                let callback_started_at = std::time::Instant::now();
+                let callback_data = query.data.clone().unwrap_or_default();
                 for plugin in ctx.plugins.iter() {
+                    let plugin_started_at = std::time::Instant::now();
                     match plugin
                         .handle_callback(ctx.clone(), query.clone(), dialogue.clone())
                         .await
                     {
                         Ok(true) => {
+                            let plugin_ms = plugin_started_at.elapsed().as_millis() as u64;
+                            let total_ms = callback_started_at.elapsed().as_millis() as u64;
+                            if total_ms >= 250 {
+                                tracing::warn!(
+                                    callback = %callback_data,
+                                    plugin = plugin.name(),
+                                    plugin_ms,
+                                    total_ms,
+                                    "slow callback handled"
+                                );
+                            }
                             return false;
                         }
                         Ok(false) => {}
                         Err(err) => {
                             tracing::error!(
+                                callback = %callback_data,
+                                plugin = plugin.name(),
+                                plugin_ms = plugin_started_at.elapsed().as_millis() as u64,
+                                total_ms = callback_started_at.elapsed().as_millis() as u64,
                                 "Plugin {} failed while handling callback {:?}: {err}",
                                 plugin.name(),
                                 query.data
