@@ -12,7 +12,6 @@ use crate::domains::orders::models::OrderWithProduct;
 use crate::domains::users::repo as users_repo;
 
 const ADMIN_ORDER_PAID_NOTIFICATION_KEY: &str = "admin_order_paid_notification";
-const ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT: &str = "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: {memo}\nSản phẩm: {product}\nThời gian: {paid_at}";
 
 pub async fn notify_admins_order_paid(
     ctx: &AppContext,
@@ -60,24 +59,19 @@ pub async fn notify_admins_order_paid(
 }
 
 pub fn render_admin_order_paid_notification(
-    ctx: &AppContext,
-    lang: &str,
+    _ctx: &AppContext,
+    _lang: &str,
     order: &OrderWithProduct,
     _payment_ref: &str,
     paid_at: DateTime<Utc>,
     _source_label: &str,
     _username: &str,
 ) -> String {
-    i18n::tr(
-        ctx,
-        lang,
-        ADMIN_ORDER_PAID_NOTIFICATION_KEY,
-        ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT,
-        &[
-            ("memo", order.order.bank_memo.clone()),
-            ("product", order.product.name.clone()),
-            ("paid_at", format_vietnam_datetime(paid_at)),
-        ],
+    format!(
+        "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: {}\nSản phẩm: {}\nThời gian: {}",
+        order.order.bank_memo,
+        order.product.name,
+        format_vietnam_datetime(paid_at)
     )
 }
 
@@ -153,7 +147,7 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([(
                     "admin_order_paid_notification".to_string(),
-                    "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: {memo}\nSản phẩm: {product}\nThời gian: {paid_at}"
+                    "Order: {order_id}; plan {plan}; amount {amount}; memo {memo}"
                         .to_string(),
                 )]),
             )]),
