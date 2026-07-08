@@ -2,6 +2,8 @@
   "action_invalid": "Invalid action. Please try again.",
   "admin_order_paid_notification": "✅ NEW PAID ORDER\n🔖 Memo: {memo}\nProduct: {product}\nPaid at: {paid_at}",
   "back_btn": "⬅️ Back",
+  "orders_history_button": "{memo} • {date} • {product}",
+  "orders_history_text": "🧾 PURCHASE HISTORY\n\nTap an order to view details.\nEach button shows: memo • purchase date • product",
   "bep20_payment_error": "Could not create USDT BEP20 payment: {error}",
   "bep20_payment_instructions": "🟢 USDT BEP20 payment\n\n• Network: BNB Smart Chain (BEP20)\n• Amount to send: {amount} USDT\n• Receiving address: {address}\n• Order: {order_id}\n• Expires: {expires_at}\n\n⚠️ Send exactly {amount} USDT on BNB Smart Chain (BEP20). Do not round, underpay, or overpay. Wrong amount or wrong network requires manual review and may delay delivery.",
   "binance_payment_error": "Could not create Binance Pay checkout: {error}",

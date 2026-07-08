@@ -51,9 +51,8 @@ pub async fn send_orders(
     }
 
     let text = order_history_text(&ctx, &lang);
-    let keyboard = order_history_keyboard(&ctx, &lang, &orders);
-    bot.send_message(chat_id, text)
-        .reply_markup(keyboard)
+    let keyboard = order_history_keyboard_json(&ctx, &lang, &orders);
+    i18n::send_message_with_json_keyboard(&ctx, chat_id, "orders_history_text", text, keyboard)
         .await?;
     Ok(())
 }
@@ -78,7 +77,7 @@ fn order_history_keyboard(
         .filter(|order| matches!(order.order.status, OrderStatus::Paid))
     {
         rows.push(vec![InlineKeyboardButton::callback(
-            order_button_label(order),
+            order_button_label(ctx, lang, order),
             format!("order:{}", order.order.id),
         )]);
     }
@@ -90,6 +89,42 @@ fn order_history_keyboard(
         "start:shop",
     )]);
     InlineKeyboardMarkup::new(rows)
+}
+
+fn order_history_keyboard_json(
+    ctx: &AppContext,
+    lang: &str,
+    orders: &[OrderWithProduct],
+) -> serde_json::Value {
+    let mut rows = Vec::new();
+    for order in orders
+        .iter()
+        .filter(|order| matches!(order.order.status, OrderStatus::Paid))
+    {
+        let parts = i18n::button_parts_for_key(
+            ctx,
+            "orders_history_button",
+            order_button_template_text(ctx, lang, order),
+        );
+        let mut button = serde_json::json!({
+            "text": parts.text,
+            "callback_data": format!("order:{}", order.order.id),
+        });
+        if let Some(icon_id) = parts.icon_custom_emoji_id
+            && let Some(obj) = button.as_object_mut()
+        {
+            obj.insert("icon_custom_emoji_id".to_string(), serde_json::Value::String(icon_id));
+        }
+        rows.push(vec![button]);
+    }
+    rows.push(vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "orders_back_shop_btn",
+        "⬅️ Quay lại",
+        "start:shop",
+    )]);
+    serde_json::json!({ "inline_keyboard": rows })
 }
 
 fn product_is_active(order: &OrderWithProduct) -> bool {
@@ -164,9 +199,65 @@ fn orders_empty_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
     )]])
 }
 
-fn order_button_label(order: &OrderWithProduct) -> String {
-    let product_name = truncate_chars(order.product.name.trim(), 28);
-    format!("{} — {}", order.order.bank_memo, product_name)
+fn order_button_label(ctx: &AppContext, lang: &str, order: &OrderWithProduct) -> String {
+    i18n::button_parts_for_key(
+        ctx,
+        "orders_history_button",
+        order_button_template_text(ctx, lang, order),
+    )
+    .text
+}
+
+fn order_button_template_text(ctx: &AppContext, lang: &str, order: &OrderWithProduct) -> String {
+    let product_name = truncate_chars(&clean_order_product_name(&order.product.name), 26);
+    let datetime = format_optional_vietnam_time(order.order.paid_at.as_deref());
+    let date = order_paid_date(&datetime);
+    i18n::tr(
+        ctx,
+        lang,
+        "orders_history_button",
+        "{memo} • {date} • {product}",
+        &[
+            ("memo", order.order.bank_memo.clone()),
+            ("date", date),
+            ("datetime", datetime),
+            ("product", product_name),
+            ("amount", format_vnd(order.order.amount)),
+            ("qty", order.order.qty.to_string()),
+        ],
+    )
+}
+
+fn order_paid_date(datetime: &str) -> String {
+    if datetime.len() >= 5 && datetime.as_bytes().get(2) == Some(&b'/') {
+        datetime.chars().take(5).collect()
+    } else {
+        "-".to_string()
+    }
+}
+
+fn clean_order_product_name(value: &str) -> String {
+    let mut cleaned = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find('{') {
+        cleaned.push_str(&rest[..start]);
+        let after_start = &rest[start + 1..];
+        if let Some(end) = after_start.find('}') {
+            let candidate = &after_start[..end];
+            if !candidate.is_empty() && candidate.chars().all(|ch| ch.is_ascii_digit()) {
+                rest = &after_start[end + 1..];
+                continue;
+            }
+        }
+        cleaned.push('{');
+        rest = after_start;
+    }
+    cleaned.push_str(rest);
+    cleaned
+        .trim()
+        .trim_start_matches(['-', '—', '|', '•', ':', ' '])
+        .trim()
+        .to_string()
 }
 
 fn order_detail_line(
@@ -828,11 +919,26 @@ mod tests {
 
         assert_eq!(rows[0][0]["callback_data"], "order:order-paid-1");
         let label = rows[0][0]["text"].as_str().unwrap();
-        assert!(label.contains("Gói VIP"));
         assert!(label.contains("DHPAID1234"));
+        assert!(label.contains("24/05"));
         assert!(!label.contains("order-paid-1"));
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1][0]["callback_data"], "start:shop");
+    }
+
+    #[tokio::test]
+    async fn order_history_button_template_strips_product_custom_emoji_placeholders() {
+        let mut paid = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
+        paid.product.name = "{6089306715604392889} Acc FB long product".to_string();
+        let ctx = test_ctx_with_texts(HashMap::from([(
+            "orders_history_button_vi".to_string(),
+            "{memo} • {date} • {product}".to_string(),
+        )]));
+
+        let label = order_button_label(&ctx, "vi", &paid);
+
+        assert_eq!(label, "DHPAID1234 • 24/05 • Acc FB long product");
+        assert!(!label.contains("{6089306715604392889}"));
     }
 
     #[tokio::test]

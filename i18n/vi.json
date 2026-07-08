@@ -75,6 +75,8 @@
   "order_not_pending": "⚠️ Đơn này không còn chờ thanh toán.",
   "order_paid": "✅ Đơn hàng đã thanh toán thành công.",
   "order_pay_caption": "💰 Số tiền: {total}\n🏦 Ngân hàng: {bank_line}\n📱 STK: {acct}\n📝 Nội dung CK: {memo}\n\n⚠️ Ghi đúng nội dung để hệ thống tự xử lý.\n\n📸 Quét QR hoặc chuyển khoản thủ công.",
+  "orders_history_button": "{memo} • {date} • {product}",
+  "orders_history_text": "🧾 LỊCH SỬ MUA HÀNG\n\nBấm vào một đơn để xem chi tiết.\nMỗi nút gồm: mã CK • ngày mua • sản phẩm",
   "order_payment_credited_to_wallet": "✅ Đã nhận thanh toán cho đơn {memo}, nhưng đơn không thể giao tự động.\n💳 Số tiền {amount} đã được cộng vào ví của bạn.\n🏦 Số dư ví: {balance}",
   "order_plan_line": "\n• Gói: {label} ({months} tháng)",
   "pagination_next": "Sau ▶️",
