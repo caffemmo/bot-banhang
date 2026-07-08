@@ -297,7 +297,6 @@ async fn send_start_menu(
 fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
-            [start_community_button_json(ctx, lang)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
@@ -319,7 +318,10 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", "affiliate:register"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", "childbot:guide"),
             ],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
+            [
+                start_community_button_json(ctx, lang),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language"),
+            ],
         ]
     })
 }
@@ -1267,8 +1269,11 @@ mod tests {
         let keyboard = start_menu_keyboard_json(&ctx, "vi");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
-        assert_eq!(rows[0][0]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
-        assert_eq!(rows[1][0]["callback_data"], "start:shop");
+        assert_eq!(rows[0][0]["callback_data"], "start:shop");
+        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
+        assert_eq!(rows[5][1]["callback_data"], "childbot:guide");
+        assert_eq!(rows[6][0]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[6][1]["callback_data"], "start:language");
     }
 
     #[test]

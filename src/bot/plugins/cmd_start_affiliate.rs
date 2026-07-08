@@ -320,7 +320,6 @@ async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resul
 fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
-            [start_community_button_json(ctx, lang)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
@@ -342,7 +341,10 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", AFFILIATE_REGISTER_CALLBACK),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", CHILD_BOT_GUIDE_CALLBACK),
             ],
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
+            [
+                start_community_button_json(ctx, lang),
+                i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language"),
+            ],
         ]
     })
 }
