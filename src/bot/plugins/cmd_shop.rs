@@ -14,7 +14,6 @@ use teloxide::types::{
 };
 use tokio::time::{Duration as TokioDuration, sleep};
 use tracing::warn;
-use url::Url;
 
 use crate::app::AppContext;
 use crate::core::qr::vietqr_link;
@@ -2378,7 +2377,7 @@ fn build_shop_home_keyboard_json(
         rows.push(vec![product_buy_button_json(product)]);
     }
 
-    let mut action_row = vec![
+    rows.push(vec![
         i18n::inline_button_callback_json(
             ctx,
             lang,
@@ -2393,25 +2392,7 @@ fn build_shop_home_keyboard_json(
             "💬 Liên hệ admin",
             "start:help",
         ),
-    ];
-    let notification_url = ctx.get_text("required_channel_url", "").trim().to_string();
-    if Url::parse(&notification_url).is_ok() {
-        action_row.push(inline_button_url_json(
-            ctx,
-            "shop_btn_notifications",
-            tl(ctx, lang, "shop_btn_notifications", "🔔 Thông báo"),
-            notification_url,
-        ));
-    } else {
-        action_row.push(i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "shop_btn_notifications",
-            "🔔 Thông báo",
-            "start:help",
-        ));
-    }
-    rows.push(action_row);
+    ]);
     rows.push(vec![i18n::inline_button_callback_json(
         ctx,
         lang,
@@ -2442,25 +2423,6 @@ fn category_button_json(category: &ShopCategoryButton) -> Value {
             "callback_data": callback_data,
         })
     }
-}
-
-fn inline_button_url_json(
-    ctx: &AppContext,
-    key: &str,
-    text: impl Into<String>,
-    url: impl Into<String>,
-) -> Value {
-    let parts = i18n::button_parts_for_key(ctx, key, text);
-    let mut button = json!({
-        "text": parts.text,
-        "url": url.into(),
-    });
-    if let Some(icon_id) = parts.icon_custom_emoji_id
-        && let Some(obj) = button.as_object_mut()
-    {
-        obj.insert("icon_custom_emoji_id".to_string(), Value::String(icon_id));
-    }
-    button
 }
 
 fn build_category_product_keyboard_json(
@@ -3598,14 +3560,13 @@ mod tests {
         assert_eq!(rows[0][1]["text"], "1️⃣ Gemini Pro");
         assert_eq!(rows[0][1]["callback_data"], "shop_cat:Gemini Pro");
         assert_eq!(rows[1].as_array().unwrap().len(), 1);
-        assert_eq!(rows[2].as_array().unwrap().len(), 3);
+        assert_eq!(rows[2].as_array().unwrap().len(), 2);
         assert_eq!(rows[2][0]["text"], "👛 Ví của tôi");
         assert_eq!(rows[2][0]["callback_data"], "start:wallet");
         assert_eq!(rows[2][1]["text"], "💬 Liên hệ admin");
         assert_eq!(rows[2][1]["callback_data"], "start:help");
-        assert_eq!(rows[2][2]["text"], "🔔 Thông báo");
-        assert_eq!(rows[2][2]["url"], "https://t.me/announcements");
         assert_eq!(rows[3][0]["callback_data"], "start:menu");
+        assert!(!keyboard.to_string().contains("https://t.me/announcements"));
         assert!(!keyboard.to_string().contains("shop_api"));
     }
 

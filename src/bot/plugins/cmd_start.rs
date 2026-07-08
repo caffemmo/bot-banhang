@@ -297,6 +297,7 @@ async fn send_start_menu(
 fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
+            [start_community_button_json(ctx, lang)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
@@ -321,6 +322,45 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
     })
+}
+
+fn start_community_button_json(ctx: &AppContext, lang: &str) -> Value {
+    let channel_url = required_channel_url(ctx);
+    if Url::parse(&channel_url).is_ok() {
+        inline_button_url_json(
+            ctx,
+            "start_btn_community",
+            t_lang(ctx, lang, "start_btn_community", "👥 Community"),
+            channel_url,
+        )
+    } else {
+        i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_community",
+            "👥 Community",
+            "start:help",
+        )
+    }
+}
+
+fn inline_button_url_json(
+    ctx: &AppContext,
+    key: &str,
+    text: impl Into<String>,
+    url: impl Into<String>,
+) -> Value {
+    let parts = i18n::button_parts_for_key(ctx, key, text);
+    let mut button = json!({
+        "text": parts.text,
+        "url": url.into(),
+    });
+    if let Some(icon_id) = parts.icon_custom_emoji_id
+        && let Some(obj) = button.as_object_mut()
+    {
+        obj.insert("icon_custom_emoji_id".to_string(), Value::String(icon_id));
+    }
+    button
 }
 
 fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(String, String)>> {
@@ -1219,6 +1259,16 @@ mod tests {
                 vec![("🌐 Ngôn ngữ".to_string(), "start:language".to_string())],
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn start_menu_keyboard_shows_community_url_button() {
+        let ctx = test_ctx_with_texts(BotTexts::default());
+        let keyboard = start_menu_keyboard_json(&ctx, "vi");
+        let rows = keyboard["inline_keyboard"].as_array().unwrap();
+
+        assert_eq!(rows[0][0]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[1][0]["callback_data"], "start:shop");
     }
 
     #[test]

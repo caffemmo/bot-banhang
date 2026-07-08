@@ -320,6 +320,7 @@ async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resul
 fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     json!({
         "inline_keyboard": [
+            [start_community_button_json(ctx, lang)],
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
@@ -344,6 +345,45 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
             [i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language")],
         ]
     })
+}
+
+fn start_community_button_json(ctx: &AppContext, lang: &str) -> Value {
+    let channel_url = required_channel_url(ctx);
+    if Url::parse(&channel_url).is_ok() {
+        inline_button_url_json(
+            ctx,
+            "start_btn_community",
+            i18n::t(ctx, lang, "start_btn_community", "👥 Community"),
+            channel_url,
+        )
+    } else {
+        i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_community",
+            "👥 Community",
+            "start:help",
+        )
+    }
+}
+
+fn inline_button_url_json(
+    ctx: &AppContext,
+    key: &str,
+    text: impl Into<String>,
+    url: impl Into<String>,
+) -> Value {
+    let parts = i18n::button_parts_for_key(ctx, key, text);
+    let mut button = json!({
+        "text": parts.text,
+        "url": url.into(),
+    });
+    if let Some(icon_id) = parts.icon_custom_emoji_id
+        && let Some(obj) = button.as_object_mut()
+    {
+        obj.insert("icon_custom_emoji_id".to_string(), Value::String(icon_id));
+    }
+    button
 }
 
 async fn register_affiliate_and_send_link(
