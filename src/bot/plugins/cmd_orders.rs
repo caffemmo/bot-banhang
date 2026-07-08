@@ -9,7 +9,9 @@ use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
 use crate::core::time::format_optional_vietnam_time;
-use crate::domains::orders::admin_notify::{admin_refund_confirm_keyboard, order_user_display};
+use crate::domains::orders::admin_notify::{
+    admin_refund_confirm_keyboard, admin_refund_request_keyboard, order_user_display,
+};
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::refund::refund_paid_order_to_wallet;
 use crate::domains::orders::repo;
@@ -213,6 +215,22 @@ async fn handle_admin_refund_callback(
     };
     let chat_id = msg.chat().id;
     let message_id = msg.id();
+    let lang = i18n::user_lang(ctx, admin_id, q.from.language_code.as_deref()).await;
+
+    if let Some(order_id) = data.strip_prefix("admin_order:view:") {
+        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+        let Some(order) = repo::get_order_with_product(&ctx.pool, order_id).await? else {
+            ctx.bot
+                .send_message(chat_id, "Không tìm thấy đơn hàng.")
+                .await?;
+            return Ok(());
+        };
+        ctx.bot
+            .send_message(chat_id, format_order_detail_text(ctx, &lang, &order))
+            .reply_markup(admin_refund_request_keyboard(&order.order.id))
+            .await?;
+        return Ok(());
+    }
 
     if let Some(order_id) = data.strip_prefix("admin_refund:req:") {
         let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
@@ -691,7 +709,7 @@ impl AppPlugin for OrdersCommandPlugin {
         _dialogue: BotDialogue,
     ) -> Result<bool, anyhow::Error> {
         let data = q.data.clone().unwrap_or_default();
-        if data.starts_with("admin_refund:") {
+        if data.starts_with("admin_refund:") || data.starts_with("admin_order:") {
             handle_admin_refund_callback(&ctx, q).await?;
             return Ok(true);
         }

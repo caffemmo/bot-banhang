@@ -12,7 +12,7 @@ use crate::domains::orders::models::OrderWithProduct;
 use crate::domains::users::repo as users_repo;
 
 const ADMIN_ORDER_PAID_NOTIFICATION_KEY: &str = "admin_order_paid_notification";
-const ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT: &str = "✅ New paid order\n\nOrder: {order_id}\nMemo: {memo}\nProduct: {product}\nPlan: {plan}\nQuantity: {qty}\nAmount: {amount} VND\nCustomer: {customer}\nUser ID: {user_id}\nUsername: {username}\nChat ID: {chat_id}\nPayment ref: {payment_ref}\nSource: {source}\nPaid at: {paid_at}";
+const ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT: &str = "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: {memo}\nSản phẩm: {product}\nThời gian: {paid_at}";
 
 pub async fn notify_admins_order_paid(
     ctx: &AppContext,
@@ -63,40 +63,19 @@ pub fn render_admin_order_paid_notification(
     ctx: &AppContext,
     lang: &str,
     order: &OrderWithProduct,
-    payment_ref: &str,
+    _payment_ref: &str,
     paid_at: DateTime<Utc>,
-    source_label: &str,
-    username: &str,
+    _source_label: &str,
+    _username: &str,
 ) -> String {
-    let plan = order
-        .order
-        .plan_label
-        .clone()
-        .unwrap_or_else(|| i18n::t(ctx, lang, "delivery_plan_none", "None"));
-    let customer = order
-        .order
-        .customer_input
-        .clone()
-        .unwrap_or_else(|| i18n::t(ctx, lang, "delivery_customer_none", "Not provided"));
-
     i18n::tr(
         ctx,
         lang,
         ADMIN_ORDER_PAID_NOTIFICATION_KEY,
         ADMIN_ORDER_PAID_NOTIFICATION_DEFAULT,
         &[
-            ("order_id", order.order.id.clone()),
             ("memo", order.order.bank_memo.clone()),
             ("product", order.product.name.clone()),
-            ("plan", plan),
-            ("qty", order.order.qty.to_string()),
-            ("amount", order.order.amount.to_string()),
-            ("customer", customer),
-            ("user_id", order.order.user_id.to_string()),
-            ("username", username.to_string()),
-            ("chat_id", order.order.chat_id.to_string()),
-            ("payment_ref", payment_ref.to_string()),
-            ("source", source_label.to_string()),
             ("paid_at", format_vietnam_datetime(paid_at)),
         ],
     )
@@ -114,10 +93,16 @@ pub fn payment_source_label(source: &PaymentSource) -> &'static str {
 }
 
 pub fn admin_refund_request_keyboard(order_id: &str) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        "💸 Hoàn tiền",
-        format!("admin_refund:req:{order_id}"),
-    )]])
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "💸 Hoàn tiền",
+            format!("admin_refund:req:{order_id}"),
+        )],
+        vec![InlineKeyboardButton::callback(
+            "🧾 Xem thông tin đơn hàng",
+            format!("admin_order:view:{order_id}"),
+        )],
+    ])
 }
 
 pub fn admin_refund_confirm_keyboard(order_id: &str) -> InlineKeyboardMarkup {
@@ -156,7 +141,7 @@ mod tests {
     use crate::domains::products::models::Product;
 
     #[tokio::test]
-    async fn renders_configurable_admin_paid_order_notification_with_order_vars() {
+    async fn renders_compact_admin_paid_order_notification() {
         let ctx = test_ctx(BotTexts::from_language_maps(
             vec![LanguageInfo {
                 code: "vi".to_string(),
@@ -168,7 +153,7 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([(
                     "admin_order_paid_notification".to_string(),
-                    "Đơn {memo}: {product} x{qty} = {amount}; user {username}; ref {payment_ref}; {source}; {paid_at}"
+                    "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: {memo}\nSản phẩm: {product}\nThời gian: {paid_at}"
                         .to_string(),
                 )]),
             )]),
@@ -188,7 +173,7 @@ mod tests {
 
         assert_eq!(
             text,
-            "Đơn MEMO1: Test product x2 = 50000; user @alice; ref tx-123; bank_webhook; 26/05/2026 08:02:03"
+            "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: MEMO1\nSản phẩm: Test product\nThời gian: 26/05/2026 08:02:03"
         );
     }
 
@@ -200,6 +185,10 @@ mod tests {
         assert_eq!(
             json["inline_keyboard"][0][0]["callback_data"],
             "admin_refund:req:order-123"
+        );
+        assert_eq!(
+            json["inline_keyboard"][1][0]["callback_data"],
+            "admin_order:view:order-123"
         );
     }
 

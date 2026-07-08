@@ -1,6 +1,6 @@
 {
   "action_invalid": "Hành động không hợp lệ, vui lòng thử lại.",
-  "admin_order_paid_notification": "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n\n🧾 Mã đơn: {order_id}\n🔖 Nội dung CK: {memo}\n📦 Sản phẩm: {product}\n🎚️ Gói: {plan}\n🔢 Số lượng: {qty}\n💰 Số tiền: {amount} VND\n👤 User ID: {user_id}\n💬 Chat ID: {chat_id}\n🧍 Thông tin khách: {customer}\n💳 Mã thanh toán: {payment_ref}\n🔌 Nguồn: {source}\n🕒 Thời gian: {paid_at}",
+  "admin_order_paid_notification": "✅ CÓ ĐƠN THANH TOÁN THÀNH CÔNG\n🔖 Nội dung CK: {memo}\nSản phẩm: {product}\nThời gian: {paid_at}",
   "back_btn": "⬅️ Quay lại",
   "bep20_payment_error": "Không thể tạo yêu cầu thanh toán USDT BEP20: {error}",
   "bep20_payment_instructions": "🟢 THANH TOÁN USDT BEP20\n\n• Mạng: BNB Smart Chain (BEP20)\n• Số USDT cần chuyển: {amount} USDT\n• Ví nhận: {address}\n• Đơn hàng: {order_id}\n• Hết hạn: {expires_at}\n\n⚠️ Vui lòng chuyển đúng chính xác {amount} USDT trên mạng BNB Smart Chain (BEP20). Không làm tròn, không chuyển thiếu hoặc thừa. Sai số tiền hoặc sai mạng sẽ cần admin xử lý thủ công và có thể làm chậm giao hàng.",
