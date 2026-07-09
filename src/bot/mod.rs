@@ -27,9 +27,6 @@ pub enum State {
     #[default]
     Idle,
     SearchingProduct,
-    SupportReply {
-        ticket_id: i64,
-    },
     ChoosingQty {
         product_id: i64,
     },

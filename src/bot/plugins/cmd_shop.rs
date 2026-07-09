@@ -4697,7 +4697,6 @@ impl AppPlugin for ShopCommandPlugin {
                 return Ok(true);
             }
             State::Idle => {}
-            State::SupportReply { .. } => {}
             State::TopupEnterAmount => {}
             State::TopupUsdtEnterAmount => {}
             State::TopupBinanceEnterAmount => {}
