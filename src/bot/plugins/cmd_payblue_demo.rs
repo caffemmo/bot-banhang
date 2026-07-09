@@ -14,7 +14,6 @@ use crate::bot::{BotDialogue, State};
 
 const PREFIX: &str = "payblue_demo:";
 const JOB_KIND_META_PAYMENT: &str = "meta_payment_demo";
-const JOB_KIND_BLUE_VERIFY: &str = "blue_verify_demo";
 
 #[derive(Debug, Clone, FromRow)]
 struct DemoJob {
@@ -106,31 +105,6 @@ impl AppPlugin for PayBlueDemoPlugin {
                 "Thanh toán Meta Verified",
             )
             .await?,
-            "payblue_demo:verify" => create_and_spawn_demo_job(
-                ctx.clone(),
-                chat_id,
-                user_id,
-                JOB_KIND_BLUE_VERIFY,
-                "Xác minh tích xanh",
-            )
-            .await?,
-            "payblue_demo:balance" => {
-                ctx.bot
-                    .send_message(chat_id, "💰 Số dư demo: <b>0 credit</b> (0 đ)")
-                    .parse_mode(teloxide::types::ParseMode::Html)
-                    .reply_markup(demo_back_keyboard())
-                    .await?;
-            }
-            "payblue_demo:history" => send_demo_history(&ctx, chat_id, user_id).await?,
-            "payblue_demo:help" => {
-                ctx.bot
-                    .send_message(
-                        chat_id,
-                        "❓ Demo này chỉ test khung task:\nPending → Running → Success/Failed.\n\nChưa hiện cho user và chưa gắn xử lý nền tảng bên ngoài.",
-                    )
-                    .reply_markup(demo_back_keyboard())
-                    .await?;
-            }
             _ => send_demo_menu(&ctx, chat_id).await?,
         }
 
@@ -169,28 +143,13 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
 }
 
 async fn send_demo_menu(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
-    let text = "💰 <b>Số dư:</b> 0 credit (0 đ)\n\nChọn 1 chức năng ở menu phía dưới hoặc gõ /help.\n\n🧪 <b>PAY BLUE TICK DEMO</b>\nChỉ admin thấy bằng lệnh <code>/payblue_demo</code>.";
+    let text = "🧪 <b>PAY BLUE TICK DEMO</b>\nChỉ admin thấy bằng lệnh <code>/payblue_demo</code>.\n\nHiện chỉ bật thử logic nút <b>Thanh toán Meta</b>.";
     ctx.bot
         .send_message(chat_id, text)
         .parse_mode(teloxide::types::ParseMode::Html)
-        .reply_markup(InlineKeyboardMarkup::new(vec![
-            vec![
-                InlineKeyboardButton::callback("🚀 Thanh toán Meta", "payblue_demo:meta"),
-                InlineKeyboardButton::callback("📋 Xác minh tích xanh", "payblue_demo:verify"),
-            ],
-            vec![
-                InlineKeyboardButton::callback("💵 Nạp credit", "payblue_demo:balance"),
-                InlineKeyboardButton::callback("💰 Số dư", "payblue_demo:balance"),
-            ],
-            vec![
-                InlineKeyboardButton::callback("🏷 Bảng giá", "payblue_demo:help"),
-                InlineKeyboardButton::callback("📜 Lịch sử", "payblue_demo:history"),
-            ],
-            vec![
-                InlineKeyboardButton::callback("❓ Trợ giúp", "payblue_demo:help"),
-                InlineKeyboardButton::callback("🌐 Ngôn ngữ", "payblue_demo:help"),
-            ],
-        ]))
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback("🚀 Thanh toán Meta", "payblue_demo:meta"),
+        ]]))
         .await?;
     Ok(())
 }
@@ -212,7 +171,6 @@ async fn create_and_spawn_demo_job(
             ),
         )
         .parse_mode(teloxide::types::ParseMode::Html)
-        .reply_markup(demo_back_keyboard())
         .await?;
 
     tokio::spawn(async move {
@@ -274,7 +232,6 @@ async fn run_demo_job(ctx: Arc<AppContext>, job_id: i64, chat_id: ChatId) -> Res
             format!("✅ Job demo <code>#{job_id}</code> thành công.\nKết quả: Demo worker xử lý thành công."),
         )
         .parse_mode(teloxide::types::ParseMode::Html)
-        .reply_markup(demo_back_keyboard())
         .await?;
     Ok(())
 }
@@ -297,57 +254,6 @@ async fn update_demo_job_status(
     .execute(pool)
     .await?;
     Ok(())
-}
-
-async fn send_demo_history(ctx: &AppContext, chat_id: ChatId, user_id: i64) -> Result<()> {
-    let jobs = sqlx::query_as::<_, DemoJob>(
-        r#"SELECT id, chat_id, user_id, kind, status, result, error, created_at, updated_at
-           FROM payblue_demo_jobs
-           WHERE user_id = ?
-           ORDER BY id DESC
-           LIMIT 8"#,
-    )
-    .bind(user_id)
-    .fetch_all(&ctx.pool)
-    .await?;
-    if jobs.is_empty() {
-        ctx.bot
-            .send_message(chat_id, "📜 Chưa có job demo nào.")
-            .reply_markup(demo_back_keyboard())
-            .await?;
-        return Ok(());
-    }
-
-    let mut lines = vec!["📜 <b>Lịch sử job demo</b>".to_string()];
-    for job in jobs {
-        lines.push(format!(
-            "#{} - {} - <b>{}</b>",
-            job.id,
-            demo_kind_label(&job.kind),
-            job.status
-        ));
-    }
-    ctx.bot
-        .send_message(chat_id, lines.join("\n"))
-        .parse_mode(teloxide::types::ParseMode::Html)
-        .reply_markup(demo_back_keyboard())
-        .await?;
-    Ok(())
-}
-
-fn demo_back_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        "⬅️ Menu demo",
-        "payblue_demo:menu",
-    )]])
-}
-
-fn demo_kind_label(kind: &str) -> &'static str {
-    match kind {
-        JOB_KIND_META_PAYMENT => "Thanh toán Meta",
-        JOB_KIND_BLUE_VERIFY => "Xác minh tích xanh",
-        _ => "Demo",
-    }
 }
 
 fn is_demo_admin(ctx: &AppContext, user_id: i64) -> bool {
