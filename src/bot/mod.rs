@@ -26,6 +26,7 @@ pub mod texts;
 pub enum State {
     #[default]
     Idle,
+    SearchingProduct,
     ChoosingQty {
         product_id: i64,
     },

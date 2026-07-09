@@ -177,6 +177,32 @@ pub async fn list_products_by_category(pool: &SqlitePool, category: &str) -> Res
     Ok(products)
 }
 
+pub async fn search_products(pool: &SqlitePool, query: &str, limit: i64) -> Result<Vec<Product>> {
+    let pattern = format!("%{}%", query.trim());
+    let limit = limit.clamp(1, 50);
+    let sql = format!(
+        r#"SELECT {PRODUCT_SELECT}
+        {PRODUCT_FROM}
+        WHERE IFNULL(p.is_active, 1) = 1
+            AND (
+                p.name LIKE ?
+                OR IFNULL(p.description, '') LIKE ?
+                OR IFNULL(COALESCE(pc.name, p.category), '') LIKE ?
+            )
+        ORDER BY p.sort_order ASC, p.id ASC
+        LIMIT ?"#
+    );
+    let products = sqlx::query_as::<sqlx::Sqlite, Product>(&sql)
+        .bind(pattern.clone())
+        .bind(pattern.clone())
+        .bind(pattern)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(products)
+}
+
 pub async fn get_product(pool: &SqlitePool, id: i64) -> Result<Option<Product>> {
     let sql = format!(
         r#"SELECT {PRODUCT_SELECT}

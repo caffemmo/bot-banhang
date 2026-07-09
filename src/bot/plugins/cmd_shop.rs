@@ -350,6 +350,11 @@ async fn shop_handle_callback(
             )
             .await?;
         }
+    } else if data == "shop_search" {
+        if let Some(msg) = &q.message {
+            dialogue.update(State::SearchingProduct).await?;
+            send_shop_search_prompt(ctx.clone(), msg.chat().id, &lang).await?;
+        }
     } else if let Some(category) = data.strip_prefix("shop_cat:") {
         if let Some(msg) = &q.message {
             dialogue.update(State::Idle).await?;
@@ -1739,6 +1744,79 @@ async fn send_products_for_category(
     send_raw_product_list_message(&ctx, chat_id, Some(message_id), &text, keyboard).await
 }
 
+async fn send_shop_search_prompt(ctx: Arc<AppContext>, chat_id: ChatId, lang: &str) -> Result<()> {
+    ctx.bot
+        .send_message(
+            chat_id,
+            tl(
+                &ctx,
+                lang,
+                "shop_search_prompt",
+                "🔎 Nhập từ khóa sản phẩm cần tìm:",
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            i18n::inline_button_callback(
+                &ctx,
+                lang,
+                "shop_back_btn",
+                "⬅️ Quay lại",
+                "start:shop",
+            ),
+        ]]))
+        .await?;
+    Ok(())
+}
+
+async fn handle_product_search_message(
+    ctx: Arc<AppContext>,
+    msg: Message,
+    dialogue: BotDialogue,
+    lang: &str,
+) -> Result<()> {
+    let query = msg.text().unwrap_or("").trim();
+    if query.is_empty() {
+        send_shop_search_prompt(ctx, msg.chat.id, lang).await?;
+        return Ok(());
+    }
+
+    let products = repo::search_products(&ctx.pool, query, 30).await?;
+    let mut products_with_stock = Vec::new();
+    for product in products {
+        let stock = repo::count_product_items(&ctx.pool, product.id)
+            .await
+            .unwrap_or(0);
+        products_with_stock.push((product, stock));
+    }
+
+    let keyboard = build_search_product_keyboard_json(&ctx, lang, &products_with_stock);
+    let text = if products_with_stock.is_empty() {
+        trl(
+            &ctx,
+            lang,
+            "shop_search_empty",
+            "🔎 Không tìm thấy sản phẩm phù hợp với: {query}",
+            &[("query", query.to_string())],
+        )
+    } else {
+        format!(
+            "{}\n\n{}",
+            trl(
+                &ctx,
+                lang,
+                "shop_search_results_title",
+                "🔎 Kết quả tìm kiếm cho: {query}",
+                &[("query", query.to_string())],
+            ),
+            format_product_list_text(&ctx, lang, &products_with_stock, 0, 0)
+        )
+    };
+
+    send_raw_product_list_message(&ctx, msg.chat.id, None, &text, keyboard).await?;
+    dialogue.update(State::Idle).await?;
+    Ok(())
+}
+
 async fn send_raw_product_list_message(
     ctx: &AppContext,
     chat_id: ChatId,
@@ -2453,6 +2531,40 @@ fn build_shop_home_keyboard_json(
         "back_btn",
         "⬅️ Quay lại",
         "start:menu",
+    ),
+    i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "shop_btn_search",
+        "🔎 Tìm kiếm sản phẩm",
+        "shop_search",
+    )]);
+
+    json!({ "inline_keyboard": rows })
+}
+
+fn build_search_product_keyboard_json(
+    ctx: &AppContext,
+    lang: &str,
+    products: &[(Product, i64)],
+) -> Value {
+    let mut rows = Vec::new();
+    for (product, _stock) in products {
+        rows.push(vec![product_buy_button_json(product)]);
+    }
+    rows.push(vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "shop_btn_search_again",
+        "🔎 Tìm kiếm lại",
+        "shop_search",
+    )]);
+    rows.push(vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "shop_back_btn",
+        "⬅️ Quay lại",
+        "start:shop",
     )]);
 
     json!({ "inline_keyboard": rows })
@@ -4141,6 +4253,7 @@ mod tests {
     #[test]
     fn legacy_continue_shopping_callback_is_routed_to_shop() {
         assert!(is_shop_callback_data("shopnew:0"));
+        assert!(is_shop_callback_data("shop_search"));
     }
 
     #[test]
@@ -4579,6 +4692,10 @@ impl AppPlugin for ShopCommandPlugin {
                 handle_info_message(ctx.clone(), msg, dialogue, product_id, qty, plan_id).await?;
                 return Ok(true);
             }
+            State::SearchingProduct => {
+                handle_product_search_message(ctx.clone(), msg, dialogue, &lang).await?;
+                return Ok(true);
+            }
             State::Idle => {}
             State::TopupEnterAmount => {}
             State::TopupUsdtEnterAmount => {}
@@ -4628,6 +4745,7 @@ fn is_shop_callback_data(text: &str) -> bool {
         || text.starts_with("shopnew:")
         || text == "shop_api"
         || text == "shop_api_new"
+        || text == "shop_search"
         || text.starts_with("shop_cat:")
         || text.starts_with("buy:")
         || text.starts_with("usage:")
