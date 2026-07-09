@@ -10,6 +10,7 @@ pub mod cmd_sale_hunt;
 pub mod cmd_shop;
 pub mod cmd_start;
 pub mod cmd_start_affiliate;
+pub mod cmd_support;
 pub mod cmd_tut;
 pub mod cmd_tut_delete;
 pub mod cmd_tut_public;
@@ -79,6 +80,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_viameta::ViametaCommandPlugin),
         Box::new(cmd_group_sales::GroupSalesCommandPlugin),
         Box::new(cmd_orders::OrdersCommandPlugin),
+        Box::new(cmd_support::SupportCommandPlugin),
         Box::new(cmd_wallet::WalletCommandPlugin),
         Box::new(example::ExamplePlugin),
     ]

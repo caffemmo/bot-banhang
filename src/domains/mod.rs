@@ -15,6 +15,7 @@ pub mod i18n;
 pub mod orders;
 pub mod products;
 pub mod stats;
+pub mod support;
 pub mod users;
 pub mod wallet;
 pub mod worker;
@@ -43,5 +44,6 @@ pub fn router(ctx: Arc<AppContext>) -> Router<Arc<AppContext>> {
         .merge(client::api::router())
         .merge(childbot::api::router())
         .merge(orders::webhook::router())
+        .merge(support::api::router())
         .merge(admin_routes)
 }
