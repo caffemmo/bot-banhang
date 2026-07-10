@@ -24,7 +24,7 @@
       }
     }
 
-    async function saveProductUsageInstructions(productId, content) {
+    async function saveProductUsageInstructions(productId, content, options = {}) {
       if (!productId) return;
       const value = (content || '').trim();
       if (value) {
@@ -32,7 +32,7 @@
           method: 'PUT',
           body: JSON.stringify({ content: value }),
         });
-      } else {
+      } else if (options.allowDelete) {
         await apiFetch(`/products/${productId}/usage-instructions`, { method: 'DELETE' });
       }
     }
@@ -77,7 +77,9 @@
           try {
             const result = await originalSaveProduct.apply(this, arguments);
             if (savedProductId) {
-              await saveProductUsageInstructions(savedProductId, usageContent);
+              await saveProductUsageInstructions(savedProductId, usageContent, {
+                allowDelete: !!existingId,
+              });
             }
             return result;
           } finally {
