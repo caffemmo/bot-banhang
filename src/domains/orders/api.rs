@@ -33,6 +33,16 @@ pub struct UploadedFileDelivery {
     pub mime: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountDelivery {
+    pub account: String,
+    pub password: String,
+    pub two_fa: Option<String>,
+    pub mail: Option<String>,
+    pub mail_password: Option<String>,
+    pub cookie: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ListOrdersQuery {
     pub status: Option<String>,
@@ -497,6 +507,61 @@ pub async fn send_product_file(
         return Ok(());
     }
 
+    if product_delivery_type(&owp.product) == "stock_item" {
+        let deliveries = parse_account_delivery_items(delivered_data);
+        if deliveries.is_empty() {
+            tracing::warn!(
+                "order {} has no valid account stock lines to deliver",
+                owp.order.id
+            );
+            ctx.bot
+                .send_message(
+                    ChatId(owp.order.chat_id),
+                    format!(
+                        "✅ Thanh toán thành công {}.\n\n⚠️ Dữ liệu tài khoản trong kho đang lỗi, vui lòng liên hệ hỗ trợ để được xử lý.",
+                        owp.order.bank_memo
+                    ),
+                )
+                .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                    InlineKeyboardButton::callback(continue_shopping_btn, "start:shop"),
+                ]]))
+                .await?;
+            return Ok(());
+        }
+
+        let mut rows = Vec::new();
+        if account_deliveries_have_cookie(&deliveries) {
+            rows.push(vec![InlineKeyboardButton::callback(
+                "Lấy cookie",
+                format!("order_cookie:{}", owp.order.id),
+            )]);
+        }
+        rows.push(vec![InlineKeyboardButton::callback(
+            continue_shopping_btn,
+            "start:shop",
+        )]);
+
+        let text = format_account_delivery_message(&deliveries);
+        if text.chars().count() <= 3900 {
+            ctx.bot
+                .send_message(ChatId(owp.order.chat_id), text)
+                .reply_markup(InlineKeyboardMarkup::new(rows))
+                .await?;
+        } else {
+            ctx.bot
+                .send_document(
+                    ChatId(owp.order.chat_id),
+                    InputFile::memory(text.into_bytes())
+                        .file_name(format!("account_{}.txt", owp.order.bank_memo)),
+                )
+                .caption("Đang lấy thông tin...\n\nThông tin tài khoản được gửi trong file.")
+                .reply_markup(InlineKeyboardMarkup::new(rows))
+                .await?;
+        }
+
+        return Ok(());
+    }
+
     let plan_label = owp
         .order
         .plan_label
@@ -543,6 +608,300 @@ pub async fn send_product_file(
         .await?;
 
     Ok(())
+}
+
+pub async fn take_account_stock_items(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    product_id: i64,
+    qty: i64,
+    order_id: &str,
+) -> Result<(String, Option<String>)> {
+    if qty <= 0 {
+        return Err(anyhow!("invalid quantity"));
+    }
+
+    let mut delivered = Vec::new();
+    let mut reserved_ids = Vec::new();
+    while delivered.len() < qty as usize {
+        let items = match repo::take_product_items(tx, product_id, 1).await {
+            Ok(items) => items,
+            Err(_) => break,
+        };
+        let Some(item) = items.into_iter().next() else {
+            break;
+        };
+
+        if parse_account_stock_line(&item.content).is_some() {
+            reserved_ids.push(item.id);
+            delivered.push(item.content);
+        } else {
+            tracing::warn!(
+                "skip invalid account stock item {} for product {} order {}",
+                item.id,
+                product_id,
+                order_id
+            );
+        }
+    }
+
+    if delivered.len() < qty as usize {
+        return Err(anyhow!(
+            "not enough valid account stock items (need {qty}, have {})",
+            delivered.len()
+        ));
+    }
+
+    Ok((
+        delivered.join("\n"),
+        Some(
+            reserved_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+    ))
+}
+
+pub fn parse_account_delivery_items(delivered_data: &str) -> Vec<AccountDelivery> {
+    delivered_data
+        .lines()
+        .filter_map(parse_account_stock_line)
+        .collect()
+}
+
+pub fn account_deliveries_have_cookie(deliveries: &[AccountDelivery]) -> bool {
+    deliveries.iter().any(|delivery| {
+        delivery
+            .cookie
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    })
+}
+
+pub fn format_account_delivery_message(deliveries: &[AccountDelivery]) -> String {
+    let mut text = String::from("Đang lấy thông tin...\n\n");
+    for (index, delivery) in deliveries.iter().enumerate() {
+        if deliveries.len() == 1 {
+            text.push_str("Thông tin tài khoản:\n\n");
+        } else {
+            text.push_str(&format!("Thông tin tài khoản {}:\n\n", index + 1));
+        }
+        text.push_str(&format!("Tài khoản: {}\n", display_field(&delivery.account)));
+        text.push_str(&format!("Pass: {}\n", display_field(&delivery.password)));
+        text.push_str(&format!(
+            "2FA: {}\n",
+            display_optional_field(delivery.two_fa.as_deref())
+        ));
+        text.push_str(&format!(
+            "Mail: {}\n",
+            display_optional_field(delivery.mail.as_deref())
+        ));
+        text.push_str(&format!(
+            "Pass mail: {}",
+            display_optional_field(delivery.mail_password.as_deref())
+        ));
+        if index + 1 < deliveries.len() {
+            text.push_str("\n\n");
+        }
+    }
+    text
+}
+
+pub fn format_cookie_text(deliveries: &[AccountDelivery]) -> Option<String> {
+    let mut blocks = Vec::new();
+    for delivery in deliveries {
+        let Some(cookie) = delivery
+            .cookie
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        blocks.push(format!(
+            "Cookie của tài khoản {}:\n{}",
+            display_field(&delivery.account),
+            cookie
+        ));
+    }
+
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks.join("\n\n"))
+    }
+}
+
+pub fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+pub fn cookie_message_html(cookie_text: &str) -> String {
+    format!("<pre>{}</pre>", html_escape(cookie_text))
+}
+
+pub fn parse_account_stock_line(raw: &str) -> Option<AccountDelivery> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = raw.split('|').map(|part| part.trim().to_string()).collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    if fixed_order_is_likely(&parts) {
+        return account_delivery_from_fixed_parts(&parts);
+    }
+
+    best_effort_account_delivery(&parts).or_else(|| account_delivery_from_fixed_parts(&parts))
+}
+
+fn account_delivery_from_fixed_parts(parts: &[String]) -> Option<AccountDelivery> {
+    let mut fields = vec![String::new(); 6];
+    for (index, part) in parts.iter().enumerate() {
+        if index < 5 {
+            fields[index] = part.trim().to_string();
+        } else if index == 5 {
+            fields[5] = part.trim().to_string();
+        } else {
+            if !fields[5].is_empty() {
+                fields[5].push('|');
+            }
+            fields[5].push_str(part.trim());
+        }
+    }
+
+    let account = fields[0].trim().to_string();
+    let password = fields[1].trim().to_string();
+    if account.is_empty() || password.is_empty() {
+        return None;
+    }
+
+    Some(AccountDelivery {
+        account,
+        password,
+        two_fa: optional_field(&fields[2]),
+        mail: optional_field(&fields[3]),
+        mail_password: optional_field(&fields[4]),
+        cookie: optional_field(&fields[5]),
+    })
+}
+
+fn best_effort_account_delivery(parts: &[String]) -> Option<AccountDelivery> {
+    let mut remaining: Vec<String> = parts
+        .iter()
+        .map(|part| part.trim().to_string())
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    let cookie = take_first_matching(&mut remaining, looks_like_cookie);
+    let mail = take_first_matching(&mut remaining, looks_like_email);
+    let two_fa = take_first_matching(&mut remaining, looks_like_2fa);
+    if remaining.len() < 2 {
+        return None;
+    }
+
+    let account = remaining.remove(0);
+    let password = remaining.remove(0);
+    if account.trim().is_empty() || password.trim().is_empty() {
+        return None;
+    }
+    if looks_like_cookie(&account) || looks_like_cookie(&password) {
+        return None;
+    }
+
+    let mail_password = remaining.first().cloned().and_then(|value| optional_field(&value));
+    Some(AccountDelivery {
+        account,
+        password,
+        two_fa,
+        mail,
+        mail_password,
+        cookie,
+    })
+}
+
+fn fixed_order_is_likely(parts: &[String]) -> bool {
+    let account = parts.first().map(String::as_str).unwrap_or("").trim();
+    let password = parts.get(1).map(String::as_str).unwrap_or("").trim();
+    if account.is_empty() || password.is_empty() {
+        return false;
+    }
+    if parts.iter().take(5).any(|part| looks_like_cookie(part)) {
+        return false;
+    }
+    if let Some(mail) = parts.get(3).map(String::as_str).map(str::trim) {
+        if !mail.is_empty() && !looks_like_email(mail) {
+            return false;
+        }
+    }
+    true
+}
+
+fn take_first_matching<F>(items: &mut Vec<String>, predicate: F) -> Option<String>
+where
+    F: Fn(&str) -> bool,
+{
+    let index = items.iter().position(|item| predicate(item))?;
+    Some(items.remove(index))
+}
+
+fn optional_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn display_field(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "Không có"
+    } else {
+        value.trim()
+    }
+}
+
+fn display_optional_field(value: Option<&str>) -> &str {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Không có")
+}
+
+fn looks_like_email(value: &str) -> bool {
+    let value = value.trim();
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    !local.is_empty() && domain.contains('.') && !domain.ends_with('.')
+}
+
+fn looks_like_cookie(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("c_user=")
+        || lower.contains("xs=")
+        || lower.contains("fr=")
+        || lower.contains("datr=")
+        || (value.len() > 80 && value.matches(';').count() >= 3)
+}
+
+fn looks_like_2fa(value: &str) -> bool {
+    let value = value.trim().replace(' ', "");
+    let len = value.len();
+    if !(10..=64).contains(&len) {
+        return false;
+    }
+    value
+        .chars()
+        .all(|ch| matches!(ch, 'A'..='Z' | '2'..='7' | '='))
 }
 
 fn display_product_name(ctx: &AppContext, name: &str) -> String {
@@ -661,6 +1020,53 @@ mod tests {
         assert_eq!(files[1].path, "storage/product_files/b.pdf");
         assert_eq!(files[1].name, "b.pdf");
         assert_eq!(files[1].mime, None);
+    }
+
+    #[test]
+    fn account_stock_parser_trims_and_merges_cookie_pipes() {
+        let parsed = parse_account_stock_line(
+            " user1 | pass1 | JBSWY3DPEHPK3PXP | user@mail.test | mailpass | c_user=1|xs=abc|fr=def ",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.account, "user1");
+        assert_eq!(parsed.password, "pass1");
+        assert_eq!(parsed.two_fa.as_deref(), Some("JBSWY3DPEHPK3PXP"));
+        assert_eq!(parsed.mail.as_deref(), Some("user@mail.test"));
+        assert_eq!(parsed.mail_password.as_deref(), Some("mailpass"));
+        assert_eq!(parsed.cookie.as_deref(), Some("c_user=1|xs=abc|fr=def"));
+    }
+
+    #[test]
+    fn account_stock_parser_allows_missing_optional_fields() {
+        let parsed = parse_account_stock_line("user1|pass1").unwrap();
+        let text = format_account_delivery_message(&[parsed]);
+
+        assert!(text.contains("Tài khoản: user1"));
+        assert!(text.contains("Pass: pass1"));
+        assert!(text.contains("2FA: Không có"));
+        assert!(text.contains("Mail: Không có"));
+        assert!(text.contains("Pass mail: Không có"));
+    }
+
+    #[test]
+    fn account_stock_parser_rejects_missing_account_or_password() {
+        assert!(parse_account_stock_line("user1||||c_user=1; xs=1").is_none());
+        assert!(parse_account_stock_line("|pass1|2fa|mail@test.com").is_none());
+    }
+
+    #[test]
+    fn account_stock_parser_best_effort_handles_messy_order() {
+        let parsed = parse_account_stock_line(
+            "c_user=1; xs=abc; fr=def; datr=xyz|JBSWY3DPEHPK3PXP|user1|pass1|user@mail.test|mailpass",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.account, "user1");
+        assert_eq!(parsed.password, "pass1");
+        assert_eq!(parsed.mail.as_deref(), Some("user@mail.test"));
+        assert_eq!(parsed.mail_password.as_deref(), Some("mailpass"));
+        assert!(parsed.cookie.as_deref().unwrap().contains("c_user=1"));
     }
 }
 

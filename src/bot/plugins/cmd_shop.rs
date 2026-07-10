@@ -1469,24 +1469,18 @@ async fn complete_wallet_payment_transaction(
             "uploaded-file order is missing reserved delivery data; please recreate the order."
         ));
     } else {
-        let reserved = repo::take_product_items(&mut tx, owp.order.product_id, owp.order.qty)
-            .await
-            .map_err(|e| anyhow!("Không đủ hàng trong kho: {e}"))?;
-        let data = reserved
-            .iter()
-            .map(|i| i.content.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let (data, ids) = orders_api::take_account_stock_items(
+            &mut tx,
+            owp.order.product_id,
+            owp.order.qty,
+            order_id,
+        )
+        .await
+        .map_err(|e| anyhow!("Không đủ hàng hợp lệ trong kho: {e}"))?;
         if data.is_empty() {
             return Err(anyhow!("Kho hàng trống"));
         }
-        reserved_item_ids = Some(
-            reserved
-                .iter()
-                .map(|item| item.id.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-        );
+        reserved_item_ids = ids;
         data
     };
 
@@ -4310,7 +4304,7 @@ mod tests {
         let item_id =
             sqlx::query("INSERT INTO product_items (product_id, content, is_buy) VALUES (?, ?, 1)")
                 .bind(product.id)
-                .bind("secret-key")
+                .bind("user-key|pass-key")
                 .execute(&pool)
                 .await
                 .unwrap()
@@ -4327,7 +4321,7 @@ mod tests {
             created_at: Utc::now().to_rfc3339(),
             paid_at: None,
             payment_tx_id: None,
-            delivered_data: Some("secret-key".to_string()),
+            delivered_data: Some("user-key|pass-key".to_string()),
             reserved_item_ids: Some(item_id.to_string()),
             customer_input: None,
             plan_id: None,
@@ -4553,7 +4547,7 @@ mod tests {
         let item_id =
             sqlx::query("INSERT INTO product_items (product_id, content, is_buy) VALUES (?, ?, 0)")
                 .bind(product.id)
-                .bind("secret-key")
+                .bind("user-key|pass-key")
                 .execute(&pool)
                 .await
                 .unwrap()

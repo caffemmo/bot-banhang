@@ -1,7 +1,9 @@
 use std::sync::Arc;
-use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters};
+use teloxide::payloads::{
+    AnswerCallbackQuerySetters, EditMessageTextSetters, SendDocumentSetters, SendMessageSetters,
+};
 use teloxide::requests::Requester;
-use teloxide::types::{BotCommand, CallbackQuery, Message, User};
+use teloxide::types::{BotCommand, CallbackQuery, InputFile, Message, ParseMode, User};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 use crate::app::AppContext;
@@ -13,6 +15,10 @@ use crate::domains::orders::admin_notify::{
     admin_refund_confirm_keyboard, admin_refund_request_keyboard, order_user_display,
 };
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
+use crate::domains::orders::api::{
+    account_deliveries_have_cookie, cookie_message_html, format_account_delivery_message,
+    format_cookie_text, parse_account_delivery_items,
+};
 use crate::domains::orders::refund::refund_paid_order_to_wallet;
 use crate::domains::orders::repo;
 use crate::domains::users::repo as users_repo;
@@ -144,6 +150,19 @@ fn order_detail_keyboard(
             "order_rebuy_btn",
             "🛒 Mua lại sản phẩm này",
             format!("buy:{}", order.product.id),
+        )]);
+    }
+    let has_cookie = order
+        .order
+        .delivered_data
+        .as_deref()
+        .map(parse_account_delivery_items)
+        .map(|deliveries| account_deliveries_have_cookie(&deliveries))
+        .unwrap_or(false);
+    if has_cookie {
+        rows.push(vec![InlineKeyboardButton::callback(
+            "Lấy cookie",
+            format!("order_cookie:{}", order.order.id),
         )]);
     }
     rows.push(vec![i18n::inline_button_callback(
@@ -535,7 +554,12 @@ fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProdu
                 "Dữ liệu giao hàng"
             )
         ));
-        lines.push(delivered_data.to_string());
+        let account_deliveries = parse_account_delivery_items(delivered_data);
+        if account_deliveries.is_empty() {
+            lines.push(delivered_data.to_string());
+        } else {
+            lines.push(format_account_delivery_message(&account_deliveries));
+        }
     }
     lines.join("\n")
 }
@@ -663,6 +687,11 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
         return Ok(());
     }
 
+    if let Some(order_id) = data.strip_prefix("order_cookie:") {
+        send_order_cookie(ctx, chat_id, order_id, user_id, &lang).await?;
+        return Ok(());
+    }
+
     if let Some(order_id) = data.strip_prefix("order_support:") {
         let Some(order) = repo::get_paid_order_for_user(&ctx.pool, order_id, user_id).await? else {
             ctx.bot
@@ -711,6 +740,59 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
         )
         .reply_markup(order_detail_keyboard(ctx, &lang, &order))
         .await?;
+    Ok(())
+}
+
+async fn send_order_cookie(
+    ctx: &Arc<AppContext>,
+    chat_id: teloxide::types::ChatId,
+    order_id: &str,
+    user_id: i64,
+    lang: &str,
+) -> anyhow::Result<()> {
+    let Some(order) = repo::get_paid_order_for_user(&ctx.pool, order_id, user_id).await? else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                ctx.get_text_lang("order_not_found", lang, "Order not found."),
+            )
+            .reply_markup(order_not_found_keyboard(ctx, lang))
+            .await?;
+        return Ok(());
+    };
+
+    let delivered_data = order
+        .order
+        .delivered_data
+        .as_deref()
+        .unwrap_or_default();
+    let deliveries = parse_account_delivery_items(delivered_data);
+    let Some(cookie_text) = format_cookie_text(&deliveries) else {
+        ctx.bot
+            .send_message(chat_id, "Đơn này không có cookie.")
+            .reply_markup(order_detail_keyboard(ctx, lang, &order))
+            .await?;
+        return Ok(());
+    };
+
+    if cookie_text.chars().count() <= 3500 {
+        ctx.bot
+            .send_message(chat_id, cookie_message_html(&cookie_text))
+            .parse_mode(ParseMode::Html)
+            .reply_markup(order_detail_keyboard(ctx, lang, &order))
+            .await?;
+    } else {
+        ctx.bot
+            .send_document(
+                chat_id,
+                InputFile::memory(cookie_text.into_bytes())
+                    .file_name(format!("cookie_{}.txt", order.order.bank_memo)),
+            )
+            .caption("Cookie của đơn hàng được gửi trong file.")
+            .reply_markup(order_detail_keyboard(ctx, lang, &order))
+            .await?;
+    }
+
     Ok(())
 }
 
@@ -805,7 +887,10 @@ impl AppPlugin for OrdersCommandPlugin {
             return Ok(true);
         }
 
-        if data == "orders:list" || data.starts_with("order:") || data.starts_with("order_support:")
+        if data == "orders:list"
+            || data.starts_with("order:")
+            || data.starts_with("order_cookie:")
+            || data.starts_with("order_support:")
         {
             handle_orders_callback(&ctx, q).await?;
             return Ok(true);

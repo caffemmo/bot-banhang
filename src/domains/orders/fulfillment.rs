@@ -9,7 +9,10 @@ use tracing::{error, warn};
 use crate::app::AppContext;
 use crate::bot::i18n;
 use crate::domains::orders::admin_notify::notify_admins_order_paid;
-use crate::domains::orders::api::{is_order_expired, parse_reserved_ids, send_product_file};
+use crate::domains::orders::api::{
+    is_order_expired, parse_reserved_ids, product_delivery_type, send_product_file,
+    take_account_stock_items,
+};
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::repo;
 use crate::domains::products::repo as products_repo;
@@ -103,37 +106,77 @@ pub async fn fulfill_paid_order(
     } else if let Some(data) = &order_with_product.order.delivered_data {
         data.clone()
     } else {
-        let taken_items = match products_repo::take_product_items(
-            &mut tx,
-            order_with_product.order.product_id,
-            order_with_product.order.qty,
-        )
-        .await
-        {
-            Ok(items) => items,
-            Err(err) => {
-                tx.rollback().await?;
-                warn!(
-                    "order {} stock unavailable after payment: {err}",
-                    order_with_product.order.id
-                );
-                return credit_paid_order_to_wallet(
-                    &ctx,
-                    &order_with_product,
-                    OrderStatus::Cancel,
-                    paid_amount_vnd(&source, &order_with_product),
-                    "stock unavailable",
+        let delivery_result =
+            if product_delivery_type(&order_with_product.product) == "uploaded_file" {
+                match products_repo::take_product_items(
+                    &mut tx,
+                    order_with_product.order.product_id,
+                    order_with_product.order.qty,
                 )
-                .await;
+                .await
+                {
+                    Ok(taken_items) => {
+                        let ids: Vec<i64> = taken_items.iter().map(|item| item.id).collect();
+                        let data = taken_items
+                            .iter()
+                            .map(|item| item.content.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        (
+                            data,
+                            Some(
+                                ids.iter()
+                                    .map(|id| id.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(","),
+                            ),
+                        )
+                    }
+                    Err(err) => {
+                        tx.rollback().await?;
+                        warn!(
+                            "order {} stock unavailable after payment: {err}",
+                            order_with_product.order.id
+                        );
+                        return credit_paid_order_to_wallet(
+                            &ctx,
+                            &order_with_product,
+                            OrderStatus::Cancel,
+                            paid_amount_vnd(&source, &order_with_product),
+                            "stock unavailable",
+                        )
+                        .await;
+                    }
+                }
+        } else {
+            match take_account_stock_items(
+                &mut tx,
+                order_with_product.order.product_id,
+                order_with_product.order.qty,
+                &order_with_product.order.id,
+            )
+            .await
+            {
+                Ok((data, ids)) => (data, ids),
+                Err(err) => {
+                    tx.rollback().await?;
+                    warn!(
+                        "order {} stock unavailable after payment: {err}",
+                        order_with_product.order.id
+                    );
+                    return credit_paid_order_to_wallet(
+                        &ctx,
+                        &order_with_product,
+                        OrderStatus::Cancel,
+                        paid_amount_vnd(&source, &order_with_product),
+                        "stock unavailable",
+                    )
+                    .await;
+                }
             }
         };
 
-        let ids: Vec<i64> = taken_items.iter().map(|item| item.id).collect();
-        let data = taken_items
-            .iter()
-            .map(|item| item.content.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let (data, ids) = delivery_result;
         if data.is_empty() {
             tx.rollback().await?;
             return credit_paid_order_to_wallet(
@@ -145,12 +188,7 @@ pub async fn fulfill_paid_order(
             )
             .await;
         }
-        reserved_ids = Some(
-            ids.iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-        );
+        reserved_ids = ids;
         data
     };
 
@@ -428,7 +466,7 @@ mod tests {
         crate::domains::products::repo::insert_product_items(
             &pool,
             order.product_id,
-            &["secret-at-payment".to_string()],
+            &["user-at-payment|pass-at-payment".to_string()],
         )
         .await
         .unwrap();
@@ -450,7 +488,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(updated.status, OrderStatus::Paid);
-        assert_eq!(updated.delivered_data.as_deref(), Some("secret-at-payment"));
+        assert_eq!(
+            updated.delivered_data.as_deref(),
+            Some("user-at-payment|pass-at-payment")
+        );
         assert!(updated.reserved_item_ids.is_some());
         let remaining =
             crate::domains::products::repo::count_product_items(&pool, order.product_id)
