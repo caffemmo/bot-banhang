@@ -695,8 +695,15 @@ pub async fn insert_product(
     .await?;
 
     let id = result.last_insert_rowid();
+    let first_sort_order =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT MIN(sort_order) FROM products WHERE id != ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await?
+            .flatten()
+            .unwrap_or(1);
     sqlx::query("UPDATE products SET sort_order = ? WHERE id = ?")
-        .bind(id)
+        .bind(first_sort_order - 1)
         .bind(id)
         .execute(pool)
         .await?;
