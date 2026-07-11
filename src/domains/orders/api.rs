@@ -511,22 +511,32 @@ pub async fn send_product_file(
         let deliveries = parse_account_delivery_items(delivered_data);
         if deliveries.is_empty() {
             tracing::warn!(
-                "order {} has no valid account stock lines to deliver",
+                "order {} has raw stock text that cannot be parsed as account fields",
                 owp.order.id
             );
-            ctx.bot
-                .send_message(
-                    ChatId(owp.order.chat_id),
-                    format!(
-                        "✅ Thanh toán thành công {}.\n\n⚠️ Dữ liệu tài khoản trong kho đang lỗi, vui lòng liên hệ hỗ trợ để được xử lý.",
-                        owp.order.bank_memo
-                    ),
-                )
-                .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-                    InlineKeyboardButton::callback(continue_shopping_btn, "start:shop"),
-                ]]))
-                .await?;
+            let rows = vec![vec![InlineKeyboardButton::callback(
+                continue_shopping_btn,
+                "start:shop",
+            )]];
+            let text = format_raw_stock_delivery_message(delivered_data);
+            if text.chars().count() <= 3900 {
+                ctx.bot
+                    .send_message(ChatId(owp.order.chat_id), text)
+                    .reply_markup(InlineKeyboardMarkup::new(rows))
+                    .await?;
+            } else {
+                ctx.bot
+                    .send_document(
+                        ChatId(owp.order.chat_id),
+                        InputFile::memory(text.into_bytes())
+                            .file_name(format!("data_{}.txt", owp.order.bank_memo)),
+                    )
+                    .caption("Đang lấy thông tin...\n\nNội dung đơn hàng được gửi trong file.")
+                    .reply_markup(InlineKeyboardMarkup::new(rows))
+                    .await?;
+            }
             return Ok(());
+
         }
 
         let mut rows = Vec::new();
@@ -639,6 +649,15 @@ pub async fn take_account_stock_items(
                 .join(","),
         ),
     ))
+}
+
+pub fn format_raw_stock_delivery_message(delivered_data: &str) -> String {
+    let data = delivered_data.trim();
+    if data.is_empty() {
+        "Đang lấy thông tin...\n\nNội dung đơn hàng trống, vui lòng liên hệ hỗ trợ.".to_string()
+    } else {
+        format!("Đang lấy thông tin...\n\n{data}")
+    }
 }
 
 pub fn parse_account_delivery_items(delivered_data: &str) -> Vec<AccountDelivery> {
@@ -1031,6 +1050,14 @@ mod tests {
     fn account_stock_parser_rejects_missing_account_or_password() {
         assert!(parse_account_stock_line("user1||||c_user=1; xs=1").is_none());
         assert!(parse_account_stock_line("|pass1|2fa|mail@test.com").is_none());
+    }
+
+    #[test]
+    fn raw_stock_delivery_message_keeps_plain_text_stock() {
+        let text = format_raw_stock_delivery_message("Lien he admin de xu ly don hang");
+
+        assert!(text.contains("Đang lấy thông tin"));
+        assert!(text.contains("Lien he admin de xu ly don hang"));
     }
 
     #[test]
