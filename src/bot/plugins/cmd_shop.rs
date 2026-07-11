@@ -1465,9 +1465,25 @@ async fn complete_wallet_payment_transaction(
     let delivered_data = if let Some(data) = &owp.order.delivered_data {
         data.clone()
     } else if orders_api::product_delivery_type(&owp.product) == "uploaded_file" {
-        return Err(anyhow!(
-            "uploaded-file order is missing reserved delivery data; please recreate the order."
-        ));
+        let taken_items = repo::take_product_items(&mut tx, owp.order.product_id, owp.order.qty)
+            .await
+            .map_err(|e| anyhow!("Không đủ file hợp lệ trong kho: {e}"))?;
+        if taken_items.is_empty() {
+            return Err(anyhow!("Kho file trống"));
+        }
+
+        reserved_item_ids = Some(
+            taken_items
+                .iter()
+                .map(|item| item.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        taken_items
+            .iter()
+            .map(|item| item.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
     } else {
         let (data, ids) = orders_api::take_account_stock_items(
             &mut tx,
@@ -4589,6 +4605,92 @@ mod tests {
         assert_eq!(updated.status, OrderStatus::Pending);
         assert_eq!(updated.delivered_data, None);
         assert_eq!(updated.reserved_item_ids, None);
+    }
+
+    #[tokio::test]
+    async fn wallet_payment_takes_uploaded_file_stock_without_pre_reserved_data() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let product = repo::insert_product(
+            &pool,
+            "File product",
+            10_000,
+            Some(1),
+            Some(0),
+            None,
+            None,
+            None,
+            Some("uploaded_file"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let item_id =
+            sqlx::query("INSERT INTO product_items (product_id, content, is_buy) VALUES (?, ?, 0)")
+                .bind(product.id)
+                .bind(r#"{"path":"storage/products/demo.txt","name":"demo.txt"}"#)
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+        let order = Order::new(
+            42,
+            420,
+            product.id,
+            1,
+            10_000,
+            "ORDER-UPLOADED-WALLET".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        orders_repo::insert_order(&pool, &order).await.unwrap();
+        sqlx::query("INSERT INTO wallets (user_id, balance, updated_at) VALUES (?, ?, ?)")
+            .bind(42_i64)
+            .bind(10_000_i64)
+            .bind("2026-05-13T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let owp = orders_repo::get_order_with_product(&pool, &order.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (delivered_data, reserved_item_ids, balance_after, _) =
+            complete_wallet_payment_transaction(&pool, &owp, 42, &order.id)
+                .await
+                .unwrap();
+
+        assert_eq!(balance_after, 0);
+        assert!(delivered_data.contains("storage/products/demo.txt"));
+        let expected_ids = item_id.to_string();
+        assert_eq!(reserved_item_ids.as_deref(), Some(expected_ids.as_str()));
+        let is_buy: i64 = sqlx::query_scalar("SELECT is_buy FROM product_items WHERE id = ?")
+            .bind(item_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(is_buy, 1);
+        let updated = orders_repo::get_order(&pool, &order.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, OrderStatus::Paid);
+        assert_eq!(updated.delivered_data.as_deref(), Some(delivered_data.as_str()));
+        assert_eq!(updated.reserved_item_ids, reserved_item_ids);
     }
 }
 
