@@ -2398,21 +2398,19 @@ fn build_checkout_keyboard(
     lang: &str,
     order_id: &str,
     wallet_balance: i64,
-    amount: i64,
+    _amount: i64,
 ) -> InlineKeyboardMarkup {
     let mut kb_rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
-    if wallet_balance >= amount {
-        kb_rows.push(vec![InlineKeyboardButton::callback(
-            trl(
-                ctx,
-                lang,
-                "paywallet_btn",
-                "💳 Pay with wallet ({balance})",
-                &[("balance", format_vnd(wallet_balance))],
-            ),
-            format!("paywallet:{order_id}"),
-        )]);
-    }
+    kb_rows.push(vec![InlineKeyboardButton::callback(
+        trl(
+            ctx,
+            lang,
+            "paywallet_btn",
+            "💳 Pay with wallet ({balance})",
+            &[("balance", format_vnd(wallet_balance))],
+        ),
+        format!("paywallet:{order_id}"),
+    )]);
     if ctx.binance_pay_enabled() {
         kb_rows.push(vec![i18n::inline_button_callback(
             ctx,
@@ -4155,6 +4153,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(!callbacks.iter().any(|data| data.starts_with("cryptopay:")));
+        assert!(callbacks.contains(&"paywallet:order-1"));
         assert!(callbacks.contains(&"start:wallet"));
     }
 
