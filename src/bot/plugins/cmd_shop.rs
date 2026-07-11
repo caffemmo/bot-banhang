@@ -76,7 +76,11 @@ fn stock_backed_order_reservation_mode(
     _requested_qty: i64,
     risk_reason: Option<String>,
 ) -> (OrderReservationMode, Option<String>) {
-    (OrderReservationMode::NoReserve, risk_reason)
+    if risk_reason.is_some() {
+        (OrderReservationMode::NoReserve, risk_reason)
+    } else {
+        (OrderReservationMode::Reserved, None)
+    }
 }
 
 fn stock_backed_order_has_enough_stock(available_stock: i64, requested_qty: i64) -> bool {
@@ -1522,6 +1526,39 @@ async fn complete_wallet_payment_transaction(
     Ok((delivered_data, reserved_item_ids, balance_after, paid_at))
 }
 
+async fn reserve_stock_for_order(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    product_id: i64,
+    qty: i64,
+    is_uploaded_file: bool,
+    order_id: &str,
+) -> Result<(String, Option<String>)> {
+    if is_uploaded_file {
+        let taken_items = repo::take_product_items(tx, product_id, qty)
+            .await
+            .map_err(|e| anyhow!("Khong du file hop le trong kho: {e}"))?;
+        if taken_items.is_empty() {
+            return Err(anyhow!("Kho file trong"));
+        }
+
+        let reserved_item_ids = taken_items
+            .iter()
+            .map(|item| item.id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let delivered_data = taken_items
+            .iter()
+            .map(|item| item.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok((delivered_data, Some(reserved_item_ids)))
+    } else {
+        orders_api::take_account_stock_items(tx, product_id, qty, order_id)
+            .await
+            .map_err(|e| anyhow!("Khong du hang hop le trong kho: {e}"))
+    }
+}
+
 async fn handle_qty_message(
     ctx: Arc<AppContext>,
     msg: Message,
@@ -2216,6 +2253,18 @@ async fn process_order(
             stock_backed_order_reservation_mode(stock, qty, no_reserve_reason);
         order.reservation_mode = reservation_mode;
         let mut tx = ctx.pool.begin().await?;
+        if matches!(reservation_mode, OrderReservationMode::Reserved) {
+            let (delivered_data, reserved_item_ids) = reserve_stock_for_order(
+                &mut tx,
+                product_id,
+                qty,
+                is_uploaded_file,
+                &order.id,
+            )
+            .await?;
+            order.delivered_data = Some(delivered_data);
+            order.reserved_item_ids = reserved_item_ids;
+        }
         repo::insert_order_tx(&mut tx, &order).await?;
         if let Some(deal_id) = applied_sale_hunt_deal_id {
             cmd_sale_hunt::mark_deal_used_tx(&mut tx, deal_id, &order.id).await?;
@@ -4513,14 +4562,18 @@ mod tests {
     }
 
     #[test]
-    fn stock_backed_orders_are_no_reserve_even_when_stock_is_short() {
-        let (available_mode, available_reason) = stock_backed_order_reservation_mode(1, 1, None);
-        let (short_mode, short_reason) = stock_backed_order_reservation_mode(0, 2, None);
+    fn stock_backed_orders_reserve_stock_unless_user_is_risky() {
+        let (normal_mode, normal_reason) = stock_backed_order_reservation_mode(5, 1, None);
+        let (risky_mode, risky_reason) = stock_backed_order_reservation_mode(
+            5,
+            1,
+            Some("recent unpaid orders 3/3 (100%)".to_string()),
+        );
 
-        assert_eq!(available_mode, OrderReservationMode::NoReserve);
-        assert_eq!(available_reason, None);
-        assert_eq!(short_mode, OrderReservationMode::NoReserve);
-        assert_eq!(short_reason, None);
+        assert_eq!(normal_mode, OrderReservationMode::Reserved);
+        assert_eq!(normal_reason, None);
+        assert_eq!(risky_mode, OrderReservationMode::NoReserve);
+        assert_eq!(risky_reason.as_deref(), Some("recent unpaid orders 3/3 (100%)"));
     }
 
     #[test]
@@ -4529,6 +4582,61 @@ mod tests {
         assert!(!stock_backed_order_has_enough_stock(1, 2));
         assert!(!stock_backed_order_has_enough_stock(0, 1));
         assert!(!stock_backed_order_has_enough_stock(5, 0));
+    }
+
+    #[tokio::test]
+    async fn reserve_stock_for_order_marks_account_item_as_reserved() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let product = repo::insert_product(
+            &pool,
+            "Key",
+            10_000,
+            Some(1),
+            Some(0),
+            None,
+            None,
+            None,
+            Some("stock_item"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let item_id =
+            sqlx::query("INSERT INTO product_items (product_id, content, is_buy) VALUES (?, ?, 0)")
+                .bind(product.id)
+                .bind("user-key|pass-key")
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        let mut tx = pool.begin().await.unwrap();
+        let (delivered_data, reserved_item_ids) =
+            reserve_stock_for_order(&mut tx, product.id, 1, false, "ORDER-RESERVE")
+                .await
+                .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(delivered_data, "user-key|pass-key");
+        let expected_ids = item_id.to_string();
+        assert_eq!(reserved_item_ids.as_deref(), Some(expected_ids.as_str()));
+        let is_buy: i64 = sqlx::query_scalar("SELECT is_buy FROM product_items WHERE id = ?")
+            .bind(item_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(is_buy, 1);
     }
 
     #[tokio::test]
