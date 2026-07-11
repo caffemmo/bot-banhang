@@ -614,49 +614,27 @@ pub async fn take_account_stock_items(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     product_id: i64,
     qty: i64,
-    order_id: &str,
+    _order_id: &str,
 ) -> Result<(String, Option<String>)> {
     if qty <= 0 {
         return Err(anyhow!("invalid quantity"));
     }
 
-    let mut delivered = Vec::new();
-    let mut reserved_ids = Vec::new();
-    while delivered.len() < qty as usize {
-        let items = match repo::take_product_items(tx, product_id, 1).await {
-            Ok(items) => items,
-            Err(_) => break,
-        };
-        let Some(item) = items.into_iter().next() else {
-            break;
-        };
-
-        if parse_account_stock_line(&item.content).is_some() {
-            reserved_ids.push(item.id);
-            delivered.push(item.content);
-        } else {
-            tracing::warn!(
-                "skip invalid account stock item {} for product {} order {}",
-                item.id,
-                product_id,
-                order_id
-            );
-        }
-    }
-
-    if delivered.len() < qty as usize {
-        return Err(anyhow!(
-            "not enough valid account stock items (need {qty}, have {})",
-            delivered.len()
-        ));
+    let items = repo::take_product_items(tx, product_id, qty).await?;
+    if items.is_empty() {
+        return Err(anyhow!("stock is empty"));
     }
 
     Ok((
-        delivered.join("\n"),
+        items
+            .iter()
+            .map(|item| item.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n"),
         Some(
-            reserved_ids
+            items
                 .iter()
-                .map(|id| id.to_string())
+                .map(|item| item.id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
         ),

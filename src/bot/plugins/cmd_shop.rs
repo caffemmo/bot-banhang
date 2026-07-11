@@ -2254,14 +2254,39 @@ async fn process_order(
         order.reservation_mode = reservation_mode;
         let mut tx = ctx.pool.begin().await?;
         if matches!(reservation_mode, OrderReservationMode::Reserved) {
-            let (delivered_data, reserved_item_ids) = reserve_stock_for_order(
+            let reserved = reserve_stock_for_order(
                 &mut tx,
                 product_id,
                 qty,
                 is_uploaded_file,
                 &order.id,
             )
-            .await?;
+            .await;
+            let (delivered_data, reserved_item_ids) = match reserved {
+                Ok(reserved) => reserved,
+                Err(e) => {
+                    warn!("reserve stock for order {} failed: {e}", order.id);
+                    tx.rollback().await?;
+                    ctx.bot
+                        .send_message(
+                            chat_id,
+                            trl(
+                                &ctx,
+                                &lang,
+                                "stock_not_enough_no_payment",
+                                "❌ Sản phẩm hiện đã hết hàng hoặc không đủ số lượng.\n\n📦 Kho còn: {stock}\n🔢 Bạn chọn: {qty}\n\nVui lòng chọn sản phẩm khác hoặc quay lại sau.",
+                                &[
+                                    ("stock", stock.max(0).to_string()),
+                                    ("qty", qty.to_string()),
+                                ],
+                            ),
+                        )
+                        .reply_markup(shop_action_result_keyboard(&ctx, &lang))
+                        .await?;
+                    dialogue.update(State::Idle).await?;
+                    return Ok(());
+                }
+            };
             order.delivered_data = Some(delivered_data);
             order.reserved_item_ids = reserved_item_ids;
         }
@@ -4615,7 +4640,7 @@ mod tests {
         let item_id =
             sqlx::query("INSERT INTO product_items (product_id, content, is_buy) VALUES (?, ?, 0)")
                 .bind(product.id)
-                .bind("user-key|pass-key")
+                .bind("user-key||||c_user=1; xs=1")
                 .execute(&pool)
                 .await
                 .unwrap()
@@ -4628,7 +4653,7 @@ mod tests {
                 .unwrap();
         tx.commit().await.unwrap();
 
-        assert_eq!(delivered_data, "user-key|pass-key");
+        assert_eq!(delivered_data, "user-key||||c_user=1; xs=1");
         let expected_ids = item_id.to_string();
         assert_eq!(reserved_item_ids.as_deref(), Some(expected_ids.as_str()));
         let is_buy: i64 = sqlx::query_scalar("SELECT is_buy FROM product_items WHERE id = ?")
