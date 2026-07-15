@@ -77,20 +77,12 @@ async fn main() -> Result<()> {
 
     let server_task = tokio::spawn({
         let ctx = ctx.clone();
-        async move {
-            if let Err(err) = crate::core::pages::serve(ctx.clone()).await {
-                tracing::error!("Server stopped: {err}");
-            }
-        }
+        async move { crate::core::pages::serve(ctx).await }
     });
 
     let worker_task = tokio::spawn({
         let ctx = ctx.clone();
-        async move {
-            if let Err(err) = domains::worker::run(ctx.clone()).await {
-                tracing::error!("Worker stopped: {err}");
-            }
-        }
+        async move { domains::worker::run(ctx).await }
     });
 
     tokio::select! {
