@@ -7,12 +7,13 @@ mod db;
 mod domains;
 
 use crate::bot::texts::BotTexts;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use config::Config;
 use std::path::Path;
 use teloxide::payloads::SetMyCommandsSetters;
 use teloxide::requests::Requester;
 use teloxide::types::BotCommand;
+use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -71,11 +72,7 @@ async fn main() -> Result<()> {
 
     let bot_task = tokio::spawn({
         let ctx = ctx.clone();
-        async move {
-            if let Err(err) = bot::run(ctx.clone()).await {
-                tracing::error!("Bot stopped: {err}");
-            }
-        }
+        async move { bot::run(ctx).await }
     });
 
     let server_task = tokio::spawn({
@@ -96,8 +93,19 @@ async fn main() -> Result<()> {
         }
     });
 
-    let _ = tokio::try_join!(bot_task, server_task, worker_task)?;
-    Ok(())
+    tokio::select! {
+        result = wait_for_task("Bot", bot_task) => result,
+        result = wait_for_task("Server", server_task) => result,
+        result = wait_for_task("Worker", worker_task) => result,
+    }
+}
+
+async fn wait_for_task(name: &'static str, task: JoinHandle<Result<()>>) -> Result<()> {
+    match task.await {
+        Ok(Ok(())) => anyhow::bail!("{name} stopped unexpectedly"),
+        Ok(Err(err)) => Err(err).with_context(|| format!("{name} failed")),
+        Err(err) => Err(err).with_context(|| format!("{name} task panicked or was cancelled")),
+    }
 }
 
 fn run_cli_command() -> Result<bool> {
@@ -681,5 +689,14 @@ mod tests {
         let commands = localized_commands_for_lang(&base, &texts, "vi");
 
         assert_eq!(commands[0].description, "✨ Hỗ trợ");
+    }
+
+    #[tokio::test]
+    async fn completed_background_task_is_reported_as_an_error() {
+        let task = tokio::spawn(async { Ok(()) });
+
+        let err = wait_for_task("Bot", task).await.unwrap_err();
+
+        assert!(err.to_string().contains("Bot stopped unexpectedly"));
     }
 }
