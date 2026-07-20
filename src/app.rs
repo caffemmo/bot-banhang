@@ -238,6 +238,14 @@ impl AppContext {
             .any(|admin_id| admin_id == user_id)
     }
 
+    pub fn is_telegram_admin(&self, user_id: i64) -> bool {
+        self.is_telegram_icon_admin(user_id)
+            || self
+                .order_notification_admin_ids()
+                .into_iter()
+                .any(|admin_id| admin_id == user_id)
+    }
+
     pub fn telegram_icon_admin_ids(&self) -> Vec<i64> {
         self.get_config_value("telegram_icon_admin_ids", "")
             .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
@@ -251,6 +259,22 @@ impl AppContext {
 
     pub fn order_notification_admin_ids(&self) -> Vec<i64> {
         parse_admin_id_list(&self.get_config_value("order_notification_admin_ids", ""))
+    }
+
+    pub fn bot_maintenance_enabled(&self) -> bool {
+        is_enabled_config_value(&self.get_config_value("bot_maintenance_enabled", "0"))
+    }
+
+    pub fn bot_maintenance_message(&self) -> String {
+        let message = self.get_config_value(
+            "bot_maintenance_message",
+            "Bot dang bao tri, vui long quay lai sau.",
+        );
+        if message.trim().is_empty() {
+            "Bot dang bao tri, vui long quay lai sau.".to_string()
+        } else {
+            message
+        }
     }
 
     #[allow(dead_code)]
@@ -997,6 +1021,54 @@ mod tests {
 
         assert!(enabled.order_notifications_enabled());
         assert!(!disabled.order_notifications_enabled());
+    }
+
+    #[tokio::test]
+    async fn bot_maintenance_uses_runtime_toggle_and_message() {
+        let env_config = Config::from_env_map(&required_env()).unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        let ctx = AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            env_config,
+            HashMap::from([
+                ("bot_maintenance_enabled".to_string(), "yes".to_string()),
+                (
+                    "bot_maintenance_message".to_string(),
+                    "Dang bao tri he thong.".to_string(),
+                ),
+            ]),
+            BotTexts::default(),
+            vec![],
+        );
+
+        assert!(ctx.bot_maintenance_enabled());
+        assert_eq!(ctx.bot_maintenance_message(), "Dang bao tri he thong.");
+    }
+
+    #[tokio::test]
+    async fn telegram_admin_accepts_either_admin_list() {
+        let env_config = Config::from_env_map(&required_env()).unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_lazy("sqlite::memory:")
+            .unwrap();
+        let ctx = AppContext::new(
+            Bot::new("test-token"),
+            pool,
+            env_config,
+            HashMap::from([
+                ("telegram_icon_admin_ids".to_string(), "123".to_string()),
+                ("order_notification_admin_ids".to_string(), "456".to_string()),
+            ]),
+            BotTexts::default(),
+            vec![],
+        );
+
+        assert!(ctx.is_telegram_admin(123));
+        assert!(ctx.is_telegram_admin(456));
+        assert!(!ctx.is_telegram_admin(789));
     }
 
     #[tokio::test]

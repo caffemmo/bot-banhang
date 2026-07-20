@@ -6,6 +6,7 @@ use teloxide::dispatching::dialogue::Dialogue;
 
 use crate::bot::storage::SqliteDialogueStorage;
 use teloxide::dptree;
+use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::*;
 use teloxide::types::{
     CallbackQuery, Me, Message, MessageEntity, MessageEntityKind, MessageEntityRef,
@@ -145,6 +146,10 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                 )
                 .await;
 
+                if block_message_for_maintenance(&ctx, &msg).await? {
+                    return false;
+                }
+
                 if let Some(reply) = telegram_icon_file_id_reply(&ctx, &msg) {
                     if let Err(err) = ctx.bot.send_message(msg.chat.id, reply).await {
                         tracing::warn!(
@@ -206,6 +211,9 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
 
                 let callback_started_at = std::time::Instant::now();
                 let callback_data = query.data.clone().unwrap_or_default();
+                if block_callback_for_maintenance(&ctx, &query).await? {
+                    return false;
+                }
                 for plugin in ctx.plugins.iter() {
                     let plugin_started_at = std::time::Instant::now();
                     match plugin
@@ -319,6 +327,45 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         .await;
 
     Ok(())
+}
+
+async fn block_message_for_maintenance(ctx: &AppContext, msg: &Message) -> Result<bool> {
+    if !ctx.bot_maintenance_enabled() {
+        return Ok(false);
+    }
+
+    if msg
+        .from()
+        .map(|user| ctx.is_telegram_admin(user.id.0 as i64))
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+
+    ctx.bot
+        .send_message(msg.chat.id, ctx.bot_maintenance_message())
+        .await?;
+    Ok(true)
+}
+
+async fn block_callback_for_maintenance(ctx: &AppContext, q: &CallbackQuery) -> Result<bool> {
+    if !ctx.bot_maintenance_enabled() || ctx.is_telegram_admin(q.from.id.0 as i64) {
+        return Ok(false);
+    }
+
+    let message = ctx.bot_maintenance_message();
+    let _ = ctx
+        .bot
+        .answer_callback_query(q.id.clone())
+        .text(message.clone())
+        .show_alert(true)
+        .await;
+
+    if let Some(msg) = &q.message {
+        ctx.bot.send_message(msg.chat().id, message).await?;
+    }
+
+    Ok(true)
 }
 
 fn telegram_icon_file_id_reply(ctx: &AppContext, msg: &Message) -> Option<String> {

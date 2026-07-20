@@ -4,6 +4,8 @@
         icon: '⚙️',
         fields: [
           { key: 'base_url', label: 'Base URL', value: '' },
+          { key: 'bot_maintenance_enabled', label: 'Bao tri bot (chi admin dung duoc)', value: '0' },
+          { key: 'bot_maintenance_message', label: 'Thong bao bao tri bot', value: 'Bot dang bao tri, vui long quay lai sau.' },
           { key: 'stock_auto_broadcast_enabled', label: 'Tự động thông báo khi nhập kho', value: '0' },
         ]
       },
@@ -186,6 +188,7 @@
 
     function isWideConfigField(key) {
       return new Set([
+        'bot_maintenance_message',
         'viameta_menu_title',
         'viameta_menu_description',
         'viameta_maintenance_message',
@@ -199,6 +202,7 @@
       value = value == null ? '' : String(value);
       const toggleKeys = new Set([
         'required_channel_enabled',
+        'bot_maintenance_enabled',
         'telegram_i18n_emojis_enabled',
         'stock_auto_broadcast_enabled',
         'order_notifications_enabled',
@@ -261,6 +265,7 @@
         return `<input type="number" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" min="0" step="1000">`;
       }
       const multilineKeys = new Set([
+        'bot_maintenance_message',
         'viameta_menu_title',
         'viameta_menu_description',
         'viameta_maintenance_message',

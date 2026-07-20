@@ -253,6 +253,11 @@ fn init_tracing() {
 async fn seed_configs_from_env(pool: &db::DbPool, config: &config::Config) {
     let mut seeds: Vec<(&str, String)> = vec![
         ("bank_name", config.bank_name.clone()),
+        ("bot_maintenance_enabled", "0".to_string()),
+        (
+            "bot_maintenance_message",
+            "Bot dang bao tri, vui long quay lai sau.".to_string(),
+        ),
         ("required_channel_enabled", "1".to_string()),
         ("required_channel_id", "@zvwboo".to_string()),
         ("required_channel_url", "https://t.me/zvwboo".to_string()),
