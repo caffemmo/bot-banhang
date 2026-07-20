@@ -2635,47 +2635,21 @@ fn is_product_button_symbol(ch: char) -> bool {
 fn format_product_list_text(
     ctx: &AppContext,
     lang: &str,
-    products: &[(Product, i64)],
+    _products: &[(Product, i64)],
     _page: i64,
     _wallet_balance: i64,
 ) -> String {
-    let mut lines = vec![
-        tl(ctx, lang, "shop_list_title", "📋 MENU SẢN PHẨM"),
+    [
+        tl(ctx, lang, "shop_list_title", "📋 MENU"),
         "━━━━━━━━━━━━━━━━━━━━".to_string(),
         tl(
             ctx,
             lang,
             "shop_digital_warning",
-            "🎁 NẠP VÍ BONUS 5-10% 🔥\n👇 CHỌN SẢN PHẨM BÊN DƯỚI:",
+            "🎁 NẠP VÍ BONUS 5-10% 🔥\n👇 Chọn danh mục bên dưới:",
         ),
-    ];
-
-    let mut categories = Vec::new();
-    for (product, _stock) in products {
-        let category = product_category(product, ctx, lang);
-        if !categories.iter().any(|existing| existing == &category) {
-            categories.push(category);
-        }
-    }
-
-    for category in categories {
-        lines.push(String::new());
-        lines.push(category.to_uppercase());
-
-        for (product, stock) in products {
-            if product_category(product, ctx, lang) != category {
-                continue;
-            }
-            lines.push(format!(
-                "• {} — {} ({})",
-                product.name.trim(),
-                format_vnd(product.price),
-                product_stock_display(product, *stock, ctx, lang),
-            ));
-        }
-    }
-
-    lines.join("\n")
+    ]
+    .join("\n")
 }
 
 fn shop_product_list_bold_entities(text: &str) -> Vec<MessageEntity> {
@@ -3319,7 +3293,7 @@ mod tests {
 
         assert_eq!(button["text"], "CapCut Pro");
         assert_eq!(button["icon_custom_emoji_id"], "5368324170671202286");
-        assert!(text.contains("✨ CapCut Pro"));
+        assert!(!text.contains("CapCut Pro"));
     }
 
     #[tokio::test]
@@ -3414,12 +3388,13 @@ mod tests {
         let ctx = test_ctx();
         let text = format_product_list_text(&ctx, "vi", &products, 0, 0);
 
-        assert!(text.contains("📋 MENU SẢN PHẨM"));
+        assert!(text.contains("📋 MENU"));
         assert!(text.contains("━━━━━━━━━━━━━━━━━━━━"));
-        assert!(text.contains("GEMINI PRO"));
-        assert!(text.contains("• Gemini Pro + 5TB Pixel mail — 35.000đ (còn 2)"));
-        assert!(text.contains("MEITU"));
-        assert!(text.contains("• Meitu SVIP — 70.000đ (✅ có sẵn)"));
+        assert!(text.contains("Chọn danh mục bên dưới"));
+        assert!(!text.contains("GEMINI PRO"));
+        assert!(!text.contains("Gemini Pro + 5TB Pixel mail"));
+        assert!(!text.contains("MEITU"));
+        assert!(!text.contains("Meitu SVIP"));
         assert!(!text.contains("💵 Số dư"));
     }
 
