@@ -528,6 +528,11 @@ async fn shop_handle_callback(
         if let Some(msg) = &q.message {
             send_product_usage_instructions(&ctx, msg.chat().id, product_id, &lang, true).await?;
         }
+    } else if let Some(order_id) = data.strip_prefix("delivery_copy:") {
+        if let Some(msg) = &q.message {
+            send_split_delivered_product(&ctx, msg.chat().id, q.from.id.0 as i64, order_id)
+                .await?;
+        }
     } else if data.starts_with("qty:") {
         let qty: i64 = data["qty:".len()..].parse().unwrap_or(1);
         let state = dialogue.get().await?;
@@ -737,6 +742,94 @@ async fn shop_handle_callback(
     }
 
     Ok(())
+}
+
+async fn send_split_delivered_product(
+    ctx: &Arc<AppContext>,
+    chat_id: ChatId,
+    user_id: i64,
+    order_id: &str,
+) -> Result<()> {
+    let Some(order) = orders_repo::get_order_with_product(&ctx.pool, order_id).await? else {
+        ctx.bot
+            .send_message(chat_id, "Không tìm thấy đơn hàng này.")
+            .await?;
+        return Ok(());
+    };
+
+    if order.order.user_id != user_id || order.order.chat_id != chat_id.0 {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền xem dữ liệu đơn hàng này.")
+            .await?;
+        return Ok(());
+    }
+
+    if order.order.status != OrderStatus::Paid {
+        ctx.bot
+            .send_message(chat_id, "Đơn hàng này chưa thanh toán thành công.")
+            .await?;
+        return Ok(());
+    }
+
+    let Some(delivered_data) = order
+        .order
+        .delivered_data
+        .as_deref()
+        .map(str::trim)
+        .filter(|data| !data.is_empty())
+    else {
+        ctx.bot
+            .send_message(chat_id, "Đơn hàng này chưa có dữ liệu sản phẩm.")
+            .await?;
+        return Ok(());
+    };
+
+    let fields = orders_api::split_stock_delivery_fields(delivered_data);
+    if fields.is_empty() {
+        ctx.bot
+            .send_message(chat_id, "Không có dữ liệu để tách.")
+            .await?;
+        return Ok(());
+    }
+
+    ctx.bot
+        .send_message(chat_id, "📋 Sản phẩm đã tách theo dấu |:")
+        .await?;
+    for field in fields {
+        for chunk in split_copy_message_chunks(&field, 3500) {
+            ctx.bot
+                .send_message(
+                    chat_id,
+                    format!("<code>{}</code>", orders_api::html_escape(&chunk)),
+                )
+                .parse_mode(ParseMode::Html)
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn split_copy_message_chunks(value: &str, max_chars: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut count = 0usize;
+
+    for ch in value.chars() {
+        if count == max_chars {
+            chunks.push(current);
+            current = String::new();
+            count = 0;
+        }
+        current.push(ch);
+        count += 1;
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
 }
 
 async fn handle_crypto_callback(
@@ -4049,6 +4142,7 @@ mod tests {
     fn legacy_continue_shopping_callback_is_routed_to_shop() {
         assert!(is_shop_callback_data("shopnew:0"));
         assert!(is_shop_callback_data("shop_search"));
+        assert!(is_shop_callback_data("delivery_copy:order-1"));
     }
 
     #[test]
@@ -4687,6 +4781,7 @@ fn is_shop_callback_data(text: &str) -> bool {
         || text.starts_with("shop_cat:")
         || text.starts_with("buy:")
         || text.starts_with("usage:")
+        || text.starts_with("delivery_copy:")
         || text.starts_with("qty:")
         || text.starts_with("plan:")
         || text.starts_with("cancel:")

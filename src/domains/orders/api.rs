@@ -26,7 +26,6 @@ use crate::core::pagination::normalize_pagination;
 use crate::core::responses::{Ack, ApiError, ApiResult, PaginatedResponse, ok};
 
 pub const RESERVE_TTL_MINUTES: i64 = 5;
-const TELEGRAM_COPY_TEXT_LIMIT_CHARS: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UploadedFileDelivery {
@@ -510,14 +509,18 @@ pub async fn send_product_file(
     }
 
     if product_delivery_type(&owp.product) == "stock_item" {
-        let rows = stock_delivery_fallback_keyboard_rows(owp.product.id, &continue_shopping_btn);
+        let rows = stock_delivery_fallback_keyboard_rows(
+            &owp.order.id,
+            owp.product.id,
+            &continue_shopping_btn,
+        );
 
         let text = format_stock_delivery_message_html(ctx, owp, delivered_data);
         if text.chars().count() <= 3900 {
             let reply_markup = stock_delivery_keyboard_json(
+                &owp.order.id,
                 owp.product.id,
                 &continue_shopping_btn,
-                delivered_data,
             );
             let payload = json!({
                 "chat_id": owp.order.chat_id,
@@ -528,7 +531,7 @@ pub async fn send_product_file(
 
             if let Err(err) = i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await {
                 tracing::warn!(
-                    "send stock delivery with copy_text keyboard failed for order {}: {err}",
+                    "send stock delivery with delivery copy keyboard failed for order {}: {err}",
                     owp.order.id
                 );
                 ctx.bot
@@ -737,9 +740,19 @@ fn format_stock_delivery_message_body(
 🕘 Thời gian: {paid_time}\n\n\
 📌 Sản phẩm:\n\
 {product_data}\n\n\
-👉 Bấm nút 📋 Copy sản phẩm bên dưới để Telegram tự copy nội dung.",
+👉 Bấm nút 📋 Copy sản phẩm để bot tách theo dấu | và gửi từng phần.",
         format_vnd(amount),
     )
+}
+
+pub fn split_stock_delivery_fields(delivered_data: &str) -> Vec<String> {
+    delivered_data
+        .lines()
+        .flat_map(|line| line.split('|'))
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn format_order_paid_time(paid_at: &Option<String>, created_at: &str) -> String {
@@ -754,44 +767,38 @@ fn format_order_paid_time(paid_at: &Option<String>, created_at: &str) -> String 
 }
 
 fn stock_delivery_keyboard_json(
+    order_id: &str,
     product_id: i64,
     continue_shopping_btn: &str,
-    delivered_data: &str,
 ) -> Value {
-    let chunks = copy_text_chunks(delivered_data);
-    let mut rows = Vec::new();
-    let total = chunks.len();
-    for (index, chunk) in chunks.into_iter().enumerate() {
-        let label = if total == 1 {
-            "📋 Copy sản phẩm".to_string()
-        } else {
-            format!("📋 Copy sản phẩm {}/{}", index + 1, total)
-        };
-        rows.push(vec![json!({
-            "text": label,
-            "copy_text": {
-                "text": chunk,
-            },
-        })]);
-    }
-
-    rows.push(vec![json!({
-        "text": "📘 Hướng dẫn sử dụng",
-        "callback_data": format!("usage:{product_id}"),
-    })]);
-    rows.push(vec![json!({
-        "text": continue_shopping_btn,
-        "callback_data": "start:shop",
-    })]);
-
-    json!({ "inline_keyboard": rows })
+    json!({
+        "inline_keyboard": [
+            [{
+                "text": "📋 Copy sản phẩm",
+                "callback_data": format!("delivery_copy:{order_id}"),
+            }],
+            [{
+                "text": "📘 Hướng dẫn sử dụng",
+                "callback_data": format!("usage:{product_id}"),
+            }],
+            [{
+                "text": continue_shopping_btn,
+                "callback_data": "start:shop",
+            }]
+        ]
+    })
 }
 
 fn stock_delivery_fallback_keyboard_rows(
+    order_id: &str,
     product_id: i64,
     continue_shopping_btn: &str,
 ) -> Vec<Vec<InlineKeyboardButton>> {
     vec![
+        vec![InlineKeyboardButton::callback(
+            "📋 Copy sản phẩm",
+            format!("delivery_copy:{order_id}"),
+        )],
         vec![InlineKeyboardButton::callback(
             "📘 Hướng dẫn sử dụng",
             format!("usage:{product_id}"),
@@ -801,34 +808,6 @@ fn stock_delivery_fallback_keyboard_rows(
             "start:shop",
         )],
     ]
-}
-
-fn copy_text_chunks(delivered_data: &str) -> Vec<String> {
-    let source = if delivered_data.trim().is_empty() {
-        "Nội dung đơn hàng trống, vui lòng liên hệ hỗ trợ."
-    } else {
-        delivered_data
-    };
-
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    let mut count = 0usize;
-
-    for ch in source.chars() {
-        if count == TELEGRAM_COPY_TEXT_LIMIT_CHARS {
-            chunks.push(current);
-            current = String::new();
-            count = 0;
-        }
-        current.push(ch);
-        count += 1;
-    }
-
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-
-    chunks
 }
 
 fn format_vnd(amount: i64) -> String {
@@ -1237,24 +1216,23 @@ mod tests {
 
     #[test]
     fn stock_delivery_keyboard_adds_copy_usage_and_continue_buttons() {
-        let keyboard = stock_delivery_keyboard_json(42, "🛒 Tiếp tục mua hàng", "abc123");
+        let keyboard = stock_delivery_keyboard_json("order-1", 42, "🛒 Tiếp tục mua hàng");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["text"], "📋 Copy sản phẩm");
-        assert_eq!(rows[0][0]["copy_text"]["text"], "abc123");
+        assert_eq!(rows[0][0]["callback_data"], "delivery_copy:order-1");
         assert_eq!(rows[1][0]["callback_data"], "usage:42");
         assert_eq!(rows[2][0]["callback_data"], "start:shop");
     }
 
     #[test]
-    fn copy_text_chunks_respect_telegram_limit() {
-        let long_text = "a".repeat(TELEGRAM_COPY_TEXT_LIMIT_CHARS + 1);
+    fn stock_delivery_fields_split_pipe_delimited_stock() {
+        let fields = split_stock_delivery_fields(" user1 | pass1 | 2fa1\nuser2|pass2||mail@test.com ");
 
-        let chunks = copy_text_chunks(&long_text);
-
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].chars().count(), TELEGRAM_COPY_TEXT_LIMIT_CHARS);
-        assert_eq!(chunks[1], "a");
+        assert_eq!(
+            fields,
+            vec!["user1", "pass1", "2fa1", "user2", "pass2", "mail@test.com"]
+        );
     }
 
     #[test]
