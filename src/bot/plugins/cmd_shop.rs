@@ -1775,7 +1775,7 @@ async fn send_products_for_category(
     let text = if products_with_stock.is_empty() {
         tl(&ctx, lang, "no_products", "There are no products yet.")
     } else {
-        format_category_product_list_text(&ctx, lang, category)
+        format_product_list_text(&ctx, lang, &products_with_stock, 0, 0)
     };
     send_raw_product_list_message(&ctx, chat_id, Some(message_id), &text, keyboard).await
 }
@@ -2655,16 +2655,6 @@ fn format_product_list_text(
     .join("\n")
 }
 
-fn format_category_product_list_text(ctx: &AppContext, lang: &str, category: &str) -> String {
-    trl(
-        ctx,
-        lang,
-        "shop_category_prompt",
-        "📂 {category}\n━━━━━━━━━━━━━━━━━━━━\n👇 Choose a product below:",
-        &[("category", category.trim().to_string())],
-    )
-}
-
 fn shop_product_list_bold_entities(text: &str) -> Vec<MessageEntity> {
     let mut entities = Vec::new();
     let mut offset = 0usize;
@@ -3482,17 +3472,6 @@ mod tests {
             product_category(&product, &ctx, "vi"),
             "{5375135722514685501} CAP CUT"
         );
-    }
-
-    #[tokio::test]
-    async fn category_product_list_text_does_not_render_product_names() {
-        let ctx = test_ctx();
-        let text = format_category_product_list_text(&ctx, "vi", "Gemini Pro");
-
-        assert!(text.contains("Gemini Pro"));
-        assert!(text.contains("Choose a product below"));
-        assert!(!text.contains("—"));
-        assert!(!text.contains("còn 2"));
     }
 
     #[tokio::test]
