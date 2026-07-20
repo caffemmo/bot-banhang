@@ -1422,11 +1422,6 @@ async fn handle_pay_with_wallet(
     if let Err(e) = orders_api::send_product_file(&ctx, &updated_owp, &final_delivered_data).await {
         tracing::error!("send_product_file after wallet payment failed: {e}");
     }
-    if let Err(e) =
-        send_product_usage_instructions(&ctx, chat_id, updated_owp.product.id, &lang, false).await
-    {
-        tracing::error!("send usage instructions after wallet payment failed: {e}");
-    }
     if let Err(e) = notify_admins_order_paid(
         &ctx,
         &updated_owp,

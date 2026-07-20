@@ -2,12 +2,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use teloxide::prelude::Requester;
-use teloxide::types::ChatId;
 use tracing::{error, warn};
 
 use crate::app::AppContext;
-use crate::bot::i18n;
 use crate::domains::orders::admin_notify::notify_admins_order_paid;
 use crate::domains::orders::api::{
     is_order_expired, parse_reserved_ids, product_delivery_type, send_product_file,
@@ -16,7 +13,6 @@ use crate::domains::orders::api::{
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::repo;
 use crate::domains::products::repo as products_repo;
-use crate::domains::products::usage_instructions;
 use crate::domains::wallet::repo as wallet_repo;
 
 #[allow(dead_code)]
@@ -212,9 +208,6 @@ pub async fn fulfill_paid_order(
     if let Err(err) = send_product_file(&ctx, &order_with_product, &delivered_data).await {
         error!("send product file failed for order {order_id}: {err}");
     }
-    if let Err(err) = send_usage_instructions(&ctx, &order_with_product).await {
-        error!("send usage instructions failed for order {order_id}: {err}");
-    }
     if let Err(err) =
         notify_admins_order_paid(&ctx, &order_with_product, payment_ref, paid_at, &source).await
     {
@@ -233,33 +226,6 @@ fn paid_amount_vnd(source: &PaymentSource, order: &OrderWithProduct) -> i64 {
         | PaymentSource::Wallet
         | PaymentSource::ClientApiWallet => order.order.amount,
     }
-}
-
-async fn send_usage_instructions(
-    ctx: &Arc<AppContext>,
-    order: &OrderWithProduct,
-) -> Result<()> {
-    let Some(content) = usage_instructions::get_usage_instructions(&ctx.pool, order.product.id)
-        .await?
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
-
-    let text = format!(
-        "📘 Hướng dẫn sử dụng\n\nSản phẩm: {}\n\n{}",
-        display_product_name(ctx, &order.product.name), content
-    );
-    ctx.bot
-        .send_message(ChatId(order.order.chat_id), text)
-        .await?;
-
-    Ok(())
-}
-
-fn display_product_name(ctx: &AppContext, name: &str) -> String {
-    i18n::rich_text_for_key(ctx, "", name).text
 }
 
 async fn credit_paid_order_to_wallet(

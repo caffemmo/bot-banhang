@@ -9,6 +9,7 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
@@ -25,6 +26,7 @@ use crate::core::pagination::normalize_pagination;
 use crate::core::responses::{Ack, ApiError, ApiResult, PaginatedResponse, ok};
 
 pub const RESERVE_TTL_MINUTES: i64 = 5;
+const TELEGRAM_COPY_TEXT_LIMIT_CHARS: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UploadedFileDelivery {
@@ -508,17 +510,30 @@ pub async fn send_product_file(
     }
 
     if product_delivery_type(&owp.product) == "stock_item" {
-        let rows = vec![vec![InlineKeyboardButton::callback(
-            continue_shopping_btn,
-            "start:shop",
-        )]];
+        let rows = stock_delivery_fallback_keyboard_rows(owp.product.id, &continue_shopping_btn);
 
-        let text = format_raw_stock_delivery_message(delivered_data);
+        let text = format_stock_delivery_message(ctx, owp, delivered_data);
         if text.chars().count() <= 3900 {
-            ctx.bot
-                .send_message(ChatId(owp.order.chat_id), text)
-                .reply_markup(InlineKeyboardMarkup::new(rows))
-                .await?;
+            let reply_markup =
+                stock_delivery_keyboard_json(owp.product.id, &continue_shopping_btn, delivered_data);
+            let payload = i18n::message_payload_with_json_keyboard(
+                ctx,
+                ChatId(owp.order.chat_id),
+                "",
+                text.clone(),
+                reply_markup,
+            )?;
+
+            if let Err(err) = i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await {
+                tracing::warn!(
+                    "send stock delivery with copy_text keyboard failed for order {}: {err}",
+                    owp.order.id
+                );
+                ctx.bot
+                    .send_message(ChatId(owp.order.chat_id), text)
+                    .reply_markup(InlineKeyboardMarkup::new(rows))
+                    .await?;
+            }
         } else {
             ctx.bot
                 .send_document(
@@ -526,7 +541,9 @@ pub async fn send_product_file(
                     InputFile::memory(text.into_bytes())
                         .file_name(format!("data_{}.txt", owp.order.bank_memo)),
                 )
-                .caption("✅ Thanh toán thành công.\n\nNội dung đơn hàng được gửi trong file.")
+                .caption(
+                    "✅ Thanh toán thành công.\n\nNội dung đơn hàng được gửi trong file.\nBấm nút hướng dẫn nếu cần xem cách sử dụng.",
+                )
                 .reply_markup(InlineKeyboardMarkup::new(rows))
                 .await?;
         }
@@ -619,6 +636,152 @@ pub fn format_raw_stock_delivery_message(delivered_data: &str) -> String {
     } else {
         delivered_data.to_string()
     }
+}
+
+fn format_stock_delivery_message(
+    ctx: &AppContext,
+    owp: &OrderWithProduct,
+    delivered_data: &str,
+) -> String {
+    format_stock_delivery_message_parts(
+        &owp.order.bank_memo,
+        &display_product_name(ctx, &owp.product.name),
+        owp.order.qty,
+        owp.order.amount,
+        &format_order_paid_time(&owp.order.paid_at, &owp.order.created_at),
+        delivered_data,
+    )
+}
+
+fn format_stock_delivery_message_parts(
+    memo: &str,
+    product: &str,
+    qty: i64,
+    amount: i64,
+    paid_time: &str,
+    delivered_data: &str,
+) -> String {
+    let product_data = format_raw_stock_delivery_message(delivered_data);
+    if delivered_data.trim().is_empty() {
+        return product_data;
+    }
+
+    format!(
+        "🛒 THANH TOÁN THÀNH CÔNG!\n\
+━━━━━━━━━━━━━━━━━━━━\n\
+🎁 Đơn hàng: {memo}\n\
+🏆 Sản phẩm: {product}\n\
+📦 Số lượng: x{qty}\n\
+💰 Tổng: {}\n\
+🕘 Thời gian: {paid_time}\n\n\
+📌 Sản phẩm:\n\
+{product_data}\n\n\
+👉 Bấm nút 📋 Copy sản phẩm bên dưới để Telegram tự copy nội dung.",
+        format_vnd(amount),
+    )
+}
+
+fn format_order_paid_time(paid_at: &Option<String>, created_at: &str) -> String {
+    let raw = paid_at.as_deref().unwrap_or(created_at);
+    DateTime::parse_from_rfc3339(raw)
+        .map(|dt| {
+            dt.with_timezone(&Utc)
+                .format("%H:%M %d/%m/%Y")
+                .to_string()
+        })
+        .unwrap_or_else(|_| raw.to_string())
+}
+
+fn stock_delivery_keyboard_json(
+    product_id: i64,
+    continue_shopping_btn: &str,
+    delivered_data: &str,
+) -> Value {
+    let chunks = copy_text_chunks(delivered_data);
+    let mut rows = Vec::new();
+    let total = chunks.len();
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let label = if total == 1 {
+            "📋 Copy sản phẩm".to_string()
+        } else {
+            format!("📋 Copy sản phẩm {}/{}", index + 1, total)
+        };
+        rows.push(vec![json!({
+            "text": label,
+            "copy_text": {
+                "text": chunk,
+            },
+        })]);
+    }
+
+    rows.push(vec![json!({
+        "text": "📘 Hướng dẫn sử dụng",
+        "callback_data": format!("usage:{product_id}"),
+    })]);
+    rows.push(vec![json!({
+        "text": continue_shopping_btn,
+        "callback_data": "start:shop",
+    })]);
+
+    json!({ "inline_keyboard": rows })
+}
+
+fn stock_delivery_fallback_keyboard_rows(
+    product_id: i64,
+    continue_shopping_btn: &str,
+) -> Vec<Vec<InlineKeyboardButton>> {
+    vec![
+        vec![InlineKeyboardButton::callback(
+            "📘 Hướng dẫn sử dụng",
+            format!("usage:{product_id}"),
+        )],
+        vec![InlineKeyboardButton::callback(
+            continue_shopping_btn.to_string(),
+            "start:shop",
+        )],
+    ]
+}
+
+fn copy_text_chunks(delivered_data: &str) -> Vec<String> {
+    let source = if delivered_data.trim().is_empty() {
+        "Nội dung đơn hàng trống, vui lòng liên hệ hỗ trợ."
+    } else {
+        delivered_data
+    };
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut count = 0usize;
+
+    for ch in source.chars() {
+        if count == TELEGRAM_COPY_TEXT_LIMIT_CHARS {
+            chunks.push(current);
+            current = String::new();
+            count = 0;
+        }
+        current.push(ch);
+        count += 1;
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
+}
+
+fn format_vnd(amount: i64) -> String {
+    let sign = if amount < 0 { "-" } else { "" };
+    let digits = amount.abs().to_string();
+    let mut out = String::new();
+    for (index, ch) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            out.push('.');
+        }
+        out.push(ch);
+    }
+    let formatted = out.chars().rev().collect::<String>();
+    format!("{sign}{formatted}đ")
 }
 
 pub fn parse_account_delivery_items(delivered_data: &str) -> Vec<AccountDelivery> {
@@ -971,6 +1134,48 @@ mod tests {
         let text = format_raw_stock_delivery_message("  Lien he admin de xu ly don hang\n");
 
         assert_eq!(text, "  Lien he admin de xu ly don hang\n");
+    }
+
+    #[test]
+    fn stock_delivery_message_wraps_raw_stock_without_parsing_it() {
+        let raw = "61576546966288|pass|2fa|mail@test.com";
+
+        let text = format_stock_delivery_message_parts(
+            "HRS160726110512P23",
+            "ChatGPT Plus",
+            1,
+            23000,
+            "04:05 16/07/2026",
+            raw,
+        );
+
+        assert!(text.contains("🛒 THANH TOÁN THÀNH CÔNG!"));
+        assert!(text.contains("🎁 Đơn hàng: HRS160726110512P23"));
+        assert!(text.contains("🏆 Sản phẩm: ChatGPT Plus"));
+        assert!(text.contains("💰 Tổng: 23.000đ"));
+        assert!(text.contains(raw));
+    }
+
+    #[test]
+    fn stock_delivery_keyboard_adds_copy_usage_and_continue_buttons() {
+        let keyboard = stock_delivery_keyboard_json(42, "🛒 Tiếp tục mua hàng", "abc123");
+        let rows = keyboard["inline_keyboard"].as_array().unwrap();
+
+        assert_eq!(rows[0][0]["text"], "📋 Copy sản phẩm");
+        assert_eq!(rows[0][0]["copy_text"]["text"], "abc123");
+        assert_eq!(rows[1][0]["callback_data"], "usage:42");
+        assert_eq!(rows[2][0]["callback_data"], "start:shop");
+    }
+
+    #[test]
+    fn copy_text_chunks_respect_telegram_limit() {
+        let long_text = "a".repeat(TELEGRAM_COPY_TEXT_LIMIT_CHARS + 1);
+
+        let chunks = copy_text_chunks(&long_text);
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].chars().count(), TELEGRAM_COPY_TEXT_LIMIT_CHARS);
+        assert_eq!(chunks[1], "a");
     }
 
     #[test]
