@@ -508,50 +508,12 @@ pub async fn send_product_file(
     }
 
     if product_delivery_type(&owp.product) == "stock_item" {
-        let deliveries = parse_account_delivery_items(delivered_data);
-        if deliveries.is_empty() {
-            tracing::warn!(
-                "order {} has raw stock text that cannot be parsed as account fields",
-                owp.order.id
-            );
-            let rows = vec![vec![InlineKeyboardButton::callback(
-                continue_shopping_btn,
-                "start:shop",
-            )]];
-            let text = format_raw_stock_delivery_message(delivered_data);
-            if text.chars().count() <= 3900 {
-                ctx.bot
-                    .send_message(ChatId(owp.order.chat_id), text)
-                    .reply_markup(InlineKeyboardMarkup::new(rows))
-                    .await?;
-            } else {
-                ctx.bot
-                    .send_document(
-                        ChatId(owp.order.chat_id),
-                        InputFile::memory(text.into_bytes())
-                            .file_name(format!("data_{}.txt", owp.order.bank_memo)),
-                    )
-                    .caption("Đang lấy thông tin...\n\nNội dung đơn hàng được gửi trong file.")
-                    .reply_markup(InlineKeyboardMarkup::new(rows))
-                    .await?;
-            }
-            return Ok(());
-
-        }
-
-        let mut rows = Vec::new();
-        if account_deliveries_have_cookie(&deliveries) {
-            rows.push(vec![InlineKeyboardButton::callback(
-                "Lấy cookie",
-                format!("order_cookie:{}", owp.order.id),
-            )]);
-        }
-        rows.push(vec![InlineKeyboardButton::callback(
+        let rows = vec![vec![InlineKeyboardButton::callback(
             continue_shopping_btn,
             "start:shop",
-        )]);
+        )]];
 
-        let text = format_account_delivery_message(&deliveries);
+        let text = format_raw_stock_delivery_message(delivered_data);
         if text.chars().count() <= 3900 {
             ctx.bot
                 .send_message(ChatId(owp.order.chat_id), text)
@@ -562,9 +524,9 @@ pub async fn send_product_file(
                 .send_document(
                     ChatId(owp.order.chat_id),
                     InputFile::memory(text.into_bytes())
-                        .file_name(format!("account_{}.txt", owp.order.bank_memo)),
+                        .file_name(format!("data_{}.txt", owp.order.bank_memo)),
                 )
-                .caption("Đang lấy thông tin...\n\nThông tin tài khoản được gửi trong file.")
+                .caption("✅ Thanh toán thành công.\n\nNội dung đơn hàng được gửi trong file.")
                 .reply_markup(InlineKeyboardMarkup::new(rows))
                 .await?;
         }
@@ -652,11 +614,10 @@ pub async fn take_account_stock_items(
 }
 
 pub fn format_raw_stock_delivery_message(delivered_data: &str) -> String {
-    let data = delivered_data.trim();
-    if data.is_empty() {
-        "Đang lấy thông tin...\n\nNội dung đơn hàng trống, vui lòng liên hệ hỗ trợ.".to_string()
+    if delivered_data.trim().is_empty() {
+        "Nội dung đơn hàng trống, vui lòng liên hệ hỗ trợ.".to_string()
     } else {
-        format!("Đang lấy thông tin...\n\n{data}")
+        delivered_data.to_string()
     }
 }
 
@@ -665,45 +626,6 @@ pub fn parse_account_delivery_items(delivered_data: &str) -> Vec<AccountDelivery
         .lines()
         .filter_map(parse_account_stock_line)
         .collect()
-}
-
-pub fn account_deliveries_have_cookie(deliveries: &[AccountDelivery]) -> bool {
-    deliveries.iter().any(|delivery| {
-        delivery
-            .cookie
-            .as_deref()
-            .map(|value| !value.trim().is_empty())
-            .unwrap_or(false)
-    })
-}
-
-pub fn format_account_delivery_message(deliveries: &[AccountDelivery]) -> String {
-    let mut text = String::from("Đang lấy thông tin...\n\n");
-    for (index, delivery) in deliveries.iter().enumerate() {
-        if deliveries.len() == 1 {
-            text.push_str("Thông tin tài khoản:\n\n");
-        } else {
-            text.push_str(&format!("Thông tin tài khoản {}:\n\n", index + 1));
-        }
-        text.push_str(&format!("Tài khoản: {}\n", display_field(&delivery.account)));
-        text.push_str(&format!("Pass: {}\n", display_field(&delivery.password)));
-        text.push_str(&format!(
-            "2FA: {}\n",
-            display_optional_field(delivery.two_fa.as_deref())
-        ));
-        text.push_str(&format!(
-            "Mail: {}\n",
-            display_optional_field(delivery.mail.as_deref())
-        ));
-        text.push_str(&format!(
-            "Pass mail: {}",
-            display_optional_field(delivery.mail_password.as_deref())
-        ));
-        if index + 1 < deliveries.len() {
-            text.push_str("\n\n");
-        }
-    }
-    text
 }
 
 pub fn format_cookie_text(deliveries: &[AccountDelivery]) -> Option<String> {
@@ -864,13 +786,6 @@ fn display_field(value: &str) -> &str {
     } else {
         value.trim()
     }
-}
-
-fn display_optional_field(value: Option<&str>) -> &str {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Không có")
 }
 
 fn looks_like_email(value: &str) -> bool {
@@ -1037,13 +952,12 @@ mod tests {
     #[test]
     fn account_stock_parser_allows_missing_optional_fields() {
         let parsed = parse_account_stock_line("user1|pass1").unwrap();
-        let text = format_account_delivery_message(&[parsed]);
-
-        assert!(text.contains("Tài khoản: user1"));
-        assert!(text.contains("Pass: pass1"));
-        assert!(text.contains("2FA: Không có"));
-        assert!(text.contains("Mail: Không có"));
-        assert!(text.contains("Pass mail: Không có"));
+        assert_eq!(parsed.account, "user1");
+        assert_eq!(parsed.password, "pass1");
+        assert_eq!(parsed.two_fa, None);
+        assert_eq!(parsed.mail, None);
+        assert_eq!(parsed.mail_password, None);
+        assert_eq!(parsed.cookie, None);
     }
 
     #[test]
@@ -1054,10 +968,9 @@ mod tests {
 
     #[test]
     fn raw_stock_delivery_message_keeps_plain_text_stock() {
-        let text = format_raw_stock_delivery_message("Lien he admin de xu ly don hang");
+        let text = format_raw_stock_delivery_message("  Lien he admin de xu ly don hang\n");
 
-        assert!(text.contains("Đang lấy thông tin"));
-        assert!(text.contains("Lien he admin de xu ly don hang"));
+        assert_eq!(text, "  Lien he admin de xu ly don hang\n");
     }
 
     #[test]

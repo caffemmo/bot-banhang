@@ -16,8 +16,7 @@ use crate::domains::orders::admin_notify::{
 };
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::api::{
-    account_deliveries_have_cookie, cookie_message_html, format_account_delivery_message,
-    format_cookie_text, parse_account_delivery_items,
+    cookie_message_html, format_cookie_text, parse_account_delivery_items,
 };
 use crate::domains::orders::refund::refund_paid_order_to_wallet;
 use crate::domains::orders::repo;
@@ -150,19 +149,6 @@ fn order_detail_keyboard(
             "order_rebuy_btn",
             "🛒 Mua lại sản phẩm này",
             format!("buy:{}", order.product.id),
-        )]);
-    }
-    let has_cookie = order
-        .order
-        .delivered_data
-        .as_deref()
-        .map(parse_account_delivery_items)
-        .map(|deliveries| account_deliveries_have_cookie(&deliveries))
-        .unwrap_or(false);
-    if has_cookie {
-        rows.push(vec![InlineKeyboardButton::callback(
-            "Lấy cookie",
-            format!("order_cookie:{}", order.order.id),
         )]);
     }
     rows.push(vec![i18n::inline_button_callback(
@@ -554,12 +540,7 @@ fn format_order_detail_text(ctx: &AppContext, lang: &str, order: &OrderWithProdu
                 "Dữ liệu giao hàng"
             )
         ));
-        let account_deliveries = parse_account_delivery_items(delivered_data);
-        if account_deliveries.is_empty() {
-            lines.push(delivered_data.to_string());
-        } else {
-            lines.push(format_account_delivery_message(&account_deliveries));
-        }
+        lines.push(delivered_data.to_string());
     }
     lines.join("\n")
 }
