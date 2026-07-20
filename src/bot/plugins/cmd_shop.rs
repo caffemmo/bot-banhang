@@ -1775,7 +1775,7 @@ async fn send_products_for_category(
     let text = if products_with_stock.is_empty() {
         tl(&ctx, lang, "no_products", "There are no products yet.")
     } else {
-        format_category_product_list_text(&ctx, lang, category, &products_with_stock)
+        format_category_product_list_text(&ctx, lang, category)
     };
     send_raw_product_list_message(&ctx, chat_id, Some(message_id), &text, keyboard).await
 }
@@ -2655,32 +2655,14 @@ fn format_product_list_text(
     .join("\n")
 }
 
-fn format_category_product_list_text(
-    ctx: &AppContext,
-    lang: &str,
-    category: &str,
-    products: &[(Product, i64)],
-) -> String {
-    let mut lines = vec![trl(
+fn format_category_product_list_text(ctx: &AppContext, lang: &str, category: &str) -> String {
+    trl(
         ctx,
         lang,
         "shop_category_prompt",
-        "📂 {category}\n━━━━━━━━━━━━━━━━━━━━",
+        "📂 {category}\n━━━━━━━━━━━━━━━━━━━━\n👇 Choose a product below:",
         &[("category", category.trim().to_string())],
-    )];
-
-    for (product, stock) in products {
-        lines.push(format!(
-            "• {} — {} ({})",
-            truncate_button_text(product.name.trim(), 72),
-            format_vnd(product.price),
-            product_stock_display(product, *stock, ctx, lang),
-        ));
-    }
-
-    lines.push(String::new());
-    lines.push(tl(ctx, lang, "shop_category_choose_hint", "👇 Chọn nút bên dưới để mua:"));
-    lines.join("\n")
+    )
 }
 
 fn shop_product_list_bold_entities(text: &str) -> Vec<MessageEntity> {
@@ -3503,43 +3485,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn category_product_list_text_renders_selected_category_products() {
+    async fn category_product_list_text_does_not_render_product_names() {
         let ctx = test_ctx();
-        let products = vec![
-            (
-                Product {
-                    id: 1,
-                    name: "Gemini Pro + 5TB Pixel mail".to_string(),
-                    price: 35_000,
-                    is_active: Some(1),
-                    requires_input: Some(0),
-                    input_prompt: None,
-                    description: None,
-                    image_url: None,
-                    delivery_type: Some("stock_item".to_string()),
-                    file_path: None,
-                    file_name: None,
-                    file_mime: None,
-                    category_id: None,
-                    category: Some("Gemini Pro".to_string()),
-                    category_emoji: None,
-                    category_custom_emoji_id: None,
-                    button_emoji: None,
-                    button_custom_emoji_id: None,
-                    created_at: None,
-                    sort_order: None,
-                    show_sold_count: Some(0),
-                },
-                2,
-            ),
-        ];
-        let text = format_category_product_list_text(&ctx, "vi", "Gemini Pro", &products);
+        let text = format_category_product_list_text(&ctx, "vi", "Gemini Pro");
 
         assert!(text.contains("Gemini Pro"));
-        assert!(text.contains("Gemini Pro + 5TB Pixel mail"));
-        assert!(text.contains("35.000đ"));
-        assert!(text.contains("2 left"));
-        assert!(text.contains("Chọn nút bên dưới"));
+        assert!(text.contains("Choose a product below"));
+        assert!(!text.contains("—"));
+        assert!(!text.contains("còn 2"));
     }
 
     #[tokio::test]
