@@ -146,7 +146,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                 )
                 .await;
 
-                if block_message_for_maintenance(&ctx, &msg).await? {
+                if block_message_for_maintenance(&ctx, &msg).await {
                     return false;
                 }
 
@@ -211,7 +211,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
 
                 let callback_started_at = std::time::Instant::now();
                 let callback_data = query.data.clone().unwrap_or_default();
-                if block_callback_for_maintenance(&ctx, &query).await? {
+                if block_callback_for_maintenance(&ctx, &query).await {
                     return false;
                 }
                 for plugin in ctx.plugins.iter() {
@@ -329,9 +329,9 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
     Ok(())
 }
 
-async fn block_message_for_maintenance(ctx: &AppContext, msg: &Message) -> Result<bool> {
+async fn block_message_for_maintenance(ctx: &AppContext, msg: &Message) -> bool {
     if !ctx.bot_maintenance_enabled() {
-        return Ok(false);
+        return false;
     }
 
     if msg
@@ -339,18 +339,25 @@ async fn block_message_for_maintenance(ctx: &AppContext, msg: &Message) -> Resul
         .map(|user| ctx.is_telegram_admin(user.id.0 as i64))
         .unwrap_or(false)
     {
-        return Ok(false);
+        return false;
     }
 
-    ctx.bot
+    if let Err(err) = ctx
+        .bot
         .send_message(msg.chat.id, ctx.bot_maintenance_message())
-        .await?;
-    Ok(true)
+        .await
+    {
+        tracing::warn!(
+            "Failed to send maintenance message in chat {}: {err}",
+            msg.chat.id.0
+        );
+    }
+    true
 }
 
-async fn block_callback_for_maintenance(ctx: &AppContext, q: &CallbackQuery) -> Result<bool> {
+async fn block_callback_for_maintenance(ctx: &AppContext, q: &CallbackQuery) -> bool {
     if !ctx.bot_maintenance_enabled() || ctx.is_telegram_admin(q.from.id.0 as i64) {
-        return Ok(false);
+        return false;
     }
 
     let message = ctx.bot_maintenance_message();
@@ -362,10 +369,15 @@ async fn block_callback_for_maintenance(ctx: &AppContext, q: &CallbackQuery) -> 
         .await;
 
     if let Some(msg) = &q.message {
-        ctx.bot.send_message(msg.chat().id, message).await?;
+        if let Err(err) = ctx.bot.send_message(msg.chat().id, message).await {
+            tracing::warn!(
+                "Failed to send maintenance callback message in chat {}: {err}",
+                msg.chat().id.0
+            );
+        }
     }
 
-    Ok(true)
+    true
 }
 
 fn telegram_icon_file_id_reply(ctx: &AppContext, msg: &Message) -> Option<String> {
