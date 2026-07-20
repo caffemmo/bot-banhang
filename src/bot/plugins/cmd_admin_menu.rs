@@ -18,10 +18,8 @@ const ADMIN_MENU_HOME: &str = "admin_menu:home";
 const ADMIN_MENU_ALL: &str = "admin_menu:all";
 const ADMIN_MENU_BROADCAST: &str = "admin_menu:broadcast";
 const ADMIN_MENU_AFFILIATE: &str = "admin_menu:affiliate";
-const ADMIN_MENU_CHILDBOT: &str = "admin_menu:childbot";
 const ADMIN_MENU_GROUP: &str = "admin_menu:group";
 const ADMIN_MENU_REFUND: &str = "admin_menu:refund";
-const ADMIN_MENU_TUT: &str = "admin_menu:tut";
 
 #[async_trait::async_trait]
 impl AppPlugin for AdminMenuCommandPlugin {
@@ -98,10 +96,8 @@ impl AppPlugin for AdminMenuCommandPlugin {
             ADMIN_MENU_ALL => (admin_all_commands_text(), admin_back_keyboard()),
             ADMIN_MENU_BROADCAST => (admin_broadcast_text(), admin_back_keyboard()),
             ADMIN_MENU_AFFILIATE => (admin_affiliate_text(), admin_back_keyboard()),
-            ADMIN_MENU_CHILDBOT => (admin_childbot_text(), admin_back_keyboard()),
             ADMIN_MENU_GROUP => (admin_group_text(), admin_back_keyboard()),
             ADMIN_MENU_REFUND => (admin_refund_text(), admin_back_keyboard()),
-            ADMIN_MENU_TUT => (admin_tut_text(), admin_back_keyboard()),
             _ => (admin_home_text(), admin_home_keyboard()),
         };
 
@@ -146,20 +142,12 @@ fn admin_home_keyboard() -> InlineKeyboardMarkup {
             InlineKeyboardButton::callback("📣 Broadcast", ADMIN_MENU_BROADCAST),
             InlineKeyboardButton::callback("🤝 CTV", ADMIN_MENU_AFFILIATE),
         ],
-        vec![
-            InlineKeyboardButton::callback("🤖 Bot con", ADMIN_MENU_CHILDBOT),
-            InlineKeyboardButton::callback("🛒 Đăng sản phẩm", ADMIN_MENU_GROUP),
-        ],
+        vec![InlineKeyboardButton::callback("🛒 Đăng sản phẩm", ADMIN_MENU_GROUP)],
         vec![InlineKeyboardButton::callback(
             "💸 Hoàn tiền đơn hàng",
             ADMIN_MENU_REFUND,
         )],
-        vec![InlineKeyboardButton::callback("📚 Quản lý TUT", ADMIN_MENU_TUT)],
     ])
-}
-
-fn admin_tut_text() -> &'static str {
-    "📚 <b>QUẢN LÝ TUT</b>\n\n<code>/tut</code> - mở menu quản lý TUT.\n<code>/tutadd</code> - admin tạo TUT trong bot: tiêu đề, teaser, nội dung full.\n<code>/tutlist</code> - xem danh sách TUT đã tạo, có nhãn FREE/VIP.\n<code>/tutpost &lt;id&gt;</code> - đăng teaser lên kênh đã cấu hình.\n<code>/tutvipadd &lt;telegram_id&gt; [ngày]</code> - cấp VIP thủ công.\n<code>/tutviplist</code> - xem danh sách VIP còn hạn.\n<code>/tutstats</code> - xem thống kê TUT/VIP.\n<code>/myvip</code> - khách xem hạn VIP.\n\nLogic xem:\n• TUT FREE: user thường bấm Xem full là xem được ngay.\n• TUT VIP: user phải mua/có VIP còn hạn mới xem được.\n\nKhi tạo TUT bằng <code>/tutadd</code>:\n• Mặc định nội dung sẽ là TUT VIP.\n• Nếu muốn TUT FREE, ở bước nhập nội dung full hãy để dòng đầu tiên là <code>free</code>, dòng sau mới ghi nội dung.\n\nCấu hình cần có trong admin config:\n<code>vip_tut_channel_id</code> - kênh/nhóm để bot đăng teaser, ví dụ <code>@tenkenh</code> hoặc <code>-100...</code>.\n<code>vip_tut_price</code> - giá VIP 30 ngày, mặc định 99000.\n<code>vip_tut_days</code> - số ngày VIP, mặc định 30.\n\nBot phải được thêm làm admin của kênh/nhóm thì mới đăng teaser được."
 }
 
 fn admin_back_keyboard() -> InlineKeyboardMarkup {
@@ -170,11 +158,11 @@ fn admin_back_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn admin_home_text() -> &'static str {
-    "🔐 <b>MENU ADMIN</b>\n\nMình tìm thấy <b>7 lệnh admin</b> trong source, cộng thêm menu mới <code>/admin</code>.\n\nChọn nhóm chức năng bên dưới để xem cách dùng."
+    "🔐 <b>MENU ADMIN</b>\n\nMình tìm thấy <b>4 lệnh admin</b> trong source, cộng thêm menu mới <code>/admin</code>.\n\nChọn nhóm chức năng bên dưới để xem cách dùng."
 }
 
 fn admin_all_commands_text() -> &'static str {
-    "📋 <b>TẤT CẢ LỆNH ADMIN</b>\n\n<b>Thông báo</b>\n<code>/broadcast</code> - mở danh sách mẫu thông báo và gửi broadcast.\n\n<b>CTV</b>\n<code>/ctvadd &lt;telegram_id&gt; [hoa_hong_%]</code> - thêm CTV thủ công.\n<code>/ctvoff &lt;telegram_id&gt;</code> - tắt CTV.\n<code>/ctvlist</code> - xem danh sách CTV.\n\n<b>Bot con</b>\n<code>/childbotadd &lt;telegram_id_ctv&gt; [@bot_username] [tên shop]</code> - tạo API key bot con.\n<code>/childbotlist</code> - xem danh sách bot con.\n\n<b>Nhóm bán hàng</b>\n<code>/postproduct &lt;product_id&gt;</code> - đăng card sản phẩm vào group/chat hiện tại.\n\n<b>Hoàn tiền</b>\nKhông có lệnh gõ riêng. Admin bấm nút hoàn tiền trong thông báo đơn hàng."
+    "📋 <b>TẤT CẢ LỆNH ADMIN</b>\n\n<b>Thông báo</b>\n<code>/broadcast</code> - mở danh sách mẫu thông báo và gửi broadcast.\n\n<b>CTV</b>\n<code>/ctvadd &lt;telegram_id&gt; [hoa_hong_%]</code> - thêm CTV thủ công.\n<code>/ctvoff &lt;telegram_id&gt;</code> - tắt CTV.\n<code>/ctvlist</code> - xem danh sách CTV.\n\n<b>Nhóm bán hàng</b>\n<code>/postproduct &lt;product_id&gt;</code> - đăng card sản phẩm vào group/chat hiện tại.\n\n<b>Hoàn tiền</b>\nKhông có lệnh gõ riêng. Admin bấm nút hoàn tiền trong thông báo đơn hàng."
 }
 
 fn admin_broadcast_text() -> &'static str {
@@ -183,10 +171,6 @@ fn admin_broadcast_text() -> &'static str {
 
 fn admin_affiliate_text() -> &'static str {
     "🤝 <b>QUẢN LÝ CTV</b>\n\n<code>/ctvadd &lt;telegram_id&gt; [hoa_hong_%]</code>\nThêm CTV thủ công. Ví dụ: <code>/ctvadd 123456789 5</code>\n\n<code>/ctvoff &lt;telegram_id&gt;</code>\nTắt CTV. Ví dụ: <code>/ctvoff 123456789</code>\n\n<code>/ctvlist</code>\nXem danh sách CTV, số đơn và hoa hồng.\n\nGhi chú: khách tự đăng ký CTV bằng nút <b>Đăng kí CTV</b> ở <code>/start</code>."
-}
-
-fn admin_childbot_text() -> &'static str {
-    "🤖 <b>QUẢN LÝ BOT CON</b>\n\n<code>/childbotadd &lt;telegram_id_ctv&gt; [@bot_username] [tên shop]</code>\nTạo API key cho bot con.\n\nVí dụ:\n<code>/childbotadd 123456789 @demo_ctv_bot Shop CTV Test</code>\n\n<code>/childbotlist</code>\nXem danh sách bot con đã tạo.\n\nLưu ý: API key bot con chỉ dùng để tạo yêu cầu mua, không có quyền trừ ví trực tiếp."
 }
 
 fn admin_group_text() -> &'static str {

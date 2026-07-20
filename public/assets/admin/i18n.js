@@ -110,7 +110,6 @@
       'required_channel_check_btn',
       'required_channel_join_btn',
       'shop_back_btn',
-      'start_btn_api_integration',
       'start_btn_help',
       'start_btn_language',
       'start_btn_orders',

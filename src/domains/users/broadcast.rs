@@ -290,14 +290,6 @@ fn default_broadcast_templates() -> Vec<BroadcastTemplateSeed> {
             product_id: None,
             sort_order: 9,
         },
-        BroadcastTemplateSeed {
-            name: "Kết nối API",
-            text: "KẾT NỐI API SHOP\n━━━━━━━━━━━━\n\nDùng API để tích hợp mua hàng tự động hoặc tạo key API mới khi cần.",
-            mode: "message_only",
-            buttons_json: r#"[[{"text":"API của tôi","callback_data":"shop_api"},{"text":"Tạo API mới","callback_data":"shop_api_new"}]]"#,
-            product_id: None,
-            sort_order: 10,
-        },
     ]
 }
 
@@ -448,8 +440,10 @@ fn valid_template_callback_data(value: &str) -> bool {
         && (value.starts_with("start:")
             || value.starts_with("wallet:")
             || value.starts_with("buy:")
-            || value.starts_with("shop")
-            || value == "shop_api")
+            || value.starts_with("shop:")
+            || value.starts_with("shopnew:")
+            || value == "shop_search"
+            || value.starts_with("shop_cat:"))
 }
 
 fn parse_broadcast_button_rows(
@@ -1451,9 +1445,9 @@ mod tests {
 
         let templates = list_broadcast_templates(&pool).await.unwrap();
 
-        assert_eq!(templates.len(), 10);
+        assert_eq!(templates.len(), 9);
         assert_eq!(templates[0].id, 1);
-        assert_eq!(templates[9].id, 10);
+        assert_eq!(templates[8].id, 9);
         assert_eq!(templates[0].mode, "view_shop");
         assert!(templates[0].buttons_json.contains("start:shop"));
         assert!(

@@ -37,7 +37,6 @@ enum StartMenuAction {
     Wallet,
     Orders,
     TopupHistory,
-    ApiIntegration,
     Help,
     Language,
 }
@@ -307,16 +306,13 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
             ],
             [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_api_integration", "🔌 API integration", "shop_api"),
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
             ],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_tut", "📚 TUT", "tut:user_home"),
             ],
             [
                 i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", "affiliate:register"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_child_bot", "🤖 Tạo bot con", "childbot:guide"),
             ],
             [
                 start_community_button_json(ctx, lang),
@@ -367,64 +363,52 @@ fn inline_button_url_json(
 
 fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(String, String)>> {
     vec![
-        vec![(
-            texts.get_lang("start_btn_shop", lang, "🛒 Shop"),
-            "start:shop".to_string(),
-        )],
         vec![
             (
-                texts.get_lang("start_btn_topup", lang, "💰 Top up"),
+                texts.get_lang("start_btn_shop", lang, "Shop"),
+                "start:shop".to_string(),
+            ),
+        ],
+        vec![
+            (
+                texts.get_lang("start_btn_topup", lang, "Top up"),
                 "wallet:topup".to_string(),
             ),
             (
-                texts.get_lang("start_btn_wallet", lang, "💳 Wallet"),
+                texts.get_lang("start_btn_wallet", lang, "Wallet"),
                 "start:wallet".to_string(),
             ),
         ],
         vec![
             (
-                texts.get_lang("start_btn_purchased", lang, "📦 Purchased"),
+                texts.get_lang("start_btn_purchased", lang, "Purchased"),
                 "start:orders".to_string(),
             ),
             (
-                texts.get_lang("start_btn_topup_history", lang, "📜 Top-up history"),
+                texts.get_lang("start_btn_topup_history", lang, "Top-up history"),
                 "wallet:topup_history".to_string(),
             ),
         ],
         vec![
             (
-                texts.get_lang("start_btn_api_integration", lang, "🔌 API integration"),
-                "shop_api".to_string(),
+                texts.get_lang("start_btn_viameta", lang, "Verification service"),
+                "viameta:menu".to_string(),
             ),
+            (
+                texts.get_lang("start_btn_affiliate_register", lang, "Register affiliate"),
+                "affiliate:register".to_string(),
+            ),
+        ],
+        vec![
             (
                 texts.get_lang("start_btn_help", lang, "Help"),
                 "start:help".to_string(),
             ),
-        ],
-        vec![
             (
-                texts.get_lang("start_btn_viameta", lang, "✅ Dịch vụ tích xanh"),
-                "viameta:menu".to_string(),
-            ),
-            (
-                texts.get_lang("start_btn_tut", lang, "📚 TUT"),
-                "tut:user_home".to_string(),
+                texts.get_lang("start_btn_language", lang, "Language"),
+                "start:language".to_string(),
             ),
         ],
-        vec![
-            (
-                texts.get_lang("start_btn_affiliate_register", lang, "🤝 Đăng kí CTV"),
-                "affiliate:register".to_string(),
-            ),
-            (
-                texts.get_lang("start_btn_child_bot", lang, "🤖 Tạo bot con"),
-                "childbot:guide".to_string(),
-            ),
-        ],
-        vec![(
-            texts.get_lang("start_btn_language", lang, "🌐 Language"),
-            "start:language".to_string(),
-        )],
     ]
 }
 
@@ -487,7 +471,6 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
                     json!({"text": "📜 Top-up history"}),
                 ],
                 vec![
-                    json!({"text": "🔌 API integration"}),
                     json!({"text": "Help"}),
                 ],
                 vec![json!({"text": "✅ Dịch vụ tích xanh"})],
@@ -503,11 +486,8 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "start:wallet" => "start_btn_wallet",
         "start:orders" => "start_btn_purchased",
         "wallet:topup_history" => "start_btn_topup_history",
-        "shop_api" => "start_btn_api_integration",
         "viameta:menu" => "start_btn_viameta",
-        "tut:user_home" => "start_btn_tut",
         "affiliate:register" => "start_btn_affiliate_register",
-        "childbot:guide" => "start_btn_child_bot",
         "start:help" => "start_btn_help",
         "start:language" => "start_btn_language",
         _ => "start_btn",
@@ -676,10 +656,6 @@ fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuActio
             texts.get_lang("start_btn_topup_history", lang, "📜 Top-up history"),
         ),
         (
-            StartMenuAction::ApiIntegration,
-            texts.get_lang("start_btn_api_integration", lang, "🔌 API integration"),
-        ),
-        (
             StartMenuAction::Help,
             texts.get_lang("start_btn_help", lang, "Help"),
         ),
@@ -774,27 +750,6 @@ impl AppPlugin for StartCommandPlugin {
                             msg.chat.id,
                             None,
                             user.id.0 as i64,
-                            &lang,
-                        )
-                        .await?;
-                    } else {
-                        send_message_with_start_reply_keyboard(
-                            &ctx,
-                            msg.chat.id,
-                            "user_unknown",
-                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
-                            &lang,
-                        )
-                        .await?;
-                    }
-                }
-                StartMenuAction::ApiIntegration => {
-                    if let Some(user) = msg.from() {
-                        cmd_shop::send_api_integration_page(
-                            ctx.clone(),
-                            msg.chat.id,
-                            user.id.0 as i64,
-                            false,
                             &lang,
                         )
                         .await?;
@@ -1191,40 +1146,22 @@ mod tests {
         let texts = BotTexts::from_language_maps(
             vec![LanguageInfo {
                 code: "vi".to_string(),
-                label: "Tiếng Việt".to_string(),
+                label: "Vietnamese".to_string(),
                 fallback: "en".to_string(),
                 enabled: true,
             }],
             HashMap::from([(
                 "vi".to_string(),
                 HashMap::from([
-                    ("start_btn_shop".to_string(), "🛒 Xem sản phẩm".to_string()),
-                    ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
-                    ("start_btn_wallet".to_string(), "💳 Ví tiền".to_string()),
-                    ("start_btn_purchased".to_string(), "📦 Đã mua".to_string()),
-                    (
-                        "start_btn_topup_history".to_string(),
-                        "📜 Lịch sử nạp".to_string(),
-                    ),
-                    (
-                        "start_btn_api_integration".to_string(),
-                        "🔌 Tích hợp API".to_string(),
-                    ),
-                    (
-                        "start_btn_viameta".to_string(),
-                        "✅ Dịch vụ tích xanh".to_string(),
-                    ),
-                    ("start_btn_tut".to_string(), "📚 TUT".to_string()),
-                    (
-                        "start_btn_affiliate_register".to_string(),
-                        "🤝 Đăng kí CTV".to_string(),
-                    ),
-                    (
-                        "start_btn_child_bot".to_string(),
-                        "🤖 Tạo bot con".to_string(),
-                    ),
-                    ("start_btn_help".to_string(), "Hướng dẫn".to_string()),
-                    ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
+                    ("start_btn_shop".to_string(), "Xem san pham".to_string()),
+                    ("start_btn_topup".to_string(), "Nap tien".to_string()),
+                    ("start_btn_wallet".to_string(), "Vi tien".to_string()),
+                    ("start_btn_purchased".to_string(), "Da mua".to_string()),
+                    ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
+                    ("start_btn_viameta".to_string(), "Up tich xanh".to_string()),
+                    ("start_btn_affiliate_register".to_string(), "CTV".to_string()),
+                    ("start_btn_help".to_string(), "Huong dan".to_string()),
+                    ("start_btn_language".to_string(), "Ngon ngu".to_string()),
                 ]),
             )]),
         );
@@ -1234,31 +1171,23 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                vec![("🛒 Xem sản phẩm".to_string(), "start:shop".to_string())],
+                vec![("Xem san pham".to_string(), "start:shop".to_string())],
                 vec![
-                    ("💰 Nạp tiền".to_string(), "wallet:topup".to_string()),
-                    ("💳 Ví tiền".to_string(), "start:wallet".to_string()),
+                    ("Nap tien".to_string(), "wallet:topup".to_string()),
+                    ("Vi tien".to_string(), "start:wallet".to_string()),
                 ],
                 vec![
-                    ("📦 Đã mua".to_string(), "start:orders".to_string()),
-                    (
-                        "📜 Lịch sử nạp".to_string(),
-                        "wallet:topup_history".to_string()
-                    ),
+                    ("Da mua".to_string(), "start:orders".to_string()),
+                    ("Lich su nap".to_string(), "wallet:topup_history".to_string()),
                 ],
                 vec![
-                    ("🔌 Tích hợp API".to_string(), "shop_api".to_string()),
-                    ("Hướng dẫn".to_string(), "start:help".to_string()),
+                    ("Up tich xanh".to_string(), "viameta:menu".to_string()),
+                    ("CTV".to_string(), "affiliate:register".to_string()),
                 ],
                 vec![
-                    ("✅ Dịch vụ tích xanh".to_string(), "viameta:menu".to_string()),
-                    ("📚 TUT".to_string(), "tut:user_home".to_string()),
+                    ("Huong dan".to_string(), "start:help".to_string()),
+                    ("Ngon ngu".to_string(), "start:language".to_string()),
                 ],
-                vec![
-                    ("🤝 Đăng kí CTV".to_string(), "affiliate:register".to_string()),
-                    ("🤖 Tạo bot con".to_string(), "childbot:guide".to_string()),
-                ],
-                vec![("🌐 Ngôn ngữ".to_string(), "start:language".to_string())],
             ]
         );
     }
@@ -1270,10 +1199,14 @@ mod tests {
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["callback_data"], "start:shop");
+        assert_eq!(rows[3][0]["callback_data"], "start:help");
+        assert_eq!(rows[4][0]["callback_data"], "viameta:menu");
         assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
-        assert_eq!(rows[5][1]["callback_data"], "childbot:guide");
         assert_eq!(rows[6][0]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
         assert_eq!(rows[6][1]["callback_data"], "start:language");
+        assert!(!keyboard.to_string().contains("shop_api"));
+        assert!(!keyboard.to_string().contains("tut:user_home"));
+        assert!(!keyboard.to_string().contains("childbot:guide"));
     }
 
     #[test]
@@ -1281,40 +1214,22 @@ mod tests {
         let texts = BotTexts::from_language_maps(
             vec![LanguageInfo {
                 code: "vi".to_string(),
-                label: "Tiếng Việt".to_string(),
+                label: "Vietnamese".to_string(),
                 fallback: "en".to_string(),
                 enabled: true,
             }],
             HashMap::from([(
                 "vi".to_string(),
                 HashMap::from([
-                    ("start_btn_shop".to_string(), "🛒 Xem sản phẩm".to_string()),
-                    ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
-                    ("start_btn_wallet".to_string(), "💳 Ví tiền".to_string()),
-                    ("start_btn_purchased".to_string(), "📦 Đã mua".to_string()),
-                    (
-                        "start_btn_topup_history".to_string(),
-                        "📜 Lịch sử nạp".to_string(),
-                    ),
-                    (
-                        "start_btn_api_integration".to_string(),
-                        "🔌 Tích hợp API".to_string(),
-                    ),
-                    (
-                        "start_btn_viameta".to_string(),
-                        "✅ Dịch vụ tích xanh".to_string(),
-                    ),
-                    ("start_btn_tut".to_string(), "📚 TUT".to_string()),
-                    (
-                        "start_btn_affiliate_register".to_string(),
-                        "🤝 Đăng kí CTV".to_string(),
-                    ),
-                    (
-                        "start_btn_child_bot".to_string(),
-                        "🤖 Tạo bot con".to_string(),
-                    ),
-                    ("start_btn_help".to_string(), "Hướng dẫn".to_string()),
-                    ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
+                    ("start_btn_shop".to_string(), "Xem san pham".to_string()),
+                    ("start_btn_topup".to_string(), "Nap tien".to_string()),
+                    ("start_btn_wallet".to_string(), "Vi tien".to_string()),
+                    ("start_btn_purchased".to_string(), "Da mua".to_string()),
+                    ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
+                    ("start_btn_viameta".to_string(), "Up tich xanh".to_string()),
+                    ("start_btn_affiliate_register".to_string(), "CTV".to_string()),
+                    ("start_btn_help".to_string(), "Huong dan".to_string()),
+                    ("start_btn_language".to_string(), "Ngon ngu".to_string()),
                 ]),
             )]),
         );
@@ -1324,13 +1239,11 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                vec!["🛒 Xem sản phẩm".to_string()],
-                vec!["💰 Nạp tiền".to_string(), "💳 Ví tiền".to_string()],
-                vec!["📦 Đã mua".to_string(), "📜 Lịch sử nạp".to_string()],
-                vec!["🔌 Tích hợp API".to_string(), "Hướng dẫn".to_string()],
-                vec!["✅ Dịch vụ tích xanh".to_string(), "📚 TUT".to_string()],
-                vec!["🤝 Đăng kí CTV".to_string(), "🤖 Tạo bot con".to_string()],
-                vec!["🌐 Ngôn ngữ".to_string()],
+                vec!["Xem san pham".to_string()],
+                vec!["Nap tien".to_string(), "Vi tien".to_string()],
+                vec!["Da mua".to_string(), "Lich su nap".to_string()],
+                vec!["Up tich xanh".to_string(), "CTV".to_string()],
+                vec!["Huong dan".to_string(), "Ngon ngu".to_string()],
             ]
         );
     }
@@ -1375,51 +1288,38 @@ mod tests {
         let texts = BotTexts::from_language_maps(
             vec![LanguageInfo {
                 code: "vi".to_string(),
-                label: "Tiếng Việt".to_string(),
+                label: "Vietnamese".to_string(),
                 fallback: "en".to_string(),
                 enabled: true,
             }],
             HashMap::from([(
                 "vi".to_string(),
                 HashMap::from([
-                    ("start_btn_topup".to_string(), "💰 Nạp tiền".to_string()),
-                    (
-                        "start_btn_topup_history".to_string(),
-                        "📜 Lịch sử nạp".to_string(),
-                    ),
-                    (
-                        "start_btn_api_integration".to_string(),
-                        "🔌 Tích hợp API".to_string(),
-                    ),
-                    (
-                        "start_btn_orders".to_string(),
-                        "📋 Đơn hàng gần đây".to_string(),
-                    ),
-                    ("start_btn_language".to_string(), "🌐 Ngôn ngữ".to_string()),
+                    ("start_btn_topup".to_string(), "Nap tien".to_string()),
+                    ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
+                    ("start_btn_orders".to_string(), "Don hang gan day".to_string()),
+                    ("start_btn_language".to_string(), "Ngon ngu".to_string()),
                 ]),
             )]),
         );
 
         assert_eq!(
-            start_menu_action_from_text(&texts, "vi", "💰 Nạp tiền"),
+            start_menu_action_from_text(&texts, "vi", "Nap tien"),
             Some(StartMenuAction::Topup)
         );
         assert_eq!(
-            start_menu_action_from_text(&texts, "vi", "📜 Lịch sử nạp"),
+            start_menu_action_from_text(&texts, "vi", "Lich su nap"),
             Some(StartMenuAction::TopupHistory)
         );
         assert_eq!(
-            start_menu_action_from_text(&texts, "vi", "🔌 Tích hợp API"),
-            Some(StartMenuAction::ApiIntegration)
-        );
-        assert_eq!(
-            start_menu_action_from_text(&texts, "vi", "📋 Đơn hàng gần đây"),
+            start_menu_action_from_text(&texts, "vi", "Don hang gan day"),
             Some(StartMenuAction::Orders)
         );
         assert_eq!(
-            start_menu_action_from_text(&texts, "vi", "🌐 Ngôn ngữ"),
+            start_menu_action_from_text(&texts, "vi", "Ngon ngu"),
             Some(StartMenuAction::Language)
         );
+        assert_eq!(start_menu_action_from_text(&texts, "vi", "Dau API"), None);
     }
 
     #[test]

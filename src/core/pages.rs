@@ -133,7 +133,7 @@ mod tests {
         assert!(ADMIN_HTML.contains("wallet:topup_history"));
         assert!(ADMIN_HTML.contains("wallet:show"));
         assert!(ADMIN_HTML.contains("buy:ID"));
-        assert!(ADMIN_HTML.contains("shop_api"));
-        assert!(ADMIN_HTML.contains("shop_api_new"));
+        assert!(!ADMIN_HTML.contains("shop_api"));
+        assert!(!ADMIN_HTML.contains("shop_api_new"));
     }
 }

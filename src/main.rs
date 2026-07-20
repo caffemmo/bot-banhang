@@ -144,20 +144,8 @@ fn public_bot_commands() -> Vec<BotCommand> {
             description: "Tra cứu đơn theo mã".to_string(),
         },
         BotCommand {
-            command: "newapi".to_string(),
-            description: "Tạo API key mới".to_string(),
-        },
-        BotCommand {
             command: "viameta".to_string(),
             description: "Dịch vụ tích xanh".to_string(),
-        },
-        BotCommand {
-            command: "tut".to_string(),
-            description: "Kho TUT Free/VIP".to_string(),
-        },
-        BotCommand {
-            command: "myvip".to_string(),
-            description: "Xem hạn VIP TUT".to_string(),
         },
         BotCommand {
             command: "help".to_string(),
@@ -613,7 +601,9 @@ mod tests {
         assert!(commands.contains(&"start".to_string()));
         assert!(commands.contains(&"shop".to_string()));
         assert!(commands.contains(&"wallet".to_string()));
-        assert!(commands.contains(&"tut".to_string()));
+        assert!(!commands.contains(&"newapi".to_string()));
+        assert!(!commands.contains(&"tut".to_string()));
+        assert!(!commands.contains(&"myvip".to_string()));
         assert!(!commands.contains(&"ctvlist".to_string()));
         assert!(!commands.contains(&"childbotadd".to_string()));
         assert!(!commands.contains(&"tutadd".to_string()));

@@ -19,7 +19,6 @@ use url::Url;
 use crate::app::AppContext;
 use crate::core::qr::vietqr_link;
 use crate::core::time::format_vietnam_time;
-use crate::domains::client::repo as client_repo;
 use crate::domains::crypto_pay::models::{
     CryptoPaymentMethod, CryptoPaymentRequest, CryptoPaymentStatus,
 };
@@ -337,19 +336,6 @@ async fn shop_handle_callback(
                 msg.chat().id,
                 page,
                 None,
-                &lang,
-            )
-            .await?;
-        }
-    } else if data == "shop_api" || data == "shop_api_new" {
-        if let Some(msg) = &q.message {
-            dialogue.update(State::Idle).await?;
-            show_api_integration_page(
-                ctx.clone(),
-                msg.chat().id,
-                msg.id(),
-                q.from.id.0 as i64,
-                data == "shop_api_new",
                 &lang,
             )
             .await?;
@@ -1897,126 +1883,6 @@ fn should_fallback_to_new_product_list_message(err: &anyhow::Error) -> bool {
     message.contains("there is no text in the message to edit")
         || message.contains("message to edit not found")
         || message.contains("message can't be edited")
-}
-
-async fn show_api_integration_page(
-    ctx: Arc<AppContext>,
-    chat_id: ChatId,
-    message_id: MessageId,
-    user_id: i64,
-    rotate_token: bool,
-    lang: &str,
-) -> Result<()> {
-    let token = if rotate_token {
-        client_repo::create_or_replace_api_key(&ctx.pool, user_id).await?
-    } else {
-        client_repo::get_or_create_api_key(&ctx.pool, user_id).await?
-    };
-    let text = format_api_integration_text(&ctx, user_id, &token);
-    ctx.bot
-        .edit_message_text(chat_id, message_id, text)
-        .parse_mode(ParseMode::Html)
-        .reply_markup(api_integration_keyboard(&ctx, lang))
-        .await?;
-    Ok(())
-}
-
-pub(crate) async fn send_api_integration_page(
-    ctx: Arc<AppContext>,
-    chat_id: ChatId,
-    user_id: i64,
-    rotate_token: bool,
-    lang: &str,
-) -> Result<()> {
-    let token = if rotate_token {
-        client_repo::create_or_replace_api_key(&ctx.pool, user_id).await?
-    } else {
-        client_repo::get_or_create_api_key(&ctx.pool, user_id).await?
-    };
-    let text = format_api_integration_text(&ctx, user_id, &token);
-    ctx.bot
-        .send_message(chat_id, text)
-        .parse_mode(ParseMode::Html)
-        .reply_markup(api_integration_keyboard(&ctx, lang))
-        .await?;
-    Ok(())
-}
-
-fn format_api_integration_text(ctx: &AppContext, chat_id: i64, token: &str) -> String {
-    let api_key = format!("{chat_id}:{token}");
-    let base_url = api_base_url(ctx);
-    let products_url = format!("{base_url}/api/client/products");
-    let wallet_url = format!("{base_url}/api/client/wallet");
-    let orders_url = format!("{base_url}/api/client/orders");
-    let buy_example = "{\n  \"product_id\": 1,\n  \"qty\": 1,\n  \"plan_id\": null,\n  \"customer_input\": \"email@example.com\"\n}";
-
-    format!(
-        "🔌 <b>Tích hợp API</b>\n\n\
-API key:\n{api_key}\n\n\
-Base URL:\n{base_url}\n\n\
-Endpoints:\nGET products: {products}\nGET wallet: {wallet}\nPOST /api/client/orders: {orders}\n\n\
-Header:\n{header}\n\n\
-Ví dụ body mua hàng:\n<pre>{buy_example}</pre>\n\n\
-Bấm “Tạo token mới” nếu muốn đổi key. Token cũ sẽ mất hiệu lực ngay.",
-        api_key = copyable_code(&api_key),
-        base_url = copyable_code(&base_url),
-        products = copyable_code(&products_url),
-        wallet = copyable_code(&wallet_url),
-        orders = copyable_code(&orders_url),
-        header = copyable_code(&format!("Authorization: Bearer {api_key}")),
-        buy_example = html_escape(buy_example),
-    )
-}
-
-fn api_base_url(ctx: &AppContext) -> String {
-    ctx.base_url()
-        .unwrap_or_else(|| format!("http://localhost:{}", ctx.config.port))
-        .trim_end_matches('/')
-        .to_string()
-}
-
-fn api_integration_keyboard(ctx: &AppContext, lang: &str) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "shop_api_new_token_btn",
-            "🔄 Tạo token mới",
-            "shop_api_new",
-        )],
-        vec![i18n::inline_button_callback(
-            ctx,
-            lang,
-            "shop_back_btn",
-            "⬅️ Quay lại",
-            "start:shop",
-        )],
-    ])
-}
-
-fn api_integration_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
-    json!({
-        "inline_keyboard": [
-            [
-                i18n::inline_button_callback_json(
-                    ctx,
-                    lang,
-                    "shop_api_new_token_btn",
-                    "🔄 Tạo token mới",
-                    "shop_api_new",
-                )
-            ],
-            [
-                i18n::inline_button_callback_json(
-                    ctx,
-                    lang,
-                    "shop_back_btn",
-                    "⬅️ Quay lại",
-                    "start:shop",
-                )
-            ]
-        ]
-    })
 }
 
 fn shop_product_list_payload(
@@ -3853,155 +3719,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_integration_page_shows_token_url_endpoints_and_usage() {
-        let pool = SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
-        let ctx = AppContext::new(
-            Bot::new("test-token"),
-            pool,
-            Config {
-                telegram_token: "test-token".to_string(),
-                database_url: "sqlite::memory:".to_string(),
-                bank_name: "VCB".to_string(),
-                bank_account: Some("123".to_string()),
-                bank_account_name: None,
-                webhook_secret: "secret".to_string(),
-                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
-                admin_setup_code: "setupcode".to_string(),
-                admin_cookie_secure: false,
-                base_url: Some("https://shop.example".to_string()),
-                i18n_dir: "i18n".to_string(),
-                port: 8080,
-                crypto: crate::config::CryptoConfig::default(),
-            },
-            std::collections::HashMap::new(),
-            BotTexts::default(),
-            vec![],
-        );
-
-        let text = format_api_integration_text(&ctx, 42, "abc-token");
-
-        assert!(text.contains("Tích hợp API"));
-        assert!(text.contains("<code>42:abc-token</code>"));
-        assert!(text.contains("<code>https://shop.example/api/client/products</code>"));
-        assert!(text.contains("Authorization: Bearer 42:abc-token"));
-        assert!(text.contains("POST /api/client/orders"));
-        assert!(text.contains("\"product_id\": 1"));
-    }
-
-    #[tokio::test]
-    async fn api_integration_page_uses_runtime_base_url_config() {
-        let pool = SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
-        let mut configs = std::collections::HashMap::new();
-        configs.insert(
-            "base_url".to_string(),
-            "https://runtime-shop.example/".to_string(),
-        );
-        let ctx = AppContext::new(
-            Bot::new("test-token"),
-            pool,
-            Config {
-                telegram_token: "test-token".to_string(),
-                database_url: "sqlite::memory:".to_string(),
-                bank_name: "VCB".to_string(),
-                bank_account: Some("123".to_string()),
-                bank_account_name: None,
-                webhook_secret: "secret".to_string(),
-                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
-                admin_setup_code: "setupcode".to_string(),
-                admin_cookie_secure: false,
-                base_url: None,
-                i18n_dir: "i18n".to_string(),
-                port: 8080,
-                crypto: crate::config::CryptoConfig::default(),
-            },
-            configs,
-            BotTexts::default(),
-            vec![],
-        );
-
-        let text = format_api_integration_text(&ctx, 42, "abc-token");
-
-        assert!(text.contains("<code>https://runtime-shop.example</code>"));
-        assert!(text.contains("<code>https://runtime-shop.example/api/client/products</code>"));
-        assert!(!text.contains("localhost"));
-    }
-
-    #[tokio::test]
-    async fn api_integration_page_falls_back_to_env_base_url_when_runtime_base_url_is_blank() {
-        let pool = SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
-        let mut configs = std::collections::HashMap::new();
-        configs.insert("base_url".to_string(), "".to_string());
-        let ctx = AppContext::new(
-            Bot::new("test-token"),
-            pool,
-            Config {
-                telegram_token: "test-token".to_string(),
-                database_url: "sqlite::memory:".to_string(),
-                bank_name: "VCB".to_string(),
-                bank_account: Some("123".to_string()),
-                bank_account_name: None,
-                webhook_secret: "secret".to_string(),
-                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
-                admin_setup_code: "setupcode".to_string(),
-                admin_cookie_secure: false,
-                base_url: Some("https://env-shop.example".to_string()),
-                i18n_dir: "i18n".to_string(),
-                port: 8080,
-                crypto: crate::config::CryptoConfig::default(),
-            },
-            configs,
-            BotTexts::default(),
-            vec![],
-        );
-
-        let text = format_api_integration_text(&ctx, 42, "abc-token");
-
-        assert!(text.contains("<code>https://env-shop.example/api/client/products</code>"));
-        assert!(!text.contains("localhost"));
-    }
-
-    #[tokio::test]
-    async fn api_integration_keyboard_has_rotate_and_back_buttons() {
-        let pool = SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
-        let ctx = AppContext::new(
-            Bot::new("test-token"),
-            pool,
-            Config {
-                telegram_token: "test-token".to_string(),
-                database_url: "sqlite::memory:".to_string(),
-                bank_name: "VCB".to_string(),
-                bank_account: Some("123".to_string()),
-                bank_account_name: None,
-                webhook_secret: "secret".to_string(),
-                admin_jwt_secret: "12345678901234567890123456789012".to_string(),
-                admin_setup_code: "setupcode".to_string(),
-                admin_cookie_secure: false,
-                base_url: None,
-                i18n_dir: "i18n".to_string(),
-                port: 8080,
-                crypto: crate::config::CryptoConfig::default(),
-            },
-            std::collections::HashMap::new(),
-            BotTexts::default(),
-            vec![],
-        );
-
-        let keyboard = api_integration_keyboard_json(&ctx, "vi");
-        let rows = keyboard["inline_keyboard"].as_array().unwrap();
-
-        assert_eq!(rows[0][0]["callback_data"], "shop_api_new");
-        assert_eq!(rows[1][0]["callback_data"], "start:shop");
-    }
-
-    #[tokio::test]
     async fn category_keyboard_lists_buy_buttons_and_back_to_shop() {
         let product = Product {
             id: 42,
@@ -4971,8 +4688,6 @@ fn is_shop_callback_data(text: &str) -> bool {
     text.starts_with("start:shop")
         || text.starts_with("shop:")
         || text.starts_with("shopnew:")
-        || text == "shop_api"
-        || text == "shop_api_new"
         || text == "shop_search"
         || text.starts_with("shop_cat:")
         || text.starts_with("buy:")
