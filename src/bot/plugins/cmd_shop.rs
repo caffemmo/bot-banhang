@@ -41,9 +41,6 @@ use teloxide::types::BotCommand;
 
 const COUNTDOWN_TICK_SECONDS: u64 = 2;
 const PRODUCT_BUTTON_NAME_MAX_CHARS: usize = 32;
-const PRODUCT_PROMPT_NAME_MAX_CHARS: usize = 72;
-const PRODUCT_PROMPT_DESCRIPTION_LINE_MAX_CHARS: usize = 92;
-const PRODUCT_PROMPT_DESCRIPTION_MAX_LINES: usize = 6;
 
 fn order_expires_at(created_at: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(created_at)
@@ -432,7 +429,7 @@ async fn shop_handle_callback(
                     }
                     dialogue.update(State::ChoosingQty { product_id }).await?;
                     let text = uploaded_file_quantity_prompt(
-                        &product_prompt_name(&product),
+                        &product.name,
                         product.price,
                         stock,
                         Some(desc_text.as_str()),
@@ -460,9 +457,9 @@ async fn shop_handle_callback(
                                 &ctx,
                                 &lang,
                                 "manual_product_plan_prompt",
-                                "✅ {product}\n💵 Price: {price}\n\n{description}ℹ️ This product requires activation information.\n\n📅 Choose a plan/month below:",
+                                "✅ You selected {product} — {price}\n{description}ℹ️ This product requires activation information.\n\n📅 Choose a plan/month below:",
                                 &[
-                                    ("product", product_prompt_name(&product)),
+                                    ("product", product.name.clone()),
                                     ("price", format_vnd(product.price)),
                                     ("description", desc_text.clone()),
                                 ],
@@ -491,9 +488,9 @@ async fn shop_handle_callback(
                         &ctx,
                         &lang,
                         "product_qty_prompt",
-                        "✅ {product}\n💵 Price: {price}\n📦 Stock: {stock}\n\n{description}{requires_input}⌨️ Enter quantity:",
+                        "✅ You selected {product} — {price}\n📦 Stock left: {stock}\n{description}{requires_input}\n\n⌨️ Enter quantity to buy:",
                         &[
-                            ("product", product_prompt_name(&product)),
+                            ("product", product.name.clone()),
                             ("price", format_vnd(product.price)),
                             ("stock", stock.to_string()),
                             ("description", description_for_quantity_prompt(&desc_text)),
@@ -504,7 +501,7 @@ async fn shop_handle_callback(
                                         &ctx,
                                         &lang,
                                         "product_requires_input_note",
-                                        "ℹ️ This product requires activation information, which will be requested in the next step.\n\n",
+                                        "ℹ️ This product requires activation information, which will be requested in the next step.",
                                     )
                                 } else {
                                     "".to_string()
@@ -2822,16 +2819,12 @@ fn truncate_button_text(value: &str, max_chars: usize) -> String {
     format!("{shortened}...")
 }
 
-fn product_prompt_name(product: &Product) -> String {
-    truncate_button_text(product.name.trim(), PRODUCT_PROMPT_NAME_MAX_CHARS)
-}
-
 fn description_for_quantity_prompt(description: &str) -> String {
     let trimmed = description.trim_end();
     if trimmed.is_empty() {
         String::new()
     } else {
-        format!("{trimmed}\n\n")
+        trimmed.to_string()
     }
 }
 
@@ -2848,7 +2841,7 @@ fn product_description_prompt_line(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        lines.push(format_product_prompt_description(desc));
+        lines.push(desc.to_string());
     }
 
     if product.show_sold_count.unwrap_or(0) != 0 {
@@ -2869,45 +2862,9 @@ fn product_description_prompt_line(
         ctx,
         lang,
         "product_description_line",
-        "📝 Mô tả\n{description}\n\n",
+        "📝 Mô tả:\n{description}\n\n",
         &[("description", lines.join("\n\n"))],
     )
-}
-
-fn format_product_prompt_description(description: &str) -> String {
-    let normalized = description
-        .replace(" | ", "\n")
-        .replace(" - ", "\n")
-        .replace(" • ", "\n");
-    let mut lines = Vec::new();
-
-    for raw in normalized.lines() {
-        let line = raw
-            .trim()
-            .trim_start_matches(&['•', '-', '*'][..])
-            .trim();
-        if line.is_empty() {
-            continue;
-        }
-        lines.push(format!(
-            "• {}",
-            truncate_button_text(line, PRODUCT_PROMPT_DESCRIPTION_LINE_MAX_CHARS)
-        ));
-        if lines.len() >= PRODUCT_PROMPT_DESCRIPTION_MAX_LINES {
-            break;
-        }
-    }
-
-    if normalized
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count()
-        > PRODUCT_PROMPT_DESCRIPTION_MAX_LINES
-    {
-        lines.push("• ...".to_string());
-    }
-
-    lines.join("\n")
 }
 
 fn render_button_custom_emoji_placeholders(value: &str) -> (String, Option<String>) {
@@ -2958,7 +2915,7 @@ fn uploaded_file_quantity_prompt(
         ctx,
         lang,
         "uploaded_file_quantity_prompt",
-        "✅ {product}\n💵 Price: {price}\n📦 File stock: {stock}\n\n{description}📎 Product files will be sent automatically after payment.\n\n⌨️ Enter file quantity:",
+        "✅ You selected {product} — {price}\n📦 File stock left: {stock}\n{description}📎 Product files will be sent automatically after payment.\n\n⌨️ Enter the number of files to buy:",
         &[
             ("product", product_name.to_string()),
             ("price", format_vnd(price)),
@@ -3498,7 +3455,7 @@ mod tests {
             &ctx,
             "vi",
             "product_description_line",
-            "📝 Description\n{description}\n\n",
+            "📝 Description:\n{description}\n\n",
             &[("description", "Mo ta {5420147074266044260}".to_string())],
         );
         let text = uploaded_file_quantity_prompt(
@@ -3882,22 +3839,22 @@ mod tests {
         let ctx = test_ctx();
         let text = uploaded_file_quantity_prompt("Tool", 50_000, 3, None, &ctx, "vi");
 
-        assert!(text.contains("File stock: 3"));
-        assert!(text.contains("Enter file quantity"));
+        assert!(text.contains("File stock left: 3"));
+        assert!(text.contains("Enter the number of files to buy"));
         assert!(text.contains("Tool"));
         assert!(text.contains("50.000đ"));
     }
 
     #[test]
     fn quantity_prompt_description_keeps_single_blank_line_before_input() {
-        let desc = "📝 Mô tả\nTest bot\n\n";
+        let desc = "📝 Mô tả:\nTest bot\n\n";
         let text = format!(
-            "✅ Tool\n💵 Giá: 10.000đ\n📦 Còn: 1\n\n{}{}⌨️ Nhập số lượng:",
+            "✅ Bạn chọn Tool - 10.000đ\n📦 Còn lại: 1\n{}{}\n\n⌨️ Nhập số lượng muốn mua:",
             description_for_quantity_prompt(desc),
             ""
         );
 
-        assert!(text.contains("Test bot\n\n⌨️ Nhập số lượng:"));
+        assert!(text.contains("Test bot\n\n⌨️ Nhập số lượng muốn mua:"));
         assert!(!text.contains("Test bot\n\n\n⌨️"));
     }
 
@@ -3935,22 +3892,7 @@ mod tests {
         let text = product_description_prompt_line(&ctx, "vi", &product, 12);
 
         assert!(text.contains("Mô tả"));
-        assert!(text.contains("• Mô tả"));
         assert!(text.trim_end().ends_with("Đã bán: 12 sản phẩm"));
-    }
-
-    #[tokio::test]
-    async fn product_description_prompt_splits_long_separator_text_into_short_bullets() {
-        let ctx = test_ctx();
-        let product = test_product_with_description(Some(
-            "Clone sạch sẽ khách hàng yên tâm sử dụng: UID | Pass | 2FA | Mail vía lấy code | Cookie | Checkpoint",
-        ));
-
-        let text = product_description_prompt_line(&ctx, "vi", &product, 0);
-
-        assert!(text.contains("• Clone sạch sẽ"));
-        assert!(text.contains("• Pass"));
-        assert!(text.contains("• Cookie"));
     }
 
     #[tokio::test]
