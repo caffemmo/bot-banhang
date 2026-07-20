@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
 use teloxide::requests::Requester;
-use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
 use crate::app::AppContext;
 use crate::bot::i18n;
@@ -512,17 +512,19 @@ pub async fn send_product_file(
     if product_delivery_type(&owp.product) == "stock_item" {
         let rows = stock_delivery_fallback_keyboard_rows(owp.product.id, &continue_shopping_btn);
 
-        let text = format_stock_delivery_message(ctx, owp, delivered_data);
+        let text = format_stock_delivery_message_html(ctx, owp, delivered_data);
         if text.chars().count() <= 3900 {
-            let reply_markup =
-                stock_delivery_keyboard_json(owp.product.id, &continue_shopping_btn, delivered_data);
-            let payload = i18n::message_payload_with_json_keyboard(
-                ctx,
-                ChatId(owp.order.chat_id),
-                "",
-                text.clone(),
-                reply_markup,
-            )?;
+            let reply_markup = stock_delivery_keyboard_json(
+                owp.product.id,
+                &continue_shopping_btn,
+                delivered_data,
+            );
+            let payload = json!({
+                "chat_id": owp.order.chat_id,
+                "text": text.clone(),
+                "parse_mode": "HTML",
+                "reply_markup": reply_markup,
+            });
 
             if let Err(err) = i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await {
                 tracing::warn!(
@@ -531,14 +533,16 @@ pub async fn send_product_file(
                 );
                 ctx.bot
                     .send_message(ChatId(owp.order.chat_id), text)
+                    .parse_mode(ParseMode::Html)
                     .reply_markup(InlineKeyboardMarkup::new(rows))
                     .await?;
             }
         } else {
+            let file_text = format_stock_delivery_message(ctx, owp, delivered_data);
             ctx.bot
                 .send_document(
                     ChatId(owp.order.chat_id),
-                    InputFile::memory(text.into_bytes())
+                    InputFile::memory(file_text.into_bytes())
                         .file_name(format!("data_{}.txt", owp.order.bank_memo)),
                 )
                 .caption(
@@ -653,6 +657,21 @@ fn format_stock_delivery_message(
     )
 }
 
+fn format_stock_delivery_message_html(
+    ctx: &AppContext,
+    owp: &OrderWithProduct,
+    delivered_data: &str,
+) -> String {
+    format_stock_delivery_message_html_parts(
+        &owp.order.bank_memo,
+        &display_product_name(ctx, &owp.product.name),
+        owp.order.qty,
+        owp.order.amount,
+        &format_order_paid_time(&owp.order.paid_at, &owp.order.created_at),
+        delivered_data,
+    )
+}
+
 fn format_stock_delivery_message_parts(
     memo: &str,
     product: &str,
@@ -666,6 +685,48 @@ fn format_stock_delivery_message_parts(
         return product_data;
     }
 
+    format_stock_delivery_message_body(
+        memo,
+        product,
+        qty,
+        amount,
+        paid_time,
+        &product_data,
+    )
+}
+
+fn format_stock_delivery_message_html_parts(
+    memo: &str,
+    product: &str,
+    qty: i64,
+    amount: i64,
+    paid_time: &str,
+    delivered_data: &str,
+) -> String {
+    let product_data = format_raw_stock_delivery_message(delivered_data);
+    if delivered_data.trim().is_empty() {
+        return html_escape(&product_data);
+    }
+
+    let product_data_html = format!("<pre>{}</pre>", html_escape(&product_data));
+    format_stock_delivery_message_body(
+        &html_escape(memo),
+        &html_escape(product),
+        qty,
+        amount,
+        &html_escape(paid_time),
+        &product_data_html,
+    )
+}
+
+fn format_stock_delivery_message_body(
+    memo: &str,
+    product: &str,
+    qty: i64,
+    amount: i64,
+    paid_time: &str,
+    product_data: &str,
+) -> String {
     format!(
         "🛒 THANH TOÁN THÀNH CÔNG!\n\
 ━━━━━━━━━━━━━━━━━━━━\n\
@@ -1154,6 +1215,24 @@ mod tests {
         assert!(text.contains("🏆 Sản phẩm: ChatGPT Plus"));
         assert!(text.contains("💰 Tổng: 23.000đ"));
         assert!(text.contains(raw));
+    }
+
+    #[test]
+    fn stock_delivery_message_html_renders_stock_as_code_block() {
+        let raw = "user<1>|pass&2|mail@test.com";
+
+        let text = format_stock_delivery_message_html_parts(
+            "HRS160726110512P23",
+            "ChatGPT <Plus>",
+            1,
+            23000,
+            "04:05 16/07/2026",
+            raw,
+        );
+
+        assert!(text.contains("🏆 Sản phẩm: ChatGPT &lt;Plus&gt;"));
+        assert!(text.contains("<pre>user&lt;1&gt;|pass&amp;2|mail@test.com</pre>"));
+        assert!(!text.contains("Raw backup"));
     }
 
     #[test]
