@@ -39,7 +39,6 @@ struct NetflixCookie {
     pc_login_link: Option<String>,
     token_expires: Option<i64>,
     time_remaining: Option<i64>,
-    quota_remaining: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,30 +141,57 @@ pub fn netflix_button_json(ctx: &AppContext, lang: &str) -> Value {
 async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
     if !netflix_enabled(ctx) {
         ctx.bot
-            .send_message(chat_id, "🎬 Netflix hiện đang tắt, vui lòng quay lại sau.")
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_disabled_message",
+                    "🎬 Netflix hiện đang tắt, vui lòng quay lại sau.",
+                ),
+            )
             .await?;
         return Ok(());
     }
 
     let price = netflix_price(ctx);
     let wallet_hint = if price > 0 {
-        format!("\nGiá: <b>{}</b>", format_vnd(price))
+        format!(
+            "\n{}: <b>{}</b>",
+            netflix_text(ctx, "netflix_price_label", "Giá"),
+            format_vnd(price)
+        )
     } else {
-        "\nGiá: <b>Miễn phí</b>".to_string()
+        format!(
+            "\n{}: <b>{}</b>",
+            netflix_text(ctx, "netflix_price_label", "Giá"),
+            netflix_text(ctx, "netflix_free_label", "Miễn phí")
+        )
     };
     let text = format!(
-        "🎬 <b>XEM NETFLIX</b>\n\nBấm nút bên dưới để lấy cookie và link đăng nhập Netflix.{wallet_hint}\n\nLink đăng nhập có hạn khoảng 1 giờ. Khi hết hạn, bấm <b>Tạo lại link</b>."
+        "{}\n\n{}{wallet_hint}\n\n{}",
+        netflix_text(ctx, "netflix_menu_title", "🎬 <b>XEM NETFLIX</b>"),
+        netflix_text(
+            ctx,
+            "netflix_menu_description",
+            "Bấm nút bên dưới để lấy cookie và link đăng nhập Netflix."
+        ),
+        netflix_text(
+            ctx,
+            "netflix_menu_note",
+            "Link đăng nhập có hạn khoảng 1 giờ. Khi hết hạn, bấm <b>Tạo lại link</b>."
+        )
     );
 
+    let buy_button_text = netflix_text(ctx, "netflix_buy_button_text", "🎬 Lấy Netflix");
     ctx.bot
         .send_message(chat_id, text)
         .parse_mode(ParseMode::Html)
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![InlineKeyboardButton::callback(
                 if price > 0 {
-                    format!("🎬 Lấy Netflix ({})", format_vnd(price))
+                    format!("{} ({})", buy_button_text, format_vnd(price))
                 } else {
-                    "🎬 Lấy Netflix".to_string()
+                    buy_button_text
                 },
                 "netflix:buy",
             )],
@@ -191,7 +217,14 @@ async fn handle_netflix_buy(
 ) -> Result<()> {
     if !netflix_enabled(ctx) {
         ctx.bot
-            .send_message(chat_id, "🎬 Netflix hiện đang tắt, vui lòng quay lại sau.")
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_disabled_message",
+                    "🎬 Netflix hiện đang tắt, vui lòng quay lại sau.",
+                ),
+            )
             .await?;
         return Ok(());
     }
@@ -200,7 +233,7 @@ async fn handle_netflix_buy(
         ctx.bot
             .send_message(
                 chat_id,
-                "⚠️ Chưa cấu hình API key Netflix CTV. Vào web admin nhập netflix_ctv_api_key.",
+                netflix_text(ctx, "netflix_get_error_message", "⚠️ Get lỗi, vui lòng thử lại sau."),
             )
             .await?;
         return Ok(());
@@ -246,7 +279,14 @@ async fn handle_netflix_buy(
     }
 
     ctx.bot
-        .send_message(chat_id, "⏳ Đang lấy Netflix, vui lòng chờ...")
+        .send_message(
+            chat_id,
+            netflix_text(
+                ctx,
+                "netflix_loading_message",
+                "⏳ Đang lấy Netflix, vui lòng chờ...",
+            ),
+        )
         .await?;
 
     match call_get_cookie_api(ctx, &api_key).await {
@@ -261,14 +301,18 @@ async fn handle_netflix_buy(
             ctx.bot
                 .send_message(
                     chat_id,
-                    format!(
-                        "⚠️ Chưa lấy được Netflix từ API bên thứ 3.\nLý do: {}",
-                        html_escape(&friendly_error(&err.to_string()))
-                    ),
+                    html_escape(&netflix_text(
+                        ctx,
+                        "netflix_get_error_message",
+                        "⚠️ Get lỗi, vui lòng thử lại sau.",
+                    )),
                 )
                 .parse_mode(ParseMode::Html)
                 .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-                    InlineKeyboardButton::callback("🔄 Thử lại", "netflix:buy"),
+                    InlineKeyboardButton::callback(
+                        netflix_text(ctx, "netflix_retry_button_text", "🔄 Thử lại"),
+                        "netflix:buy",
+                    ),
                     InlineKeyboardButton::callback("⬅️ Quay lại", "netflix:menu"),
                 ]]))
                 .await?;
@@ -289,20 +333,38 @@ async fn handle_netflix_regen(
         ctx.bot
             .send_message(
                 chat_id,
-                "⚠️ Chưa cấu hình API key Netflix CTV. Vào web admin nhập netflix_ctv_api_key.",
+                netflix_text(
+                    ctx,
+                    "netflix_regen_error_message",
+                    "⚠️ Tạo lại link lỗi, vui lòng thử lại sau.",
+                ),
             )
             .await?;
         return Ok(());
     };
     let Some(session) = get_netflix_session(ctx, session_id, user_id, chat_id.0).await? else {
         ctx.bot
-            .send_message(chat_id, "Không tìm thấy phiên Netflix này.")
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_session_missing_message",
+                    "Không tìm thấy phiên Netflix này.",
+                ),
+            )
             .await?;
         return Ok(());
     };
 
     ctx.bot
-        .send_message(chat_id, "⏳ Đang tạo lại link Netflix...")
+        .send_message(
+            chat_id,
+            netflix_text(
+                ctx,
+                "netflix_regen_loading_message",
+                "⏳ Đang tạo lại link Netflix...",
+            ),
+        )
         .await?;
 
     match call_regen_api(ctx, &api_key, &session.log_id).await {
@@ -316,23 +378,23 @@ async fn handle_netflix_regen(
                 pc_login_link: Some(pc_link),
                 token_expires: expires_at,
                 time_remaining: None,
-                quota_remaining: None,
             };
             send_netflix_cookie(ctx, chat_id, session.id, &cookie, 0).await?;
         }
-        Err(err) => {
+        Err(_err) => {
             ctx.bot
                 .send_message(
                     chat_id,
-                    format!(
-                        "⚠️ Chưa tạo lại được link.\nLý do: {}",
-                        html_escape(&friendly_error(&err.to_string()))
-                    ),
+                    html_escape(&netflix_text(
+                        ctx,
+                        "netflix_regen_error_message",
+                        "⚠️ Tạo lại link lỗi, vui lòng thử lại sau.",
+                    )),
                 )
                 .parse_mode(ParseMode::Html)
                 .reply_markup(InlineKeyboardMarkup::new(vec![vec![
                     InlineKeyboardButton::callback(
-                        "🔄 Thử lại",
+                        netflix_text(ctx, "netflix_retry_button_text", "🔄 Thử lại"),
                         format!("netflix:regen:{session_id}"),
                     ),
                     InlineKeyboardButton::callback("⬅️ Menu Netflix", "netflix:menu"),
@@ -354,41 +416,60 @@ async fn send_netflix_cookie(
     let mut rows = Vec::new();
     let mut link_row = Vec::new();
     if let Some(link) = cookie.pc_login_link.as_deref().and_then(url_button_link) {
-        link_row.push(InlineKeyboardButton::url("💻 Mở PC", link));
+        link_row.push(InlineKeyboardButton::url(
+            netflix_text(ctx, "netflix_pc_button_text", "💻 Mở PC"),
+            link,
+        ));
     }
     if let Some(link) = cookie.mobile_login_link.as_deref().and_then(url_button_link) {
-        link_row.push(InlineKeyboardButton::url("📱 Mở Mobile", link));
+        link_row.push(InlineKeyboardButton::url(
+            netflix_text(ctx, "netflix_mobile_button_text", "📱 Mở Mobile"),
+            link,
+        ));
     }
     if !link_row.is_empty() {
         rows.push(link_row);
     }
     rows.push(vec![InlineKeyboardButton::callback(
-        "🔄 Tạo lại link",
+        netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
         format!("netflix:regen:{session_id}"),
     )]);
     rows.push(vec![InlineKeyboardButton::callback(
-        "🎬 Lấy Netflix khác",
+        netflix_text(ctx, "netflix_buy_again_button_text", "🎬 Lấy Netflix khác"),
         "netflix:buy",
     )]);
 
     let mut text = format!(
-        "✅ <b>NETFLIX ĐÃ SẴN SÀNG</b>\n\nMã cookie: <code>{}</code>\nLog ID: <code>{}</code>",
+        "{}\n\n{}: <code>{}</code>",
+        netflix_text(ctx, "netflix_success_title", "✅ <b>NETFLIX ĐÃ SẴN SÀNG</b>"),
+        netflix_text(ctx, "netflix_account_code_label", "Mã tài khoản"),
         cookie
             .cookie_number
             .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        html_escape(&cookie.log_id)
+            .unwrap_or_else(|| "-".to_string())
     );
     if price > 0 {
-        text.push_str(&format!("\nĐã trừ ví: <b>{}</b>", format_vnd(price)));
+        text.push_str(&format!(
+            "\n{}: <b>{}</b>",
+            netflix_text(ctx, "netflix_wallet_deducted_label", "Đã trừ ví"),
+            format_vnd(price)
+        ));
     }
     if let Some(time) = cookie.time_remaining {
-        text.push_str(&format!("\nLink còn hạn khoảng: <b>{}</b>", format_seconds(time)));
+        text.push_str(&format!(
+            "\n{}: <b>{}</b>",
+            netflix_text(ctx, "netflix_time_remaining_label", "Link còn hạn khoảng"),
+            format_seconds(time)
+        ));
     }
-    if let Some(quota) = cookie.quota_remaining {
-        text.push_str(&format!("\nQuota API còn: <b>{quota}</b>"));
-    }
-    text.push_str("\n\nBấm nút bên dưới để mở Netflix. Nếu link hết hạn, bấm Tạo lại link.");
+    text.push_str(&format!(
+        "\n\n{}",
+        netflix_text(
+            ctx,
+            "netflix_success_note",
+            "Bấm nút bên dưới để mở Netflix. Nếu link hết hạn, bấm Tạo lại link."
+        )
+    ));
 
     ctx.bot
         .send_message(chat_id, text)
@@ -401,7 +482,11 @@ async fn send_netflix_cookie(
             ctx.bot
                 .send_message(
                     chat_id,
-                    format!("🍪 <b>Cookie Netflix</b>\n<pre>{}</pre>", html_escape(raw_cookie)),
+                    format!(
+                        "{}\n<pre>{}</pre>",
+                        netflix_text(ctx, "netflix_cookie_title", "🍪 <b>Cookie Netflix</b>"),
+                        html_escape(raw_cookie)
+                    ),
                 )
                 .parse_mode(ParseMode::Html)
                 .await?;
@@ -412,7 +497,11 @@ async fn send_netflix_cookie(
                     InputFile::memory(raw_cookie.as_bytes().to_vec())
                         .file_name(format!("netflix_cookie_{session_id}.txt")),
                 )
-                .caption("🍪 Cookie Netflix được gửi trong file.")
+                .caption(netflix_text(
+                    ctx,
+                    "netflix_cookie_file_caption",
+                    "🍪 Cookie Netflix được gửi trong file.",
+                ))
                 .await?;
         }
     }
@@ -452,9 +541,6 @@ async fn call_get_cookie_api(ctx: &AppContext, api_key: &str) -> Result<NetflixC
         pc_login_link: pc,
         token_expires: json_i64(&value, "tokenExpires"),
         time_remaining: json_i64(&value, "timeRemaining"),
-        quota_remaining: value
-            .get("quota")
-            .and_then(|quota| json_i64(quota, "remaining")),
     })
 }
 
@@ -595,10 +681,10 @@ async fn refund_netflix_purchase(
     user_id: i64,
     amount: i64,
     order_id: &str,
-    reason: &str,
+    _reason: &str,
 ) -> Result<()> {
     let mut tx = ctx.pool.begin().await?;
-    let note = format!("Hoàn tiền Netflix API lỗi: {}", friendly_error(reason));
+    let note = "Hoàn tiền Netflix do get lỗi";
     wallet_repo::credit_wallet(
         &mut tx,
         user_id,
@@ -606,7 +692,7 @@ async fn refund_netflix_purchase(
         "refund",
         Some(order_id),
         None,
-        Some(&note),
+        Some(note),
     )
     .await?;
     tx.commit().await?;
@@ -626,6 +712,15 @@ fn netflix_price(ctx: &AppContext) -> i64 {
         .parse::<i64>()
         .unwrap_or(0)
         .max(0)
+}
+
+fn netflix_text(ctx: &AppContext, key: &str, default: &str) -> String {
+    let value = ctx.get_text(key, default);
+    if value.trim().is_empty() {
+        default.to_string()
+    } else {
+        value
+    }
 }
 
 fn netflix_client(ctx: &AppContext) -> Result<Client> {
