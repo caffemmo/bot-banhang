@@ -122,6 +122,8 @@ impl AppPlugin for NetflixCommandPlugin {
             send_netflix_mobile_guide(&ctx, chat_id).await?;
         } else if data == "netflix:mobile_language_guide" {
             send_netflix_mobile_language_guide(&ctx, chat_id).await?;
+        } else if data == "netflix:reopen_latest" {
+            handle_netflix_reopen_latest(&ctx, chat_id, user_id, &lang).await?;
         } else if let Some(id) = data
             .strip_prefix("netflix:cookie:")
             .and_then(|raw| raw.parse::<i64>().ok())
@@ -205,29 +207,30 @@ async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Res
         },
         "netflix:buy",
     )]];
-    if let Some(button) = netflix_pc_guide_button(ctx) {
+    if let Some(button) = netflix_reopen_latest_button(ctx) {
         menu_rows.push(vec![button]);
     }
-    if let Some(button) = netflix_language_vi_guide_button(ctx) {
-        menu_rows.push(vec![button]);
-    }
-    if let Some(button) = netflix_mobile_guide_button(ctx) {
-        menu_rows.push(vec![button]);
-    }
-    if let Some(button) = netflix_mobile_language_guide_button(ctx) {
-        menu_rows.push(vec![button]);
-    }
-    menu_rows.push(vec![i18n::inline_button_callback(
-        ctx,
-        lang,
-        "start_btn_wallet",
-        "💳 Ví tiền",
-        "start:wallet",
-    )]);
-    menu_rows.push(vec![InlineKeyboardButton::callback(
-        "⬅️ Quay lại",
-        "start:menu",
-    )]);
+    push_button_pair_row(
+        &mut menu_rows,
+        netflix_pc_guide_button(ctx),
+        netflix_mobile_guide_button(ctx),
+    );
+    push_button_pair_row(
+        &mut menu_rows,
+        netflix_language_vi_guide_button(ctx),
+        netflix_mobile_language_guide_button(ctx),
+    );
+    push_button_pair_row(
+        &mut menu_rows,
+        Some(i18n::inline_button_callback(
+            ctx,
+            lang,
+            "start_btn_wallet",
+            "💳 Ví tiền",
+            "start:wallet",
+        )),
+        Some(InlineKeyboardButton::callback("⬅️ Quay lại", "start:menu")),
+    );
 
     ctx.bot
         .send_message(chat_id, text)
@@ -435,6 +438,50 @@ async fn handle_netflix_regen(
     Ok(())
 }
 
+async fn handle_netflix_reopen_latest(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    user_id: i64,
+    lang: &str,
+) -> Result<()> {
+    if netflix_api_key(ctx).is_none() {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_regen_error_message",
+                    "⚠️ Tạo lại link lỗi, vui lòng thử lại sau.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let Some(session) = get_latest_netflix_session(ctx, user_id, chat_id.0).await? else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_reopen_latest_missing_message",
+                    "⚠️ Chưa có lượt Netflix cũ để mở lại. Hãy lấy Netflix trước.",
+                ),
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                InlineKeyboardButton::callback(
+                    netflix_text(ctx, "netflix_buy_button_text", "🎬 Lấy Netflix"),
+                    "netflix:buy",
+                ),
+                InlineKeyboardButton::callback("⬅️ Quay lại", "netflix:menu"),
+            ]]))
+            .await?;
+        return Ok(());
+    };
+
+    handle_netflix_regen(ctx, chat_id, user_id, session.id, lang).await
+}
+
 async fn send_netflix_cookie(
     ctx: &AppContext,
     chat_id: ChatId,
@@ -443,46 +490,50 @@ async fn send_netflix_cookie(
     price: i64,
 ) -> Result<()> {
     let mut rows = Vec::new();
-    let mut link_row = Vec::new();
-    if let Some(link) = cookie.pc_login_link.as_deref().and_then(url_button_link) {
-        link_row.push(InlineKeyboardButton::url(
-            netflix_text(ctx, "netflix_pc_button_text", "💻 Mở PC"),
-            link,
-        ));
-    }
-    if let Some(link) = cookie.mobile_login_link.as_deref().and_then(url_button_link) {
-        link_row.push(InlineKeyboardButton::url(
-            netflix_text(ctx, "netflix_mobile_button_text", "📱 Mở Mobile"),
-            link,
-        ));
-    }
-    if !link_row.is_empty() {
-        rows.push(link_row);
-    }
-    rows.push(vec![InlineKeyboardButton::callback(
-        netflix_text(ctx, "netflix_cookie_button_text", "🍪 Lấy cookie"),
-        format!("netflix:cookie:{session_id}"),
-    )]);
-    if let Some(button) = netflix_pc_guide_button(ctx) {
-        rows.push(vec![button]);
-    }
-    if let Some(button) = netflix_language_vi_guide_button(ctx) {
-        rows.push(vec![button]);
-    }
-    if let Some(button) = netflix_mobile_guide_button(ctx) {
-        rows.push(vec![button]);
-    }
-    if let Some(button) = netflix_mobile_language_guide_button(ctx) {
-        rows.push(vec![button]);
-    }
-    rows.push(vec![InlineKeyboardButton::callback(
-        netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
-        format!("netflix:regen:{session_id}"),
-    )]);
-    rows.push(vec![InlineKeyboardButton::callback(
-        netflix_text(ctx, "netflix_buy_again_button_text", "🎬 Lấy Netflix khác"),
-        "netflix:buy",
-    )]);
+    push_button_pair_row(
+        &mut rows,
+        cookie.pc_login_link.as_deref().and_then(url_button_link).map(|link| {
+            InlineKeyboardButton::url(
+                netflix_text(ctx, "netflix_pc_button_text", "💻 Mở PC"),
+                link,
+            )
+        }),
+        cookie.mobile_login_link.as_deref().and_then(url_button_link).map(|link| {
+            InlineKeyboardButton::url(
+                netflix_text(ctx, "netflix_mobile_button_text", "📱 Mở Mobile"),
+                link,
+            )
+        }),
+    );
+    push_button_pair_row(
+        &mut rows,
+        Some(InlineKeyboardButton::callback(
+            netflix_text(ctx, "netflix_cookie_button_text", "🍪 Lấy cookie"),
+            format!("netflix:cookie:{session_id}"),
+        )),
+        Some(InlineKeyboardButton::callback(
+            netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
+            format!("netflix:regen:{session_id}"),
+        )),
+    );
+    push_button_pair_row(
+        &mut rows,
+        netflix_pc_guide_button(ctx),
+        netflix_language_vi_guide_button(ctx),
+    );
+    push_button_pair_row(
+        &mut rows,
+        netflix_mobile_guide_button(ctx),
+        netflix_mobile_language_guide_button(ctx),
+    );
+    push_button_pair_row(
+        &mut rows,
+        Some(InlineKeyboardButton::callback(
+            netflix_text(ctx, "netflix_buy_again_button_text", "🎬 Lấy Netflix khác"),
+            "netflix:buy",
+        )),
+        Some(InlineKeyboardButton::callback("⬅️ Menu Netflix", "netflix:menu")),
+    );
 
     let mut text = format!(
         "{}\n\n{}: <code>{}</code>",
@@ -523,6 +574,19 @@ async fn send_netflix_cookie(
         .await?;
 
     Ok(())
+}
+
+fn push_button_pair_row(
+    rows: &mut Vec<Vec<InlineKeyboardButton>>,
+    left: Option<InlineKeyboardButton>,
+    right: Option<InlineKeyboardButton>,
+) {
+    match (left, right) {
+        (Some(left), Some(right)) => rows.push(vec![left, right]),
+        (Some(left), None) => rows.push(vec![left]),
+        (None, Some(right)) => rows.push(vec![right]),
+        (None, None) => {}
+    }
 }
 
 async fn handle_netflix_cookie(
@@ -609,6 +673,20 @@ async fn send_netflix_mobile_language_guide(ctx: &AppContext, chat_id: ChatId) -
         "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
     )
     .await
+}
+
+fn netflix_reopen_latest_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
+    if !config_bool(ctx, "netflix_reopen_latest_enabled", true) {
+        return None;
+    }
+    Some(InlineKeyboardButton::callback(
+        netflix_text(
+            ctx,
+            "netflix_reopen_latest_button_text",
+            "🔄 Mở lại link cũ",
+        ),
+        "netflix:reopen_latest",
+    ))
 }
 
 async fn send_netflix_mobile_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
@@ -795,6 +873,31 @@ async fn ensure_netflix_schema(pool: &crate::db::DbPool) -> Result<()> {
     Ok(())
 }
 
+async fn get_latest_netflix_session(
+    ctx: &AppContext,
+    user_id: i64,
+    chat_id: i64,
+) -> Result<Option<NetflixSession>> {
+    let row = sqlx::query_as::<_, (i64, String, Option<i64>, Option<String>)>(
+        r#"SELECT id, log_id, cookie_number, cookie
+        FROM netflix_sessions
+        WHERE user_id = ? AND chat_id = ?
+        ORDER BY id DESC
+        LIMIT 1"#,
+    )
+    .bind(user_id)
+    .bind(chat_id)
+    .fetch_optional(&ctx.pool)
+    .await?;
+
+    Ok(row.map(|(id, log_id, cookie_number, cookie)| NetflixSession {
+        id,
+        log_id,
+        cookie_number,
+        cookie,
+    }))
+}
+
 async fn save_netflix_session(
     ctx: &AppContext,
     user_id: i64,
@@ -912,7 +1015,7 @@ fn netflix_pc_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
         netflix_text(
             ctx,
             "netflix_pc_guide_button_text",
-            "💻 Hướng dẫn xem trên PC",
+            "💻 Xem trên PC",
         ),
         "netflix:pc_guide",
     ))
@@ -926,7 +1029,7 @@ fn netflix_language_vi_guide_button(ctx: &AppContext) -> Option<InlineKeyboardBu
         netflix_text(
             ctx,
             "netflix_language_vi_guide_button_text",
-            "🌐 Hướng dẫn đổi ngôn ngữ sang Tiếng Việt",
+            "🌐 Đổi ngôn ngữ PC",
         ),
         "netflix:language_vi_guide",
     ))
@@ -940,7 +1043,7 @@ fn netflix_mobile_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton>
         netflix_text(
             ctx,
             "netflix_mobile_guide_button_text",
-            "📱 Cách coi trên Mobie",
+            "📱 Xem trên Mobile",
         ),
         "netflix:mobile_guide",
     ))
@@ -954,7 +1057,7 @@ fn netflix_mobile_language_guide_button(ctx: &AppContext) -> Option<InlineKeyboa
         netflix_text(
             ctx,
             "netflix_mobile_language_guide_button_text",
-            "🌐 Cách đổi ngôn ngữ Mobile",
+            "🌐 Đổi ngôn ngữ Mobile",
         ),
         "netflix:mobile_language_guide",
     ))
