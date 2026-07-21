@@ -187,6 +187,10 @@ fn required_channel_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("required_channel_enabled", "1"))
 }
 
+fn start_viameta_enabled(ctx: &AppContext) -> bool {
+    required_channel_enabled_value(&ctx.get_text("start_viameta_enabled", "0"))
+}
+
 fn required_channel_ids(ctx: &AppContext) -> Vec<String> {
     required_channel_candidates(
         &ctx.get_text("required_channel_id", "@zvwboo"),
@@ -288,32 +292,84 @@ async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resul
 }
 
 fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
-    json!({
-        "inline_keyboard": [
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", AFFILIATE_REGISTER_CALLBACK),
-            ],
-            [
-                start_community_button_json(ctx, lang),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language"),
-            ],
-        ]
-    })
+    let mut rows = vec![
+        vec![i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_shop",
+            "🛒 Shop",
+            "start:shop",
+        )],
+        vec![
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_topup",
+                "💰 Top up",
+                "wallet:topup",
+            ),
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_wallet",
+                "💳 Wallet",
+                "start:wallet",
+            ),
+        ],
+        vec![
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_purchased",
+                "📦 Purchased",
+                "start:orders",
+            ),
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_topup_history",
+                "📜 Top-up history",
+                "wallet:topup_history",
+            ),
+        ],
+    ];
+
+    let mut support_row = vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_help",
+        "Help",
+        "start:help",
+    )];
+    if start_viameta_enabled(ctx) {
+        support_row.push(i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_viameta",
+            "✅ Up tích xanh",
+            "viameta:menu",
+        ));
+    }
+    rows.push(support_row);
+    rows.push(vec![
+        i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_affiliate_register",
+            "🤝 Đăng kí CTV",
+            AFFILIATE_REGISTER_CALLBACK,
+        ),
+        start_community_button_json(ctx, lang),
+    ]);
+    rows.push(vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_language",
+        "🌐 Language",
+        "start:language",
+    )]);
+
+    json!({ "inline_keyboard": rows })
 }
 
 fn start_community_button_json(ctx: &AppContext, lang: &str) -> Value {

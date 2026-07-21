@@ -115,6 +115,10 @@ fn required_channel_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("required_channel_enabled", "1"))
 }
 
+fn start_viameta_enabled(ctx: &AppContext) -> bool {
+    required_channel_enabled_value(&ctx.get_text("start_viameta_enabled", "0"))
+}
+
 fn required_channel_ids(ctx: &AppContext) -> Vec<String> {
     required_channel_candidates(
         &ctx.get_text("required_channel_id", "@zvwboo"),
@@ -294,32 +298,84 @@ async fn send_start_menu(
 }
 
 fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
-    json!({
-        "inline_keyboard": [
-            [i18n::inline_button_callback_json(ctx, lang, "start_btn_shop", "🛒 Shop", "start:shop")],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_topup", "💰 Top up", "wallet:topup"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_wallet", "💳 Wallet", "start:wallet"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_purchased", "📦 Purchased", "start:orders"),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_topup_history", "📜 Top-up history", "wallet:topup_history"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_viameta", "✅ Dịch vụ tích xanh", "viameta:menu"),
-            ],
-            [
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_affiliate_register", "🤝 Đăng kí CTV", "affiliate:register"),
-            ],
-            [
-                start_community_button_json(ctx, lang),
-                i18n::inline_button_callback_json(ctx, lang, "start_btn_language", "🌐 Language", "start:language"),
-            ],
-        ]
-    })
+    let mut rows = vec![
+        vec![i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_shop",
+            "🛒 Shop",
+            "start:shop",
+        )],
+        vec![
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_topup",
+                "💰 Top up",
+                "wallet:topup",
+            ),
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_wallet",
+                "💳 Wallet",
+                "start:wallet",
+            ),
+        ],
+        vec![
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_purchased",
+                "📦 Purchased",
+                "start:orders",
+            ),
+            i18n::inline_button_callback_json(
+                ctx,
+                lang,
+                "start_btn_topup_history",
+                "📜 Top-up history",
+                "wallet:topup_history",
+            ),
+        ],
+    ];
+
+    let mut support_row = vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_help",
+        "Help",
+        "start:help",
+    )];
+    if start_viameta_enabled(ctx) {
+        support_row.push(i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_viameta",
+            "✅ Up tích xanh",
+            "viameta:menu",
+        ));
+    }
+    rows.push(support_row);
+    rows.push(vec![
+        i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_affiliate_register",
+            "🤝 Đăng kí CTV",
+            "affiliate:register",
+        ),
+        start_community_button_json(ctx, lang),
+    ]);
+    rows.push(vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_language",
+        "🌐 Language",
+        "start:language",
+    )]);
+
+    json!({ "inline_keyboard": rows })
 }
 
 fn start_community_button_json(ctx: &AppContext, lang: &str) -> Value {
@@ -361,8 +417,12 @@ fn inline_button_url_json(
     button
 }
 
-fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(String, String)>> {
-    vec![
+fn start_menu_button_specs_from_texts(
+    texts: &BotTexts,
+    lang: &str,
+    include_viameta: bool,
+) -> Vec<Vec<(String, String)>> {
+    let mut rows = vec![
         vec![
             (
                 texts.get_lang("start_btn_shop", lang, "Shop"),
@@ -391,25 +451,28 @@ fn start_menu_button_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<(
         ],
         vec![
             (
-                texts.get_lang("start_btn_viameta", lang, "Verification service"),
-                "viameta:menu".to_string(),
-            ),
-            (
-                texts.get_lang("start_btn_affiliate_register", lang, "Register affiliate"),
-                "affiliate:register".to_string(),
+                texts.get_lang("start_btn_help", lang, "Help"),
+                "start:help".to_string(),
             ),
         ],
         vec![
             (
-                texts.get_lang("start_btn_help", lang, "Help"),
-                "start:help".to_string(),
+                texts.get_lang("start_btn_affiliate_register", lang, "Register affiliate"),
+                "affiliate:register".to_string(),
             ),
             (
                 texts.get_lang("start_btn_language", lang, "Language"),
                 "start:language".to_string(),
             ),
         ],
-    ]
+    ];
+    if include_viameta {
+        rows[3].push((
+            texts.get_lang("start_btn_viameta", lang, "Up tích xanh"),
+            "viameta:menu".to_string(),
+        ));
+    }
+    rows
 }
 
 async fn send_message_with_start_reply_keyboard(
@@ -447,7 +510,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
     ctx.texts
         .read()
         .map(|texts| {
-            start_menu_button_specs_from_texts(&texts, lang)
+            start_menu_button_specs_from_texts(&texts, lang, start_viameta_enabled(ctx))
                 .into_iter()
                 .map(|row| {
                     row.into_iter()
@@ -473,7 +536,6 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
                 vec![
                     json!({"text": "Help"}),
                 ],
-                vec![json!({"text": "✅ Dịch vụ tích xanh"})],
                 vec![json!({"text": "🌐 Language"})],
             ]
         })
@@ -495,7 +557,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
 }
 
 fn start_reply_keyboard_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<String>> {
-    start_menu_button_specs_from_texts(texts, lang)
+    start_menu_button_specs_from_texts(texts, lang, true)
         .into_iter()
         .map(|row| {
             row.into_iter()
@@ -1166,7 +1228,7 @@ mod tests {
             )]),
         );
 
-        let rows = start_menu_button_specs_from_texts(&texts, "vi");
+        let rows = start_menu_button_specs_from_texts(&texts, "vi", true);
 
         assert_eq!(
             rows,
@@ -1181,11 +1243,11 @@ mod tests {
                     ("Lich su nap".to_string(), "wallet:topup_history".to_string()),
                 ],
                 vec![
+                    ("Huong dan".to_string(), "start:help".to_string()),
                     ("Up tich xanh".to_string(), "viameta:menu".to_string()),
-                    ("CTV".to_string(), "affiliate:register".to_string()),
                 ],
                 vec![
-                    ("Huong dan".to_string(), "start:help".to_string()),
+                    ("CTV".to_string(), "affiliate:register".to_string()),
                     ("Ngon ngu".to_string(), "start:language".to_string()),
                 ],
             ]
@@ -1193,20 +1255,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_menu_keyboard_shows_community_url_button() {
+    async fn start_menu_keyboard_hides_viameta_by_default_and_shows_community() {
         let ctx = test_ctx_with_texts(BotTexts::default());
         let keyboard = start_menu_keyboard_json(&ctx, "vi");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["callback_data"], "start:shop");
         assert_eq!(rows[3][0]["callback_data"], "start:help");
-        assert_eq!(rows[4][0]["callback_data"], "viameta:menu");
-        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
-        assert_eq!(rows[6][0]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
-        assert_eq!(rows[6][1]["callback_data"], "start:language");
+        assert_eq!(rows[4][0]["callback_data"], "affiliate:register");
+        assert_eq!(rows[4][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[5][0]["callback_data"], "start:language");
+        assert!(!keyboard.to_string().contains("viameta:menu"));
         assert!(!keyboard.to_string().contains("shop_api"));
         assert!(!keyboard.to_string().contains("tut:user_home"));
         assert!(!keyboard.to_string().contains("childbot:guide"));
+    }
+
+    #[tokio::test]
+    async fn start_menu_keyboard_shows_viameta_when_admin_toggle_enabled() {
+        let ctx = test_ctx_with_texts_and_configs(
+            BotTexts::default(),
+            HashMap::from([("start_viameta_enabled".to_string(), "1".to_string())]),
+        );
+        let keyboard = start_menu_keyboard_json(&ctx, "vi");
+        let rows = keyboard["inline_keyboard"].as_array().unwrap();
+
+        assert_eq!(rows[3][0]["callback_data"], "start:help");
+        assert_eq!(rows[3][1]["callback_data"], "viameta:menu");
     }
 
     #[test]
@@ -1242,8 +1317,8 @@ mod tests {
                 vec!["Xem san pham".to_string()],
                 vec!["Nap tien".to_string(), "Vi tien".to_string()],
                 vec!["Da mua".to_string(), "Lich su nap".to_string()],
-                vec!["Up tich xanh".to_string(), "CTV".to_string()],
-                vec!["Huong dan".to_string(), "Ngon ngu".to_string()],
+                vec!["Huong dan".to_string(), "Up tich xanh".to_string()],
+                vec!["CTV".to_string(), "Ngon ngu".to_string()],
             ]
         );
     }
@@ -1492,6 +1567,13 @@ mod tests {
     }
 
     fn test_ctx_with_texts(texts: BotTexts) -> Arc<AppContext> {
+        test_ctx_with_texts_and_configs(texts, HashMap::new())
+    }
+
+    fn test_ctx_with_texts_and_configs(
+        texts: BotTexts,
+        configs: HashMap<String, String>,
+    ) -> Arc<AppContext> {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect_lazy("sqlite::memory:")
             .unwrap();
@@ -1513,7 +1595,7 @@ mod tests {
                 port: 8080,
                 crypto: crate::config::CryptoConfig::default(),
             },
-            HashMap::new(),
+            configs,
             texts,
             vec![],
         )

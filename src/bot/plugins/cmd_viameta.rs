@@ -192,7 +192,11 @@ impl AppPlugin for ViametaCommandPlugin {
             ctx.normalize_language_code(None)
         };
         let text = msg.text().unwrap_or("").trim();
-        if text == "/viameta" || text.eq_ignore_ascii_case("✅ Dịch vụ tích xanh") {
+        if text == "/viameta"
+            || text.eq_ignore_ascii_case("✅ Dịch vụ tích xanh")
+            || text.eq_ignore_ascii_case("✅ Up tích xanh")
+            || text.eq_ignore_ascii_case("Up tích xanh")
+        {
             send_viameta_menu(&ctx, msg.chat.id, &lang).await?;
             dialogue.update(State::Idle).await?;
             return Ok(true);

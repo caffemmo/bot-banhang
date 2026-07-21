@@ -121,7 +121,7 @@
   "start_btn_topup": "💰 Top up",
   "start_btn_topup_history": "📜 Top-up history",
   "start_btn_tut": "📚 TUT",
-  "start_btn_viameta": "✅ Verification service",
+  "start_btn_viameta": "✅ Verification",
   "start_btn_wallet": "💳 Wallet",
   "sale_hunt_active_deal_line": "Active deal: {percent}% off - code {code} - expires {expires_at}",
   "sale_hunt_btn_back": "⬅️ Back to sale hunt",
