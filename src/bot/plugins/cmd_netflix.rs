@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use rand::{Rng, distributions::Alphanumeric};
-use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
+use reqwest::header::{
+    ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, PRAGMA, REFERER, USER_AGENT,
+};
+use reqwest::RequestBuilder;
 use serde_json::{Value, json};
 use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
 use teloxide::prelude::*;
@@ -23,7 +26,7 @@ use crate::domains::wallet::repo as wallet_repo;
 const GET_COOKIE_URL_DEFAULT: &str = "https://api.tiembanh4k.com/api/ctv-api/get-cookie";
 const REGENERATE_URL_DEFAULT: &str =
     "https://backend-c0r3-7xpq9zn2025.onrender.com/api/ctv-api/regenerate-token";
-const API_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+const API_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
 
 pub struct NetflixCommandPlugin;
 
@@ -424,9 +427,7 @@ async fn call_get_cookie_api(ctx: &AppContext, api_key: &str) -> Result<NetflixC
     )?;
     let response = reqwest::Client::new()
         .get(url)
-        .header("X-API-Key", api_key)
-        .header(ACCEPT, "application/json")
-        .header(USER_AGENT, API_USER_AGENT)
+        .netflix_api_headers(api_key)
         .send()
         .await?;
     let value = read_api_json(response).await?;
@@ -468,10 +469,8 @@ async fn call_regen_api(
     )?;
     let response = reqwest::Client::new()
         .post(url)
-        .header("X-API-Key", api_key)
-        .header(ACCEPT, "application/json")
         .header(CONTENT_TYPE, "application/json")
-        .header(USER_AGENT, API_USER_AGENT)
+        .netflix_api_headers(api_key)
         .json(&json!({ "logId": log_id }))
         .timeout(std::time::Duration::from_secs(15))
         .send()
@@ -682,10 +681,36 @@ fn api_error_message(value: &Value) -> String {
         .to_string()
 }
 
+trait NetflixApiRequestHeaders {
+    fn netflix_api_headers(self, api_key: &str) -> Self;
+}
+
+impl NetflixApiRequestHeaders for RequestBuilder {
+    fn netflix_api_headers(self, api_key: &str) -> Self {
+        self.header("X-API-Key", api_key)
+            .header(ACCEPT, "application/json, text/plain, */*")
+            .header(ACCEPT_LANGUAGE, "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header(CACHE_CONTROL, "no-cache")
+            .header(PRAGMA, "no-cache")
+            .header(REFERER, "https://api.tiembanh4k.com/")
+            .header("Origin", "https://api.tiembanh4k.com")
+            .header("sec-fetch-site", "none")
+            .header("sec-fetch-mode", "navigate")
+            .header("sec-fetch-dest", "document")
+            .header("upgrade-insecure-requests", "1")
+            .header(USER_AGENT, API_USER_AGENT)
+    }
+}
+
 async fn read_api_json(response: reqwest::Response) -> Result<Value> {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        if status.as_u16() == 403 && looks_like_html(&body) {
+            return Err(anyhow!(
+                "API Netflix trả HTTP 403: máy chủ bên thứ 3 đang chặn request từ bot/VPS"
+            ));
+        }
         let detail = serde_json::from_str::<Value>(&body)
             .ok()
             .map(|value| api_error_message(&value))
@@ -693,6 +718,11 @@ async fn read_api_json(response: reqwest::Response) -> Result<Value> {
         return Err(anyhow!("API Netflix trả HTTP {}: {}", status.as_u16(), detail));
     }
     serde_json::from_str::<Value>(&body).context("API Netflix trả dữ liệu không phải JSON")
+}
+
+fn looks_like_html(value: &str) -> bool {
+    let value = value.trim_start().to_ascii_lowercase();
+    value.starts_with("<!doctype html") || value.starts_with("<html")
 }
 
 fn friendly_error(value: &str) -> String {
