@@ -418,7 +418,10 @@ async fn send_netflix_cookie(
 }
 
 async fn call_get_cookie_api(ctx: &AppContext, api_key: &str) -> Result<NetflixCookie> {
-    let url = ctx.get_text("netflix_get_cookie_url", GET_COOKIE_URL_DEFAULT);
+    let url = api_url_with_key(
+        &ctx.get_text("netflix_get_cookie_url", GET_COOKIE_URL_DEFAULT),
+        api_key,
+    )?;
     let value = reqwest::Client::new()
         .get(url)
         .header("X-API-Key", api_key)
@@ -460,7 +463,10 @@ async fn call_regen_api(
     api_key: &str,
     log_id: &str,
 ) -> Result<(String, String, Option<i64>)> {
-    let url = ctx.get_text("netflix_regenerate_url", REGENERATE_URL_DEFAULT);
+    let url = api_url_with_key(
+        &ctx.get_text("netflix_regenerate_url", REGENERATE_URL_DEFAULT),
+        api_key,
+    )?;
     let value = reqwest::Client::new()
         .post(url)
         .header("X-API-Key", api_key)
@@ -649,6 +655,12 @@ fn url_button_link(value: &str) -> Option<Url> {
     Url::parse(value).ok()
 }
 
+fn api_url_with_key(raw_url: &str, api_key: &str) -> Result<String> {
+    let mut url = Url::parse(raw_url.trim())?;
+    url.query_pairs_mut().append_pair("apikey", api_key);
+    Ok(url.to_string())
+}
+
 fn mobile_to_pc_link(value: &str) -> String {
     value.replace("unsupported", "browse")
 }
@@ -718,6 +730,14 @@ mod tests {
     fn json_i64_reads_number_or_string() {
         assert_eq!(json_i64(&json!({"v": 42}), "v"), Some(42));
         assert_eq!(json_i64(&json!({"v": "42"}), "v"), Some(42));
+    }
+
+    #[test]
+    fn api_url_with_key_appends_query_param() {
+        assert_eq!(
+            api_url_with_key("https://api.example.test/get-cookie?foo=1", "ctv_secret").unwrap(),
+            "https://api.example.test/get-cookie?foo=1&apikey=ctv_secret"
+        );
     }
 
     #[test]
