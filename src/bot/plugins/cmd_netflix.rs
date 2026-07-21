@@ -120,6 +120,8 @@ impl AppPlugin for NetflixCommandPlugin {
             send_netflix_language_vi_guide(&ctx, chat_id).await?;
         } else if data == "netflix:mobile_guide" {
             send_netflix_mobile_guide(&ctx, chat_id).await?;
+        } else if data == "netflix:mobile_language_guide" {
+            send_netflix_mobile_language_guide(&ctx, chat_id).await?;
         } else if let Some(id) = data
             .strip_prefix("netflix:regen:")
             .and_then(|raw| raw.parse::<i64>().ok())
@@ -205,6 +207,9 @@ async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Res
         menu_rows.push(vec![button]);
     }
     if let Some(button) = netflix_mobile_guide_button(ctx) {
+        menu_rows.push(vec![button]);
+    }
+    if let Some(button) = netflix_mobile_language_guide_button(ctx) {
         menu_rows.push(vec![button]);
     }
     menu_rows.push(vec![i18n::inline_button_callback(
@@ -458,6 +463,9 @@ async fn send_netflix_cookie(
     if let Some(button) = netflix_mobile_guide_button(ctx) {
         rows.push(vec![button]);
     }
+    if let Some(button) = netflix_mobile_language_guide_button(ctx) {
+        rows.push(vec![button]);
+    }
     rows.push(vec![InlineKeyboardButton::callback(
         netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
         format!("netflix:regen:{session_id}"),
@@ -535,6 +543,20 @@ async fn send_netflix_cookie(
     }
 
     Ok(())
+}
+
+async fn send_netflix_mobile_language_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    send_netflix_guide_video(
+        ctx,
+        chat_id,
+        "netflix_mobile_language_guide_video_path",
+        "public/assets/netflix/mobile-language-guide.mp4",
+        "netflix_mobile_language_guide_caption",
+        "🌐 Cách đổi ngôn ngữ Mobile",
+        "netflix_mobile_language_guide_missing_message",
+        "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
+    )
+    .await
 }
 
 async fn send_netflix_mobile_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
@@ -869,6 +891,20 @@ fn netflix_mobile_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton>
             "📱 Cách coi trên Mobie",
         ),
         "netflix:mobile_guide",
+    ))
+}
+
+fn netflix_mobile_language_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
+    if !config_bool(ctx, "netflix_mobile_language_guide_enabled", true) {
+        return None;
+    }
+    Some(InlineKeyboardButton::callback(
+        netflix_text(
+            ctx,
+            "netflix_mobile_language_guide_button_text",
+            "🌐 Cách đổi ngôn ngữ Mobile",
+        ),
+        "netflix:mobile_language_guide",
     ))
 }
 
