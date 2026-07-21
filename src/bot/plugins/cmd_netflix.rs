@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use rand::{Rng, distributions::Alphanumeric};
-use reqwest::header::{CONTENT_TYPE, USER_AGENT};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
 use serde_json::{Value, json};
 use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
 use teloxide::prelude::*;
@@ -422,15 +422,14 @@ async fn call_get_cookie_api(ctx: &AppContext, api_key: &str) -> Result<NetflixC
         &ctx.get_text("netflix_get_cookie_url", GET_COOKIE_URL_DEFAULT),
         api_key,
     )?;
-    let value = reqwest::Client::new()
+    let response = reqwest::Client::new()
         .get(url)
         .header("X-API-Key", api_key)
+        .header(ACCEPT, "application/json")
         .header(USER_AGENT, API_USER_AGENT)
         .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
         .await?;
+    let value = read_api_json(response).await?;
 
     if value.get("success").and_then(Value::as_bool) != Some(true) {
         return Err(anyhow!(api_error_message(&value)));
@@ -467,18 +466,17 @@ async fn call_regen_api(
         &ctx.get_text("netflix_regenerate_url", REGENERATE_URL_DEFAULT),
         api_key,
     )?;
-    let value = reqwest::Client::new()
+    let response = reqwest::Client::new()
         .post(url)
         .header("X-API-Key", api_key)
+        .header(ACCEPT, "application/json")
         .header(CONTENT_TYPE, "application/json")
         .header(USER_AGENT, API_USER_AGENT)
         .json(&json!({ "logId": log_id }))
         .timeout(std::time::Duration::from_secs(15))
         .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
         .await?;
+    let value = read_api_json(response).await?;
 
     if value.get("success").and_then(Value::as_bool) != Some(true) {
         return Err(anyhow!(api_error_message(&value)));
@@ -682,6 +680,19 @@ fn api_error_message(value: &Value) -> String {
         .or_else(|| json_string(value, "error"))
         .unwrap_or("API trả về thất bại")
         .to_string()
+}
+
+async fn read_api_json(response: reqwest::Response) -> Result<Value> {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let detail = serde_json::from_str::<Value>(&body)
+            .ok()
+            .map(|value| api_error_message(&value))
+            .unwrap_or_else(|| friendly_error(&body));
+        return Err(anyhow!("API Netflix trả HTTP {}: {}", status.as_u16(), detail));
+    }
+    serde_json::from_str::<Value>(&body).context("API Netflix trả dữ liệu không phải JSON")
 }
 
 fn friendly_error(value: &str) -> String {
