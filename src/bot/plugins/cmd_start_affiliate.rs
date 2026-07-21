@@ -11,6 +11,7 @@ use url::Url;
 
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
+use crate::bot::plugins::cmd_netflix;
 use crate::bot::{BotDialogue, chat_ui, i18n};
 
 pub struct StartAffiliatePlugin;
@@ -292,14 +293,19 @@ async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resul
 }
 
 fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
+    let mut shop_row = vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_shop",
+        "🛒 Shop",
+        "start:shop",
+    )];
+    if cmd_netflix::netflix_enabled(ctx) {
+        shop_row.push(cmd_netflix::netflix_button_json(ctx, lang));
+    }
+
     let mut rows = vec![
-        vec![i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_shop",
-            "🛒 Shop",
-            "start:shop",
-        )],
+        shop_row,
         vec![
             i18n::inline_button_callback_json(
                 ctx,

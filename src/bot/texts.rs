@@ -401,6 +401,11 @@ fn is_non_translation_config_key(key: &str) -> bool {
             | "required_channel_id"
             | "required_channel_url"
             | "start_viameta_enabled"
+            | "netflix_enabled"
+            | "netflix_price"
+            | "netflix_ctv_api_key"
+            | "netflix_get_cookie_url"
+            | "netflix_regenerate_url"
     )
 }
 

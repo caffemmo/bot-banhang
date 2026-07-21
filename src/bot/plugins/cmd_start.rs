@@ -12,6 +12,7 @@ use url::Url;
 use crate::app::AppContext;
 use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
+use crate::bot::plugins::cmd_netflix;
 use crate::bot::plugins::cmd_orders;
 use crate::bot::plugins::cmd_shop;
 use crate::bot::plugins::cmd_wallet;
@@ -298,14 +299,19 @@ async fn send_start_menu(
 }
 
 fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
+    let mut shop_row = vec![i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_shop",
+        "🛒 Shop",
+        "start:shop",
+    )];
+    if cmd_netflix::netflix_enabled(ctx) {
+        shop_row.push(cmd_netflix::netflix_button_json(ctx, lang));
+    }
+
     let mut rows = vec![
-        vec![i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_shop",
-            "🛒 Shop",
-            "start:shop",
-        )],
+        shop_row,
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -420,15 +426,22 @@ fn inline_button_url_json(
 fn start_menu_button_specs_from_texts(
     texts: &BotTexts,
     lang: &str,
+    include_netflix: bool,
     include_viameta: bool,
 ) -> Vec<Vec<(String, String)>> {
+    let mut shop_row = vec![(
+        texts.get_lang("start_btn_shop", lang, "Shop"),
+        "start:shop".to_string(),
+    )];
+    if include_netflix {
+        shop_row.push((
+            texts.get_lang("start_btn_netflix", lang, "🎬 Xem Netflix"),
+            "netflix:menu".to_string(),
+        ));
+    }
+
     let mut rows = vec![
-        vec![
-            (
-                texts.get_lang("start_btn_shop", lang, "Shop"),
-                "start:shop".to_string(),
-            ),
-        ],
+        shop_row,
         vec![
             (
                 texts.get_lang("start_btn_topup", lang, "Top up"),
@@ -510,7 +523,12 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
     ctx.texts
         .read()
         .map(|texts| {
-            start_menu_button_specs_from_texts(&texts, lang, start_viameta_enabled(ctx))
+            start_menu_button_specs_from_texts(
+                &texts,
+                lang,
+                cmd_netflix::netflix_enabled(ctx),
+                start_viameta_enabled(ctx),
+            )
                 .into_iter()
                 .map(|row| {
                     row.into_iter()
@@ -544,6 +562,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
 fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
     match callback {
         "start:shop" => "start_btn_shop",
+        "netflix:menu" => "start_btn_netflix",
         "wallet:topup" => "start_btn_topup",
         "start:wallet" => "start_btn_wallet",
         "start:orders" => "start_btn_purchased",
@@ -557,7 +576,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
 }
 
 fn start_reply_keyboard_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<String>> {
-    start_menu_button_specs_from_texts(texts, lang, true)
+    start_menu_button_specs_from_texts(texts, lang, true, true)
         .into_iter()
         .map(|row| {
             row.into_iter()
@@ -1216,6 +1235,7 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([
                     ("start_btn_shop".to_string(), "Xem san pham".to_string()),
+                    ("start_btn_netflix".to_string(), "Xem Netflix".to_string()),
                     ("start_btn_topup".to_string(), "Nap tien".to_string()),
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
@@ -1228,12 +1248,15 @@ mod tests {
             )]),
         );
 
-        let rows = start_menu_button_specs_from_texts(&texts, "vi", true);
+        let rows = start_menu_button_specs_from_texts(&texts, "vi", true, true);
 
         assert_eq!(
             rows,
             vec![
-                vec![("Xem san pham".to_string(), "start:shop".to_string())],
+                vec![
+                    ("Xem san pham".to_string(), "start:shop".to_string()),
+                    ("Xem Netflix".to_string(), "netflix:menu".to_string()),
+                ],
                 vec![
                     ("Nap tien".to_string(), "wallet:topup".to_string()),
                     ("Vi tien".to_string(), "start:wallet".to_string()),
@@ -1261,6 +1284,7 @@ mod tests {
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["callback_data"], "start:shop");
+        assert_eq!(rows[0][1]["callback_data"], "netflix:menu");
         assert_eq!(rows[3][0]["callback_data"], "start:help");
         assert_eq!(rows[4][0]["callback_data"], "affiliate:register");
         assert_eq!(rows[4][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
@@ -1297,6 +1321,7 @@ mod tests {
                 "vi".to_string(),
                 HashMap::from([
                     ("start_btn_shop".to_string(), "Xem san pham".to_string()),
+                    ("start_btn_netflix".to_string(), "Xem Netflix".to_string()),
                     ("start_btn_topup".to_string(), "Nap tien".to_string()),
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
@@ -1314,7 +1339,7 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                vec!["Xem san pham".to_string()],
+                vec!["Xem san pham".to_string(), "Xem Netflix".to_string()],
                 vec!["Nap tien".to_string(), "Vi tien".to_string()],
                 vec!["Da mua".to_string(), "Lich su nap".to_string()],
                 vec!["Huong dan".to_string(), "Up tich xanh".to_string()],

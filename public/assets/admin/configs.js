@@ -40,6 +40,17 @@
         ]
       },
       {
+        title: 'Netflix',
+        icon: '🎬',
+        fields: [
+          { key: 'netflix_enabled', label: 'Hiện nút Xem Netflix', value: '1' },
+          { key: 'netflix_price', label: 'Giá mỗi lần lấy Netflix', value: '0' },
+          { key: 'netflix_ctv_api_key', label: 'API key CTV Tiệm Bánh Netflix', value: '' },
+          { key: 'netflix_get_cookie_url', label: 'Endpoint lấy cookie', value: 'https://api.tiembanh4k.com/api/ctv-api/get-cookie' },
+          { key: 'netflix_regenerate_url', label: 'Endpoint tạo lại link', value: 'https://backend-c0r3-7xpq9zn2025.onrender.com/api/ctv-api/regenerate-token' },
+        ]
+      },
+      {
         title: 'Dịch vụ tích xanh',
         icon: '⚡',
         fields: [
@@ -207,6 +218,7 @@
         'telegram_i18n_emojis_enabled',
         'stock_auto_broadcast_enabled',
         'start_viameta_enabled',
+        'netflix_enabled',
         'order_notifications_enabled',
         'viameta_getlink_fb_enabled',
         'viameta_uptick_fb_enabled',
@@ -261,6 +273,7 @@
         'viameta_getlink_fb_price',
         'viameta_uptick_fb_price',
         'viameta_uptick_ig_price',
+        'netflix_price',
         'facebook_unlock_platform_fee_percent',
       ]);
       if (numericKeys.has(key)) {
