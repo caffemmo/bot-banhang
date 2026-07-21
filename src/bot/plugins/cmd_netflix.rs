@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -7,7 +8,7 @@ use reqwest::header::{
 };
 use reqwest::{Client, RequestBuilder};
 use serde_json::{Value, json};
-use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
+use teloxide::payloads::{SendDocumentSetters, SendMessageSetters, SendVideoSetters};
 use teloxide::prelude::*;
 use teloxide::requests::Requester;
 use teloxide::types::{
@@ -113,6 +114,8 @@ impl AppPlugin for NetflixCommandPlugin {
             send_netflix_menu(&ctx, chat_id, &lang).await?;
         } else if data == "netflix:buy" {
             handle_netflix_buy(&ctx, chat_id, user_id, &lang).await?;
+        } else if data == "netflix:pc_guide" {
+            send_netflix_pc_guide(&ctx, chat_id).await?;
         } else if let Some(id) = data
             .strip_prefix("netflix:regen:")
             .and_then(|raw| raw.parse::<i64>().ok())
@@ -183,27 +186,33 @@ async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Res
     );
 
     let buy_button_text = netflix_text(ctx, "netflix_buy_button_text", "🎬 Lấy Netflix");
+    let mut menu_rows = vec![vec![InlineKeyboardButton::callback(
+        if price > 0 {
+            format!("{} ({})", buy_button_text, format_vnd(price))
+        } else {
+            buy_button_text
+        },
+        "netflix:buy",
+    )]];
+    if let Some(button) = netflix_pc_guide_button(ctx) {
+        menu_rows.push(vec![button]);
+    }
+    menu_rows.push(vec![i18n::inline_button_callback(
+        ctx,
+        lang,
+        "start_btn_wallet",
+        "💳 Ví tiền",
+        "start:wallet",
+    )]);
+    menu_rows.push(vec![InlineKeyboardButton::callback(
+        "⬅️ Quay lại",
+        "start:menu",
+    )]);
+
     ctx.bot
         .send_message(chat_id, text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(InlineKeyboardMarkup::new(vec![
-            vec![InlineKeyboardButton::callback(
-                if price > 0 {
-                    format!("{} ({})", buy_button_text, format_vnd(price))
-                } else {
-                    buy_button_text
-                },
-                "netflix:buy",
-            )],
-            vec![i18n::inline_button_callback(
-                ctx,
-                lang,
-                "start_btn_wallet",
-                "💳 Ví tiền",
-                "start:wallet",
-            )],
-            vec![InlineKeyboardButton::callback("⬅️ Quay lại", "start:menu")],
-        ]))
+        .reply_markup(InlineKeyboardMarkup::new(menu_rows))
         .await?;
 
     Ok(())
@@ -430,6 +439,9 @@ async fn send_netflix_cookie(
     if !link_row.is_empty() {
         rows.push(link_row);
     }
+    if let Some(button) = netflix_pc_guide_button(ctx) {
+        rows.push(vec![button]);
+    }
     rows.push(vec![InlineKeyboardButton::callback(
         netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
         format!("netflix:regen:{session_id}"),
@@ -505,6 +517,39 @@ async fn send_netflix_cookie(
                 .await?;
         }
     }
+
+    Ok(())
+}
+
+async fn send_netflix_pc_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    let path = netflix_text(
+        ctx,
+        "netflix_pc_guide_video_path",
+        "public/assets/netflix/pc-guide.mp4",
+    );
+    let Some(video) = guide_video_input(&path) else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_pc_guide_missing_message",
+                    "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    };
+
+    ctx.bot
+        .send_video(chat_id, video)
+        .caption(netflix_text(
+            ctx,
+            "netflix_pc_guide_caption",
+            "💻 Hướng dẫn xem Netflix trên PC",
+        ))
+        .supports_streaming(true)
+        .await?;
 
     Ok(())
 }
@@ -714,6 +759,20 @@ fn netflix_price(ctx: &AppContext) -> i64 {
         .max(0)
 }
 
+fn netflix_pc_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
+    if !config_bool(ctx, "netflix_pc_guide_enabled", true) {
+        return None;
+    }
+    Some(InlineKeyboardButton::callback(
+        netflix_text(
+            ctx,
+            "netflix_pc_guide_button_text",
+            "💻 Hướng dẫn xem trên PC",
+        ),
+        "netflix:pc_guide",
+    ))
+}
+
 fn netflix_text(ctx: &AppContext, key: &str, default: &str) -> String {
     let value = ctx.get_text(key, default);
     if value.trim().is_empty() {
@@ -760,6 +819,17 @@ fn netflix_order_id() -> String {
 
 fn url_button_link(value: &str) -> Option<Url> {
     Url::parse(value).ok()
+}
+
+fn guide_video_input(value: &str) -> Option<InputFile> {
+    let value = value.trim();
+    if let Ok(url) = Url::parse(value) {
+        return Some(InputFile::url(url));
+    }
+    if Path::new(value).exists() {
+        return Some(InputFile::file(value.to_string()));
+    }
+    None
 }
 
 fn api_url_with_key(raw_url: &str, api_key: &str) -> Result<String> {
