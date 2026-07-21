@@ -116,6 +116,8 @@ impl AppPlugin for NetflixCommandPlugin {
             handle_netflix_buy(&ctx, chat_id, user_id, &lang).await?;
         } else if data == "netflix:pc_guide" {
             send_netflix_pc_guide(&ctx, chat_id).await?;
+        } else if data == "netflix:language_vi_guide" {
+            send_netflix_language_vi_guide(&ctx, chat_id).await?;
         } else if let Some(id) = data
             .strip_prefix("netflix:regen:")
             .and_then(|raw| raw.parse::<i64>().ok())
@@ -195,6 +197,9 @@ async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Res
         "netflix:buy",
     )]];
     if let Some(button) = netflix_pc_guide_button(ctx) {
+        menu_rows.push(vec![button]);
+    }
+    if let Some(button) = netflix_language_vi_guide_button(ctx) {
         menu_rows.push(vec![button]);
     }
     menu_rows.push(vec![i18n::inline_button_callback(
@@ -442,6 +447,9 @@ async fn send_netflix_cookie(
     if let Some(button) = netflix_pc_guide_button(ctx) {
         rows.push(vec![button]);
     }
+    if let Some(button) = netflix_language_vi_guide_button(ctx) {
+        rows.push(vec![button]);
+    }
     rows.push(vec![InlineKeyboardButton::callback(
         netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
         format!("netflix:regen:{session_id}"),
@@ -521,11 +529,48 @@ async fn send_netflix_cookie(
     Ok(())
 }
 
-async fn send_netflix_pc_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
-    let path = netflix_text(
+async fn send_netflix_language_vi_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    send_netflix_guide_video(
         ctx,
+        chat_id,
+        "netflix_language_vi_guide_video_path",
+        "public/assets/netflix/language-vi-guide.mp4",
+        "netflix_language_vi_guide_caption",
+        "🌐 Hướng dẫn đổi ngôn ngữ sang Tiếng Việt",
+        "netflix_language_vi_guide_missing_message",
+        "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
+    )
+    .await
+}
+
+async fn send_netflix_pc_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    send_netflix_guide_video(
+        ctx,
+        chat_id,
         "netflix_pc_guide_video_path",
         "public/assets/netflix/pc-guide.mp4",
+        "netflix_pc_guide_caption",
+        "💻 Hướng dẫn xem Netflix trên PC",
+        "netflix_pc_guide_missing_message",
+        "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
+    )
+    .await
+}
+
+async fn send_netflix_guide_video(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    path_key: &str,
+    default_path: &str,
+    caption_key: &str,
+    default_caption: &str,
+    missing_key: &str,
+    default_missing: &str,
+) -> Result<()> {
+    let path = netflix_text(
+        ctx,
+        path_key,
+        default_path,
     );
     let Some(video) = guide_video_input(&path) else {
         ctx.bot
@@ -533,8 +578,8 @@ async fn send_netflix_pc_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> 
                 chat_id,
                 netflix_text(
                     ctx,
-                    "netflix_pc_guide_missing_message",
-                    "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
+                    missing_key,
+                    default_missing,
                 ),
             )
             .await?;
@@ -545,8 +590,8 @@ async fn send_netflix_pc_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> 
         .send_video(chat_id, video)
         .caption(netflix_text(
             ctx,
-            "netflix_pc_guide_caption",
-            "💻 Hướng dẫn xem Netflix trên PC",
+            caption_key,
+            default_caption,
         ))
         .supports_streaming(true)
         .await?;
@@ -770,6 +815,20 @@ fn netflix_pc_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
             "💻 Hướng dẫn xem trên PC",
         ),
         "netflix:pc_guide",
+    ))
+}
+
+fn netflix_language_vi_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
+    if !config_bool(ctx, "netflix_language_vi_guide_enabled", true) {
+        return None;
+    }
+    Some(InlineKeyboardButton::callback(
+        netflix_text(
+            ctx,
+            "netflix_language_vi_guide_button_text",
+            "🌐 Hướng dẫn đổi ngôn ngữ sang Tiếng Việt",
+        ),
+        "netflix:language_vi_guide",
     ))
 }
 
