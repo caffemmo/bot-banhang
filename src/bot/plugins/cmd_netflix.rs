@@ -123,6 +123,11 @@ impl AppPlugin for NetflixCommandPlugin {
         } else if data == "netflix:mobile_language_guide" {
             send_netflix_mobile_language_guide(&ctx, chat_id).await?;
         } else if let Some(id) = data
+            .strip_prefix("netflix:cookie:")
+            .and_then(|raw| raw.parse::<i64>().ok())
+        {
+            handle_netflix_cookie(&ctx, chat_id, user_id, id).await?;
+        } else if let Some(id) = data
             .strip_prefix("netflix:regen:")
             .and_then(|raw| raw.parse::<i64>().ok())
         {
@@ -454,6 +459,10 @@ async fn send_netflix_cookie(
     if !link_row.is_empty() {
         rows.push(link_row);
     }
+    rows.push(vec![InlineKeyboardButton::callback(
+        netflix_text(ctx, "netflix_cookie_button_text", "🍪 Lấy cookie"),
+        format!("netflix:cookie:{session_id}"),
+    )]);
     if let Some(button) = netflix_pc_guide_button(ctx) {
         rows.push(vec![button]);
     }
@@ -513,35 +522,78 @@ async fn send_netflix_cookie(
         .reply_markup(InlineKeyboardMarkup::new(rows))
         .await?;
 
-    if let Some(raw_cookie) = cookie.cookie.as_deref().filter(|value| !value.trim().is_empty()) {
-        if raw_cookie.chars().count() <= 3300 {
-            ctx.bot
-                .send_message(
-                    chat_id,
-                    format!(
-                        "{}\n<pre>{}</pre>",
-                        netflix_text(ctx, "netflix_cookie_title", "🍪 <b>Cookie Netflix</b>"),
-                        html_escape(raw_cookie)
-                    ),
-                )
-                .parse_mode(ParseMode::Html)
-                .await?;
-        } else {
-            ctx.bot
-                .send_document(
-                    chat_id,
-                    InputFile::memory(raw_cookie.as_bytes().to_vec())
-                        .file_name(format!("netflix_cookie_{session_id}.txt")),
-                )
-                .caption(netflix_text(
-                    ctx,
-                    "netflix_cookie_file_caption",
-                    "🍪 Cookie Netflix được gửi trong file.",
-                ))
-                .await?;
-        }
-    }
+    Ok(())
+}
 
+async fn handle_netflix_cookie(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    user_id: i64,
+    session_id: i64,
+) -> Result<()> {
+    let Some(session) = get_netflix_session(ctx, session_id, user_id, chat_id.0).await? else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_session_missing_message",
+                    "Không tìm thấy phiên Netflix này.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    };
+    let Some(raw_cookie) = session.cookie.as_deref().filter(|value| !value.trim().is_empty())
+    else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_cookie_missing_message",
+                    "⚠️ Chưa có cookie cho lượt này.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    };
+
+    send_netflix_cookie_value(ctx, chat_id, session_id, raw_cookie).await
+}
+
+async fn send_netflix_cookie_value(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    session_id: i64,
+    raw_cookie: &str,
+) -> Result<()> {
+    if raw_cookie.chars().count() <= 3300 {
+        ctx.bot
+            .send_message(
+                chat_id,
+                format!(
+                    "{}\n<pre>{}</pre>",
+                    netflix_text(ctx, "netflix_cookie_title", "🍪 <b>Cookie Netflix</b>"),
+                    html_escape(raw_cookie)
+                ),
+            )
+            .parse_mode(ParseMode::Html)
+            .await?;
+    } else {
+        ctx.bot
+            .send_document(
+                chat_id,
+                InputFile::memory(raw_cookie.as_bytes().to_vec())
+                    .file_name(format!("netflix_cookie_{session_id}.txt")),
+            )
+            .caption(netflix_text(
+                ctx,
+                "netflix_cookie_file_caption",
+                "🍪 Cookie Netflix được gửi trong file.",
+            ))
+            .await?;
+    }
     Ok(())
 }
 

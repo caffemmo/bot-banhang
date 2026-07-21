@@ -91,8 +91,10 @@
           { key: 'netflix_wallet_deducted_label', label: 'Text nhãn đã trừ ví', value: 'Đã trừ ví' },
           { key: 'netflix_time_remaining_label', label: 'Text nhãn thời hạn link', value: 'Link còn hạn khoảng' },
           { key: 'netflix_success_note', label: 'Text ghi chú sau khi nhận Netflix', value: 'Bấm nút bên dưới để mở Netflix. Nếu link hết hạn, bấm Tạo lại link.' },
+          { key: 'netflix_cookie_button_text', label: 'Text nút lấy cookie', value: '🍪 Lấy cookie' },
           { key: 'netflix_cookie_title', label: 'Text tiêu đề cookie', value: '🍪 <b>Cookie Netflix</b>' },
           { key: 'netflix_cookie_file_caption', label: 'Text caption file cookie', value: '🍪 Cookie Netflix được gửi trong file.' },
+          { key: 'netflix_cookie_missing_message', label: 'Text khi không có cookie', value: '⚠️ Chưa có cookie cho lượt này.' },
         ]
       },
       {
@@ -270,6 +272,7 @@
         'netflix_success_note',
         'netflix_cookie_title',
         'netflix_cookie_file_caption',
+        'netflix_cookie_missing_message',
         'viameta_getlink_fb_description',
         'viameta_uptick_fb_description',
         'viameta_uptick_ig_description',
@@ -375,6 +378,7 @@
         'netflix_success_note',
         'netflix_cookie_title',
         'netflix_cookie_file_caption',
+        'netflix_cookie_missing_message',
         'viameta_getlink_fb_description',
         'viameta_uptick_fb_description',
         'viameta_uptick_ig_description',

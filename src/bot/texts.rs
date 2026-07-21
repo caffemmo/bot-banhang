@@ -449,8 +449,10 @@ fn is_non_translation_config_key(key: &str) -> bool {
             | "netflix_wallet_deducted_label"
             | "netflix_time_remaining_label"
             | "netflix_success_note"
+            | "netflix_cookie_button_text"
             | "netflix_cookie_title"
             | "netflix_cookie_file_caption"
+            | "netflix_cookie_missing_message"
     )
 }
 
