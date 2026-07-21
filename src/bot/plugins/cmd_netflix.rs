@@ -5,7 +5,7 @@ use rand::{Rng, distributions::Alphanumeric};
 use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, PRAGMA, REFERER, USER_AGENT,
 };
-use reqwest::RequestBuilder;
+use reqwest::{Client, RequestBuilder};
 use serde_json::{Value, json};
 use teloxide::payloads::{SendDocumentSetters, SendMessageSetters};
 use teloxide::prelude::*;
@@ -425,7 +425,7 @@ async fn call_get_cookie_api(ctx: &AppContext, api_key: &str) -> Result<NetflixC
         &ctx.get_text("netflix_get_cookie_url", GET_COOKIE_URL_DEFAULT),
         api_key,
     )?;
-    let response = reqwest::Client::new()
+    let response = netflix_client(ctx)?
         .get(url)
         .netflix_api_headers(api_key)
         .send()
@@ -467,7 +467,7 @@ async fn call_regen_api(
         &ctx.get_text("netflix_regenerate_url", REGENERATE_URL_DEFAULT),
         api_key,
     )?;
-    let response = reqwest::Client::new()
+    let response = netflix_client(ctx)?
         .post(url)
         .header(CONTENT_TYPE, "application/json")
         .netflix_api_headers(api_key)
@@ -626,6 +626,21 @@ fn netflix_price(ctx: &AppContext) -> i64 {
         .parse::<i64>()
         .unwrap_or(0)
         .max(0)
+}
+
+fn netflix_client(ctx: &AppContext) -> Result<Client> {
+    let mut builder = Client::builder();
+    if let Some(proxy_url) = ctx
+        .get_text("netflix_proxy_url", "")
+        .trim()
+        .to_string()
+        .into_nonempty()
+    {
+        builder = builder.proxy(
+            reqwest::Proxy::all(&proxy_url).context("Proxy Netflix không hợp lệ")?,
+        );
+    }
+    builder.build().context("Không tạo được HTTP client Netflix")
 }
 
 fn config_bool(ctx: &AppContext, key: &str, default: bool) -> bool {

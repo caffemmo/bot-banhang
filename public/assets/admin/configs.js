@@ -46,6 +46,7 @@
           { key: 'netflix_enabled', label: 'Hiện nút Xem Netflix', value: '1' },
           { key: 'netflix_price', label: 'Giá mỗi lần lấy Netflix', value: '0' },
           { key: 'netflix_ctv_api_key', label: 'API key CTV Tiệm Bánh Netflix', value: '' },
+          { key: 'netflix_proxy_url', label: 'Proxy Việt Nam cho Netflix (tuỳ chọn)', value: '' },
           { key: 'netflix_get_cookie_url', label: 'Endpoint lấy cookie', value: 'https://api.tiembanh4k.com/api/ctv-api/get-cookie' },
           { key: 'netflix_regenerate_url', label: 'Endpoint tạo lại link', value: 'https://backend-c0r3-7xpq9zn2025.onrender.com/api/ctv-api/regenerate-token' },
         ]
