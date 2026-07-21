@@ -118,6 +118,8 @@ impl AppPlugin for NetflixCommandPlugin {
             send_netflix_pc_guide(&ctx, chat_id).await?;
         } else if data == "netflix:language_vi_guide" {
             send_netflix_language_vi_guide(&ctx, chat_id).await?;
+        } else if data == "netflix:mobile_guide" {
+            send_netflix_mobile_guide(&ctx, chat_id).await?;
         } else if let Some(id) = data
             .strip_prefix("netflix:regen:")
             .and_then(|raw| raw.parse::<i64>().ok())
@@ -200,6 +202,9 @@ async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Res
         menu_rows.push(vec![button]);
     }
     if let Some(button) = netflix_language_vi_guide_button(ctx) {
+        menu_rows.push(vec![button]);
+    }
+    if let Some(button) = netflix_mobile_guide_button(ctx) {
         menu_rows.push(vec![button]);
     }
     menu_rows.push(vec![i18n::inline_button_callback(
@@ -450,6 +455,9 @@ async fn send_netflix_cookie(
     if let Some(button) = netflix_language_vi_guide_button(ctx) {
         rows.push(vec![button]);
     }
+    if let Some(button) = netflix_mobile_guide_button(ctx) {
+        rows.push(vec![button]);
+    }
     rows.push(vec![InlineKeyboardButton::callback(
         netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
         format!("netflix:regen:{session_id}"),
@@ -529,6 +537,20 @@ async fn send_netflix_cookie(
     Ok(())
 }
 
+async fn send_netflix_mobile_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
+    send_netflix_guide_video(
+        ctx,
+        chat_id,
+        "netflix_mobile_guide_video_path",
+        "public/assets/netflix/mobile-guide.mov",
+        "netflix_mobile_guide_caption",
+        "📱 Cách coi trên Mobie",
+        "netflix_mobile_guide_missing_message",
+        "⚠️ Video hướng dẫn chưa sẵn sàng, vui lòng thử lại sau.",
+    )
+    .await
+}
+
 async fn send_netflix_language_vi_guide(ctx: &AppContext, chat_id: ChatId) -> Result<()> {
     send_netflix_guide_video(
         ctx,
@@ -586,15 +608,19 @@ async fn send_netflix_guide_video(
         return Ok(());
     };
 
-    ctx.bot
+    let caption = netflix_text(ctx, caption_key, default_caption);
+    let send_video_result = ctx.bot
         .send_video(chat_id, video)
-        .caption(netflix_text(
-            ctx,
-            caption_key,
-            default_caption,
-        ))
+        .caption(caption.clone())
         .supports_streaming(true)
-        .await?;
+        .await;
+    if send_video_result.is_err()
+        && let Some(document) = guide_video_input(&path)
+    {
+        ctx.bot.send_document(chat_id, document).caption(caption).await?;
+    } else {
+        send_video_result?;
+    }
 
     Ok(())
 }
@@ -829,6 +855,20 @@ fn netflix_language_vi_guide_button(ctx: &AppContext) -> Option<InlineKeyboardBu
             "🌐 Hướng dẫn đổi ngôn ngữ sang Tiếng Việt",
         ),
         "netflix:language_vi_guide",
+    ))
+}
+
+fn netflix_mobile_guide_button(ctx: &AppContext) -> Option<InlineKeyboardButton> {
+    if !config_bool(ctx, "netflix_mobile_guide_enabled", true) {
+        return None;
+    }
+    Some(InlineKeyboardButton::callback(
+        netflix_text(
+            ctx,
+            "netflix_mobile_guide_button_text",
+            "📱 Cách coi trên Mobie",
+        ),
+        "netflix:mobile_guide",
     ))
 }
 
