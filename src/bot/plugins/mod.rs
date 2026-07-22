@@ -1,6 +1,7 @@
 pub mod cmd_admin_menu;
 pub mod cmd_affiliate;
 pub mod cmd_broadcast;
+pub mod cmd_external_api_stock;
 pub mod cmd_group_sales;
 pub mod cmd_help;
 pub mod cmd_netflix;
@@ -66,6 +67,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_affiliate::AffiliateCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),
         Box::new(cmd_netflix::NetflixCommandPlugin),
+        Box::new(cmd_external_api_stock::ExternalApiStockPlugin),
         Box::new(cmd_broadcast::BroadcastCommandPlugin),
         Box::new(cmd_shop::ShopCommandPlugin),
         Box::new(cmd_viameta::ViametaCommandPlugin),

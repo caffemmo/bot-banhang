@@ -478,9 +478,19 @@ async fn shop_handle_callback(
                     }
                 }
 
-                let stock = repo::count_product_items(&ctx.pool, product_id)
-                    .await
-                    .unwrap_or(0);
+                let is_external_api = delivery_type == "external_api";
+                let stock = if is_external_api {
+                    0
+                } else {
+                    repo::count_product_items(&ctx.pool, product_id)
+                        .await
+                        .unwrap_or(0)
+                };
+                let stock_label = if is_external_api {
+                    tl(&ctx, &lang, "shop_stock_external_api", "hàng API")
+                } else {
+                    stock.to_string()
+                };
                 dialogue.update(State::ChoosingQty { product_id }).await?;
                 let text = format!(
                     "{}",
@@ -492,7 +502,7 @@ async fn shop_handle_callback(
                         &[
                             ("product", product.name.clone()),
                             ("price", format_vnd(product.price)),
-                            ("stock", stock.to_string()),
+                            ("stock", stock_label),
                             ("description", description_for_quantity_prompt(&desc_text)),
                             (
                                 "requires_input",
@@ -2906,8 +2916,12 @@ fn product_button_custom_emoji_id(product: &Product) -> Option<&str> {
 }
 
 fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: &str) -> String {
-    if orders_api::product_delivery_type(product) == "manual_input" {
+    let delivery_type = orders_api::product_delivery_type(product);
+    if delivery_type == "manual_input" {
         return tl(ctx, lang, "shop_stock_manual", "✅ có sẵn");
+    }
+    if delivery_type == "external_api" {
+        return tl(ctx, lang, "shop_stock_external_api", "hàng API");
     }
     trl(
         ctx,

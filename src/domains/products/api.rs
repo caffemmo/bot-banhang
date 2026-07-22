@@ -679,9 +679,9 @@ pub fn normalize_delivery_type(raw: Option<&str>, requires_input: i64) -> Result
             "stock_item"
         });
     match value {
-        "stock_item" | "uploaded_file" | "manual_input" => Ok(value.to_string()),
+        "stock_item" | "uploaded_file" | "manual_input" | "external_api" => Ok(value.to_string()),
         _ => Err(ApiError::validation(
-            "delivery_type must be stock_item, uploaded_file, or manual_input",
+            "delivery_type must be stock_item, uploaded_file, manual_input, or external_api",
         )),
     }
 }

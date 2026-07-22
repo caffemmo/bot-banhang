@@ -103,6 +103,17 @@
         ]
       },
       {
+        title: 'Hàng API ngoài',
+        icon: '🔗',
+        fields: [
+          { key: 'external_api_stock_enabled', label: 'Bật lấy hàng từ API ngoài', value: '0' },
+          { key: 'external_api_stock_local_product_id', label: 'ID sản phẩm trong bot mình', value: '' },
+          { key: 'external_api_stock_api_id', label: 'API ID / secret bên shop nguồn', value: '' },
+          { key: 'external_api_stock_product_id', label: 'ID sản phẩm bên shop nguồn', value: 'SP-GEF55PBV' },
+          { key: 'external_api_stock_buy_url', label: 'Endpoint mua hàng bên shop nguồn', value: 'https://sumistore.me/api/tele-product/buy' },
+        ]
+      },
+      {
         title: 'Dịch vụ tích xanh',
         icon: '⚡',
         fields: [
@@ -299,6 +310,7 @@
         'netflix_mobile_guide_enabled',
         'netflix_mobile_language_guide_enabled',
         'netflix_reopen_latest_enabled',
+        'external_api_stock_enabled',
         'order_notifications_enabled',
         'viameta_getlink_fb_enabled',
         'viameta_uptick_fb_enabled',
@@ -347,6 +359,13 @@
           <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
             value="${escapeAttr(value)}" min="0" max="100000" step="1">
           <div class="form-text">Nhập 0 để tắt giới hạn này.</div>
+        `;
+      }
+      if (key === 'external_api_stock_local_product_id') {
+        return `
+          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
+            value="${escapeAttr(value)}" min="1" step="1">
+          <div class="form-text">Lấy ID này trong danh sách sản phẩm admin của bot mình.</div>
         `;
       }
       const numericKeys = new Set([

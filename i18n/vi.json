@@ -282,6 +282,7 @@
   "uploaded_file_quantity_prompt": "✅ Bạn chọn {product} - {price}\n📦 Kho file còn: {stock}\n{description}📎 File sản phẩm sẽ được gửi tự động sau khi thanh toán.\n\n⌨️ Nhập số lượng file muốn mua:",
   "uploaded_file_stock_available": "còn {stock} file",
   "uploaded_file_stock_empty": "hết file",
+  "shop_stock_external_api": "hàng API",
   "user_unknown": "Không xác định user.",
   "user_unknown_retry": "Không xác định được user. Vui lòng thử lại sau.",
   "wallet_balance_not_enough": "⚠️ Số dư ví không đủ.\nSố dư hiện tại: {balance}\nCần thanh toán: {required}",

@@ -456,6 +456,11 @@ fn is_non_translation_config_key(key: &str) -> bool {
             | "netflix_cookie_title"
             | "netflix_cookie_file_caption"
             | "netflix_cookie_missing_message"
+            | "external_api_stock_enabled"
+            | "external_api_stock_local_product_id"
+            | "external_api_stock_api_id"
+            | "external_api_stock_product_id"
+            | "external_api_stock_buy_url"
     )
 }
 

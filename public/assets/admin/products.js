@@ -137,18 +137,23 @@
           const deliveryType = productDeliveryType(p);
           const isManual = deliveryType === 'manual_input';
           const isUploadedFile = deliveryType === 'uploaded_file';
+          const isExternalApi = deliveryType === 'external_api';
           const isStock = deliveryType === 'stock_item';
           const typeLabel = deliveryType === 'manual_input'
             ? '<span class="badge bg-info">Nhập liệu</span>'
             : deliveryType === 'uploaded_file'
               ? '<span class="badge bg-primary">File</span>'
-              : '<span class="badge bg-secondary">Kho item</span>';
+              : deliveryType === 'external_api'
+                ? '<span class="badge bg-success">API ngoài</span>'
+                : '<span class="badge bg-secondary">Kho item</span>';
           const stockCell = isUploadedFile
             ? (p.stock_count > 0
               ? `<span class="badge bg-success">${p.stock_count} file</span>`
               : (p.file_name ? `<span class="badge bg-success">File cũ</span><div class="small text-muted">${escapeHtml(p.file_name)}</div>` : '<span class="badge bg-warning text-dark">Chưa có file</span>'))
             : isManual
               ? '<span class="text-muted">Theo gói</span>'
+              : isExternalApi
+                ? '<span class="text-muted">Theo API</span>'
               : p.stock_count;
           const plansBtn = isManual
             ? `<button class="btn btn-sm btn-outline-warning manage-plans" data-id="${p.id}" data-name="${productNameAttr}">Gói</button>`
