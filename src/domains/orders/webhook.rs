@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 
 use tracing::warn;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
@@ -309,7 +309,7 @@ pub async fn handle_webhook(
 fn normalize_payload(payload: IncomingWebhook, ctx: &AppContext) -> NormalizedPayment {
     match payload {
         IncomingWebhook::Legacy(p) => NormalizedPayment {
-            memo: p.memo,
+            memo: normalize_payment_memo(&p.memo),
             amount: p.amount,
             status: p.status,
             tx_id: p.tx_id,
@@ -319,15 +319,20 @@ fn normalize_payload(payload: IncomingWebhook, ctx: &AppContext) -> NormalizedPa
             // SePay does not provide our internal memo field directly.
             // We match by memo contained in the transfer content (or SePay "code" when configured).
             // Convention: bot generates a memo like "DHXXXXXXXX" and user transfers with that in content.
+            let transfer_content = if p.content.trim().is_empty() {
+                p.description.as_deref().unwrap_or("")
+            } else {
+                &p.content
+            };
             let memo = if p.code.as_deref().unwrap_or("").trim().is_empty() {
                 extract_memo_from_text(
-                    &p.content,
+                    transfer_content,
                     &ctx.order_memo_prefix(),
                     ctx.order_memo_length(),
                 )
-                .unwrap_or_else(|| p.content.trim().to_string())
+                .unwrap_or_else(|| normalize_payment_memo(transfer_content))
             } else {
-                p.code.unwrap()
+                normalize_payment_memo(&p.code.unwrap())
             };
 
             let status = if p.transfer_type.to_lowercase() == "in" {
@@ -351,6 +356,10 @@ fn normalize_payload(payload: IncomingWebhook, ctx: &AppContext) -> NormalizedPa
             }
         }
     }
+}
+
+fn normalize_payment_memo(value: &str) -> String {
+    value.trim().to_ascii_uppercase()
 }
 
 fn extract_memo_from_text(
@@ -419,6 +428,13 @@ fn parse_topup_created_at(created_at: &str) -> Option<DateTime<Utc>> {
                 .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
         })
         .ok()
+}
+
+fn topup_payment_expired(created_at: &str, paid_at: DateTime<Utc>) -> bool {
+    let Some(created) = parse_topup_created_at(created_at) else {
+        return false;
+    };
+    paid_at.signed_duration_since(created) >= Duration::minutes(TOPUP_TTL_MINUTES)
 }
 
 fn extract_source_ip(headers: &HeaderMap) -> Option<String> {
@@ -521,7 +537,10 @@ async fn handle_topup_webhook(
         ));
     }
 
-    if topup.status == "expired" {
+    let completed_at =
+        parse_paid_at(payload.paid_at.as_deref()).unwrap_or_else(|_| chrono::Utc::now());
+
+    if topup.status == "expired" && topup_payment_expired(&topup.created_at, completed_at) {
         let _ = repo::insert_webhook_event(
             &ctx.pool,
             provider,
@@ -540,28 +559,25 @@ async fn handle_topup_webhook(
         return Err((StatusCode::BAD_REQUEST, "topup request expired".to_string()));
     }
 
-    // Kiểm tra hết hạn theo thời gian (30 phút)
-    if let Some(created) = parse_topup_created_at(&topup.created_at) {
-        let elapsed = Utc::now().signed_duration_since(created);
-        if elapsed.num_minutes() >= TOPUP_TTL_MINUTES {
-            wallet_repo::expire_topup(&ctx.pool, topup.id).await.ok();
-            let _ = repo::insert_webhook_event(
-                &ctx.pool,
-                provider,
-                true,
-                source_ip,
-                Some(&payload.memo),
-                Some(&payload.tx_id),
-                Some(payload.amount),
-                Some(&payload.status),
-                None,
-                Some("rejected"),
-                Some("topup expired by time"),
-                raw_json,
-            )
-            .await;
-            return Err((StatusCode::BAD_REQUEST, "topup request expired".to_string()));
-        }
+    // Check expiry by the payment time, not by the webhook receive time.
+    if topup_payment_expired(&topup.created_at, completed_at) {
+        wallet_repo::expire_topup(&ctx.pool, topup.id).await.ok();
+        let _ = repo::insert_webhook_event(
+            &ctx.pool,
+            provider,
+            true,
+            source_ip,
+            Some(&payload.memo),
+            Some(&payload.tx_id),
+            Some(payload.amount),
+            Some(&payload.status),
+            None,
+            Some("rejected"),
+            Some("topup expired by payment time"),
+            raw_json,
+        )
+        .await;
+        return Err((StatusCode::BAD_REQUEST, "topup request expired".to_string()));
     }
 
     if payload.amount < topup.amount {
@@ -586,13 +602,10 @@ async fn handle_topup_webhook(
         ));
     }
 
-    let completed_at =
-        parse_paid_at(payload.paid_at.as_deref()).unwrap_or_else(|_| chrono::Utc::now());
-
     // Atomic + idempotent: complete topup + credit wallet.
-    // Nếu webhook retry/concurrent, chỉ request đầu tiên chuyển pending -> completed mới được cộng ví.
+    // If webhook retries/concurrent calls happen, only the first pending/expired -> completed update credits wallet.
     let mut tx = ctx.pool.begin().await.map_err(internal_error)?;
-    let completed = wallet_repo::complete_topup(&mut tx, topup.id)
+    let completed = wallet_repo::complete_paid_topup(&mut tx, topup.id)
         .await
         .map_err(internal_error)?;
     if !completed {
@@ -906,6 +919,25 @@ mod tests {
             extract_memo_from_text("Thanh toan DHABC12345", "DH", 8),
             Some("DHABC12345".to_string())
         );
+    }
+
+    #[test]
+    fn normalizes_payment_memo_for_matching() {
+        assert_eq!(normalize_payment_memo("  napabc12345  "), "NAPABC12345");
+    }
+
+    #[test]
+    fn topup_expiry_uses_payment_time() {
+        let created_at = "2026-07-21 10:00:00";
+        let paid_in_time = DateTime::parse_from_rfc3339("2026-07-21T10:29:59Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let paid_late = DateTime::parse_from_rfc3339("2026-07-21T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        assert!(!topup_payment_expired(created_at, paid_in_time));
+        assert!(topup_payment_expired(created_at, paid_late));
     }
 
     #[tokio::test]

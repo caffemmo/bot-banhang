@@ -420,6 +420,19 @@ pub async fn complete_topup(tx: &mut SqliteConnection, topup_id: i64) -> Result<
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn complete_paid_topup(tx: &mut SqliteConnection, topup_id: i64) -> Result<bool> {
+    let now = Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "UPDATE wallet_topup_requests SET status = 'completed', completed_at = ?
+         WHERE id = ? AND status IN ('pending', 'expired')",
+    )
+    .bind(&now)
+    .bind(topup_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn expire_topup(pool: &SqlitePool, topup_id: i64) -> Result<()> {
     sqlx::query(
         "UPDATE wallet_topup_requests SET status = 'expired' WHERE id = ? AND status = 'pending'",
@@ -576,5 +589,36 @@ mod tests {
         assert_eq!(transactions.len(), 1);
         assert_eq!(transactions[0].tx_type, "refund");
         assert_eq!(transactions[0].order_id.as_deref(), Some("order-1"));
+    }
+
+    #[tokio::test]
+    async fn complete_paid_topup_allows_expired_request_once() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO wallet_topup_requests (id, user_id, chat_id, amount, memo, status)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(1_i64)
+        .bind(42_i64)
+        .bind(420_i64)
+        .bind(50_000_i64)
+        .bind("NAPABC12345")
+        .bind("expired")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        assert!(complete_paid_topup(&mut tx, 1).await.unwrap());
+        assert!(!complete_paid_topup(&mut tx, 1).await.unwrap());
+        tx.commit().await.unwrap();
+
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM wallet_topup_requests WHERE id = ?")
+                .bind(1_i64)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "completed");
     }
 }
