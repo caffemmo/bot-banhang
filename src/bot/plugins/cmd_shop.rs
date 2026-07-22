@@ -2056,6 +2056,7 @@ async fn process_order(
 
     let delivery_type = orders_api::product_delivery_type(&product).to_string();
     let is_uploaded_file = delivery_type == "uploaded_file";
+    let is_external_api = delivery_type == "external_api";
     let requires_input = delivery_type == "manual_input";
 
     if requires_input
@@ -2281,23 +2282,25 @@ async fn process_order(
         }
     } else {
         // Không dùng kho; lưu sẵn delivered_data để tránh lấy stock khi thanh toán.
-        let info = customer_input.clone().unwrap_or_else(|| "N/A".to_string());
-        let plan_desc = plan_label
-            .as_ref()
-            .map(|l| {
-                trl(
-                    &ctx,
-                    &lang,
-                    "plan_months_value",
-                    "{label} ({months} months)",
-                    &[
-                        ("label", l.clone()),
-                        ("months", plan_months.unwrap_or(qty).to_string()),
-                    ],
-                )
-            })
-            .unwrap_or_else(|| tl(&ctx, &lang, "plan_none", "No plan"));
-        order.delivered_data = Some(format!("plan: {plan_desc}\ninfo: {info}"));
+        if !is_external_api {
+            let info = customer_input.clone().unwrap_or_else(|| "N/A".to_string());
+            let plan_desc = plan_label
+                .as_ref()
+                .map(|l| {
+                    trl(
+                        &ctx,
+                        &lang,
+                        "plan_months_value",
+                        "{label} ({months} months)",
+                        &[
+                            ("label", l.clone()),
+                            ("months", plan_months.unwrap_or(qty).to_string()),
+                        ],
+                    )
+                })
+                .unwrap_or_else(|| tl(&ctx, &lang, "plan_none", "No plan"));
+            order.delivered_data = Some(format!("plan: {plan_desc}\ninfo: {info}"));
+        }
         let mut tx = ctx.pool.begin().await?;
         repo::insert_order_tx(&mut tx, &order).await?;
         if let Some(deal_id) = applied_sale_hunt_deal_id {

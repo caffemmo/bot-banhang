@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
+use crate::domains::orders::api as orders_api;
 use crate::domains::orders::models::Order;
 use crate::domains::products::models::Product;
 
@@ -31,8 +32,15 @@ impl AppPlugin for ExternalApiStockPlugin {
         order: &Order,
         product: &Product,
     ) -> Result<Option<String>, anyhow::Error> {
-        if !external_api_enabled(&ctx) || !is_external_api_product(&ctx, product.id) {
+        if orders_api::product_delivery_type(product) != "external_api" {
             return Ok(None);
+        }
+
+        if !external_api_enabled(&ctx) {
+            return Ok(Some(external_api_failure_delivery(
+                &order.id,
+                &anyhow!("chưa bật cấu hình lấy hàng API ngoài"),
+            )));
         }
 
         match buy_external_stock(&ctx, order.qty).await {
@@ -51,14 +59,6 @@ impl AppPlugin for ExternalApiStockPlugin {
 
 fn external_api_enabled(ctx: &AppContext) -> bool {
     config_bool(&ctx.get_text("external_api_stock_enabled", "0"))
-}
-
-fn is_external_api_product(ctx: &AppContext, product_id: i64) -> bool {
-    ctx.get_text("external_api_stock_local_product_id", "")
-        .trim()
-        .parse::<i64>()
-        .ok()
-        == Some(product_id)
 }
 
 async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
