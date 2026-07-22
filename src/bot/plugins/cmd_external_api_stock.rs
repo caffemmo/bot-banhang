@@ -51,9 +51,22 @@ impl AppPlugin for ExternalApiStockPlugin {
 }
 
 async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
-    let api_id = required_config(ctx, "external_api_stock_api_id")?;
-    let supplier_product_id = required_config(ctx, "external_api_stock_product_id")?;
-    let buy_url = optional_config(ctx, "external_api_stock_buy_url", DEFAULT_BUY_URL);
+    let api_id = required_config(
+        ctx,
+        "external_api_stock_api_id",
+        "EXTERNAL_API_STOCK_API_ID",
+    )?;
+    let supplier_product_id = required_config(
+        ctx,
+        "external_api_stock_product_id",
+        "EXTERNAL_API_STOCK_PRODUCT_ID",
+    )?;
+    let buy_url = optional_config(
+        ctx,
+        "external_api_stock_buy_url",
+        "EXTERNAL_API_STOCK_BUY_URL",
+        DEFAULT_BUY_URL,
+    );
     let quantity = quantity.max(1);
     let body = json!({
         "id": supplier_product_id,
@@ -102,20 +115,29 @@ async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
     Ok(delivered)
 }
 
-fn required_config(ctx: &AppContext, key: &str) -> Result<String> {
-    ctx.get_text(key, "")
+fn required_config(ctx: &AppContext, key: &str, env_key: &str) -> Result<String> {
+    config_value(ctx, key, env_key, "")
         .trim()
         .to_string()
         .into_nonempty()
-        .ok_or_else(|| anyhow!("chưa cấu hình {key}"))
+        .ok_or_else(|| anyhow!("chưa cấu hình {key} hoặc {env_key}"))
 }
 
-fn optional_config(ctx: &AppContext, key: &str, default_value: &str) -> String {
-    ctx.get_text(key, default_value)
+fn optional_config(ctx: &AppContext, key: &str, env_key: &str, default_value: &str) -> String {
+    config_value(ctx, key, env_key, default_value)
         .trim()
         .to_string()
         .into_nonempty()
         .unwrap_or_else(|| default_value.to_string())
+}
+
+fn config_value(ctx: &AppContext, key: &str, env_key: &str, default_value: &str) -> String {
+    let admin_value = ctx.get_text(key, "");
+    if !admin_value.trim().is_empty() {
+        return admin_value;
+    }
+
+    std::env::var(env_key).unwrap_or_else(|_| default_value.to_string())
 }
 
 fn hmac_signature(secret: &str, timestamp: i64, nonce: &str, body: &str) -> Result<String> {
