@@ -53,7 +53,7 @@ impl AppPlugin for ExternalApiStockPlugin {
 async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
     let api_id = required_config(ctx, "external_api_stock_api_id")?;
     let supplier_product_id = required_config(ctx, "external_api_stock_product_id")?;
-    let buy_url = ctx.get_text("external_api_stock_buy_url", DEFAULT_BUY_URL);
+    let buy_url = optional_config(ctx, "external_api_stock_buy_url", DEFAULT_BUY_URL);
     let quantity = quantity.max(1);
     let body = json!({
         "id": supplier_product_id,
@@ -85,7 +85,7 @@ async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
         return Err(anyhow!(
             "API mua hàng ngoài trả HTTP {}: {}",
             status.as_u16(),
-            friendly_api_detail(&raw)
+            api_response_detail(&raw)
         ));
     }
 
@@ -108,6 +108,14 @@ fn required_config(ctx: &AppContext, key: &str) -> Result<String> {
         .to_string()
         .into_nonempty()
         .ok_or_else(|| anyhow!("chưa cấu hình {key}"))
+}
+
+fn optional_config(ctx: &AppContext, key: &str, default_value: &str) -> String {
+    ctx.get_text(key, default_value)
+        .trim()
+        .to_string()
+        .into_nonempty()
+        .unwrap_or_else(|| default_value.to_string())
 }
 
 fn hmac_signature(secret: &str, timestamp: i64, nonce: &str, body: &str) -> Result<String> {
@@ -134,40 +142,53 @@ fn format_external_delivery(value: &Value) -> String {
         lines.push(format!("order_code: {order_code}"));
     }
 
-    if let Some(accounts) = value.get("accounts").and_then(Value::as_array) {
-        for account in accounts {
-            if let Some(line) = format_account_value(account) {
-                lines.push(line);
-            }
-        }
-    }
-
-    if lines.len() <= 1
-        && let Some(account) = value.get("account")
-        && let Some(line) = format_account_value(account)
-    {
-        lines.push(line);
-    }
-
-    if lines.len() <= 1
-        && let Some(data) = value.get("data")
-        && let Some(line) = format_account_value(data)
-    {
-        lines.push(line);
-    }
+    collect_delivery_lines(value, &mut lines);
 
     lines.join("\n")
 }
 
+fn collect_delivery_lines(value: &Value, lines: &mut Vec<String>) {
+    if let Some(line) = format_account_value(value) {
+        if !lines.iter().any(|existing| existing == &line) {
+            lines.push(line);
+        }
+        return;
+    }
+
+    match value {
+        Value::Array(values) => {
+            for item in values {
+                collect_delivery_lines(item, lines);
+            }
+        }
+        Value::Object(obj) => {
+            for (key, item) in obj {
+                if is_metadata_key(key) {
+                    continue;
+                }
+                collect_delivery_lines(item, lines);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn format_account_value(value: &Value) -> Option<String> {
     if let Some(text) = value.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+        if !looks_like_delivery_text(text) {
+            return None;
+        }
         return Some(text.to_string());
     }
     let obj = value.as_object()?;
+    if is_response_metadata_object(obj) {
+        return None;
+    }
     let mut fields = Vec::new();
     for key in [
         "account", "username", "email", "login", "password", "pass", "two_fa", "twofa", "2fa",
-        "mail", "mail_password", "code", "content",
+        "secret", "mail", "mail_password", "mail_pass", "recovery_mail", "code", "content",
+        "cookie",
     ] {
         if let Some(text) = obj
             .get(key)
@@ -180,11 +201,67 @@ fn format_account_value(value: &Value) -> Option<String> {
     }
 
     if fields.is_empty() {
-        let text = serde_json::to_string(value).ok()?;
-        if text == "{}" { None } else { Some(text) }
+        None
     } else {
         Some(fields.join("|"))
     }
+}
+
+fn is_response_metadata_object(obj: &serde_json::Map<String, Value>) -> bool {
+    let has_response_marker =
+        obj.contains_key("success") || obj.contains_key("message") || obj.contains_key("error");
+    let has_delivery_marker = [
+        "account",
+        "username",
+        "email",
+        "login",
+        "password",
+        "pass",
+        "two_fa",
+        "twofa",
+        "2fa",
+        "secret",
+        "mail",
+        "mail_password",
+        "mail_pass",
+        "recovery_mail",
+        "content",
+        "cookie",
+    ]
+    .iter()
+    .any(|key| obj.contains_key(*key));
+
+    has_response_marker && !has_delivery_marker
+}
+
+fn looks_like_delivery_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    text.contains('|')
+        || text.contains('\n')
+        || text.contains('@')
+        || lower.contains("password")
+        || lower.contains("pass")
+        || lower.contains("2fa")
+}
+
+fn is_metadata_key(key: &str) -> bool {
+    matches!(
+        key,
+        "success"
+            | "code"
+            | "message"
+            | "error"
+            | "owner"
+            | "product"
+            | "pricing"
+            | "telegram_id"
+            | "requested_product_id"
+            | "quantity"
+            | "stock"
+            | "balance"
+            | "balance_before"
+            | "balance_after"
+    )
 }
 
 fn json_value_to_string(value: &Value) -> Option<String> {
@@ -201,21 +278,26 @@ fn json_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 fn api_error_message(value: &Value) -> String {
-    for key in ["message", "error", "code"] {
-        if let Some(text) = json_string(value, key) {
-            return text.to_string();
-        }
+    let code = json_string(value, "code");
+    let message = json_string(value, "message").or_else(|| json_string(value, "error"));
+    match (code, message) {
+        (Some(code), Some(message)) if code != message => format!("{code}: {message}"),
+        (Some(code), _) => code.to_string(),
+        (_, Some(message)) => message.to_string(),
+        _ => truncate_detail(&value.to_string()),
     }
-    friendly_api_detail(&value.to_string())
 }
 
-fn friendly_api_detail(raw: &str) -> String {
-    raw.lines()
-        .next()
-        .unwrap_or(raw)
-        .chars()
-        .take(180)
-        .collect()
+fn api_response_detail(raw: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        return api_error_message(&value);
+    }
+
+    truncate_detail(raw.lines().next().unwrap_or(raw))
+}
+
+fn truncate_detail(text: &str) -> String {
+    text.chars().take(180).collect()
 }
 
 trait NonEmptyString {
@@ -261,6 +343,40 @@ mod tests {
         assert_eq!(
             format_external_delivery(&value),
             "order_code: API-TELE-ABC123\na@example.com|pass|ABCDEF"
+        );
+    }
+
+    #[test]
+    fn external_delivery_reads_nested_accounts_without_status_code() {
+        let value = json!({
+            "success": true,
+            "code": "TELE_PRODUCT_PURCHASED",
+            "order_code": "API-TELE-ABC123",
+            "data": {
+                "items": [
+                    {"login": "user@example.com", "pass": "secret", "code": "JBSWY3DPEHPK3PXP"}
+                ]
+            },
+            "product": {"id": "SP-GEF55PBV", "name": "GPT PLUS"}
+        });
+
+        assert_eq!(
+            format_external_delivery(&value),
+            "order_code: API-TELE-ABC123\nuser@example.com|secret|JBSWY3DPEHPK3PXP"
+        );
+    }
+
+    #[test]
+    fn api_error_message_includes_code_and_message() {
+        let value = json!({
+            "success": false,
+            "code": "INSUFFICIENT_BALANCE",
+            "message": "Số dư không đủ"
+        });
+
+        assert_eq!(
+            api_error_message(&value),
+            "INSUFFICIENT_BALANCE: Số dư không đủ"
         );
     }
 }
