@@ -36,13 +36,6 @@ impl AppPlugin for ExternalApiStockPlugin {
             return Ok(None);
         }
 
-        if !external_api_enabled(&ctx) {
-            return Ok(Some(external_api_failure_delivery(
-                &order.id,
-                &anyhow!("chưa bật cấu hình lấy hàng API ngoài"),
-            )));
-        }
-
         match buy_external_stock(&ctx, order.qty).await {
             Ok(delivered_data) => Ok(Some(delivered_data)),
             Err(err) => {
@@ -55,10 +48,6 @@ impl AppPlugin for ExternalApiStockPlugin {
             }
         }
     }
-}
-
-fn external_api_enabled(ctx: &AppContext) -> bool {
-    config_bool(&ctx.get_text("external_api_stock_enabled", "0"))
 }
 
 async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
@@ -233,13 +222,6 @@ fn external_api_failure_delivery(order_id: &str, err: &anyhow::Error) -> String 
     tracing::error!("order {order_id} external delivery needs manual handling: {err:#}");
     format!(
         "Đơn hàng đang cần admin xử lý thủ công.\nOrder: {order_id}\nVui lòng liên hệ hỗ trợ để nhận hàng."
-    )
-}
-
-fn config_bool(raw: &str) -> bool {
-    matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on" | "bật" | "bat"
     )
 }
 
