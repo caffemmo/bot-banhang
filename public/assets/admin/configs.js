@@ -44,6 +44,8 @@
         icon: '🎬',
         fields: [
           { key: 'netflix_enabled', label: 'Hiện nút Xem Netflix', value: '1' },
+          { key: 'netflix_start_button_text', label: 'Text nút Xem Netflix', value: '🎬 Xem Netflix' },
+          { key: 'netflix_start_button_custom_emoji_id', label: 'Custom emoji ID nút Xem Netflix', value: '' },
           { key: 'netflix_price', label: 'Giá mỗi lần lấy Netflix', value: '0' },
           { key: 'netflix_ctv_api_key', label: 'API key CTV Tiệm Bánh Netflix', value: '' },
           { key: 'netflix_proxy_url', label: 'Proxy Việt Nam cho Netflix (tuỳ chọn)', value: '' },

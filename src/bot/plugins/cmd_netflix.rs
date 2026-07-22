@@ -145,13 +145,49 @@ pub fn netflix_enabled(ctx: &AppContext) -> bool {
 }
 
 pub fn netflix_button_json(ctx: &AppContext, lang: &str) -> Value {
-    i18n::inline_button_callback_json(
-        ctx,
-        lang,
-        "start_btn_netflix",
-        "🎬 Xem Netflix",
-        "netflix:menu",
-    )
+    let fallback_text = i18n::t(ctx, lang, "start_btn_netflix", "🎬 Xem Netflix");
+    let configured_text = ctx.get_text("netflix_start_button_text", "");
+    let text_source = if configured_text.trim().is_empty() {
+        fallback_text.clone()
+    } else {
+        configured_text
+    };
+    let mut parts = i18n::button_parts_for_key(ctx, "start_btn_netflix", text_source);
+    if parts.text.trim().is_empty() {
+        let fallback_parts =
+            i18n::button_parts_for_key(ctx, "start_btn_netflix", fallback_text.clone());
+        if !fallback_parts.text.trim().is_empty() {
+            parts.text = fallback_parts.text;
+        }
+    }
+    if parts.text.trim().is_empty() {
+        parts.text = netflix_default_button_label(lang).to_string();
+    }
+
+    if let Some(icon_id) = normalize_custom_emoji_id_value(
+        &ctx.get_text("netflix_start_button_custom_emoji_id", ""),
+    ) {
+        parts.icon_custom_emoji_id = Some(icon_id);
+    }
+
+    let mut button = json!({
+        "text": parts.text,
+        "callback_data": "netflix:menu",
+    });
+    if let Some(icon_id) = parts.icon_custom_emoji_id
+        && let Some(obj) = button.as_object_mut()
+    {
+        obj.insert("icon_custom_emoji_id".to_string(), Value::String(icon_id));
+    }
+    button
+}
+
+fn netflix_default_button_label(lang: &str) -> &'static str {
+    if lang.to_ascii_lowercase().starts_with("vi") {
+        "Xem Netflix"
+    } else {
+        "Watch Netflix"
+    }
 }
 
 async fn send_netflix_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Result<()> {
@@ -1225,6 +1261,18 @@ impl NonEmptyString for String {
     }
 }
 
+fn normalize_custom_emoji_id_value(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1251,27 +1299,57 @@ mod tests {
         );
     }
 
-    #[test]
-    fn config_bool_accepts_admin_toggle_values() {
+    fn test_ctx(configs: std::collections::HashMap<String, String>) -> Arc<AppContext> {
         let config = crate::config::Config::from_env_map(&std::collections::HashMap::from([
             ("TELEGRAM_TOKEN".to_string(), "test".to_string()),
             ("DATABASE_URL".to_string(), "sqlite::memory:".to_string()),
             ("WEBHOOK_SECRET".to_string(), "secret".to_string()),
-            ("ADMIN_JWT_SECRET".to_string(), "12345678901234567890123456789012".to_string()),
+            (
+                "ADMIN_JWT_SECRET".to_string(),
+                "12345678901234567890123456789012".to_string(),
+            ),
             ("ADMIN_SETUP_CODE".to_string(), "setup".to_string()),
         ]))
         .unwrap();
-        let ctx = AppContext::new(
+
+        AppContext::new(
             Bot::new("test"),
             sqlx::sqlite::SqlitePoolOptions::new()
                 .connect_lazy("sqlite::memory:")
                 .unwrap(),
             config,
-            std::collections::HashMap::from([("netflix_enabled".to_string(), "bật".to_string())]),
+            configs,
             crate::bot::texts::BotTexts::default(),
             vec![],
-        );
+        )
+    }
+
+    #[test]
+    fn config_bool_accepts_admin_toggle_values() {
+        let ctx = test_ctx(std::collections::HashMap::from([(
+            "netflix_enabled".to_string(),
+            "bật".to_string(),
+        )]));
 
         assert!(netflix_enabled(&ctx));
+    }
+
+    #[test]
+    fn netflix_button_keeps_label_when_custom_emoji_text_is_icon_only() {
+        let ctx = test_ctx(std::collections::HashMap::from([
+            (
+                "netflix_start_button_text".to_string(),
+                "🎬".to_string(),
+            ),
+            (
+                "netflix_start_button_custom_emoji_id".to_string(),
+                "5368324170671202286".to_string(),
+            ),
+        ]));
+
+        let button = netflix_button_json(&ctx, "vi");
+        assert_eq!(button["text"], "Xem Netflix");
+        assert_eq!(button["callback_data"], "netflix:menu");
+        assert_eq!(button["icon_custom_emoji_id"], "5368324170671202286");
     }
 }
