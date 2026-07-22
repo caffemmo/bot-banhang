@@ -230,7 +230,15 @@
       return product?.requires_input === 1 ? 'manual_input' : 'stock_item';
     }
 
+    function ensureExternalApiDeliveryOption() {
+      const select = $('#product-delivery-type');
+      if (!select.find('option[value="external_api"]').length) {
+        select.append('<option value="external_api">Hàng API ngoài</option>');
+      }
+    }
+
     function openProductModal(product = null) {
+      ensureExternalApiDeliveryOption();
       $('#product-id').val(product?.id || '');
       $('#product-name').val(product?.name || '');
       $('#product-price').val(product?.price ?? 0);
