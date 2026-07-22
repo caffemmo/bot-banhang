@@ -35,6 +35,7 @@ use crate::domains::wallet::repo as wallet_repo;
 
 use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
+use crate::bot::plugins::cmd_external_api_stock;
 use crate::bot::plugins::cmd_sale_hunt;
 use crate::bot::{BotDialogue, State};
 use teloxide::types::BotCommand;
@@ -517,15 +518,9 @@ async fn shop_handle_callback(
                 }
 
                 let is_external_api = delivery_type == "external_api";
-                let stock = if is_external_api {
-                    0
-                } else {
-                    repo::count_product_items(&ctx.pool, product_id)
-                        .await
-                        .unwrap_or(0)
-                };
+                let stock = product_stock_for_display(&ctx, &product).await;
                 let stock_label = if is_external_api {
-                    tl(&ctx, &lang, "shop_stock_external_api", "có sẵn")
+                    external_api_stock_label(&ctx, &lang, stock)
                 } else {
                     stock.to_string()
                 };
@@ -1965,9 +1960,7 @@ pub(crate) async fn send_products(
     let products = repo::list_products(&ctx.pool, total, 0).await?;
     let mut products_with_stock = Vec::new();
     for p in products {
-        let stock = repo::count_product_items(&ctx.pool, p.id)
-            .await
-            .unwrap_or(0);
+        let stock = product_stock_for_display(&ctx, &p).await;
         products_with_stock.push((p, stock));
     }
 
@@ -2000,9 +1993,7 @@ async fn send_products_for_category(
     let products = repo::list_products_by_category(&ctx.pool, category).await?;
     let mut products_with_stock = Vec::new();
     for p in products {
-        let stock = repo::count_product_items(&ctx.pool, p.id)
-            .await
-            .unwrap_or(0);
+        let stock = product_stock_for_display(&ctx, &p).await;
         products_with_stock.push((p, stock));
     }
 
@@ -2054,9 +2045,7 @@ async fn handle_product_search_message(
     let products = repo::search_products(&ctx.pool, query, 30).await?;
     let mut products_with_stock = Vec::new();
     for product in products {
-        let stock = repo::count_product_items(&ctx.pool, product.id)
-            .await
-            .unwrap_or(0);
+        let stock = product_stock_for_display(&ctx, &product).await;
         products_with_stock.push((product, stock));
     }
 
@@ -3064,7 +3053,7 @@ fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: 
         return tl(ctx, lang, "shop_stock_manual", "✅ có sẵn");
     }
     if delivery_type == "external_api" {
-        return tl(ctx, lang, "shop_stock_external_api", "có sẵn");
+        return external_api_stock_label(ctx, lang, stock);
     }
     trl(
         ctx,
@@ -3073,6 +3062,31 @@ fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: 
         "còn {stock}",
         &[("stock", stock.max(0).to_string())],
     )
+}
+
+async fn product_stock_for_display(ctx: &AppContext, product: &Product) -> i64 {
+    if orders_api::product_delivery_type(product) == "external_api" {
+        match cmd_external_api_stock::external_api_stock_count(ctx).await {
+            Ok(stock) => return stock.max(0),
+            Err(err) => {
+                warn!(
+                    "failed to load external API stock count for product {}: {err:#}",
+                    product.id
+                );
+                return -1;
+            }
+        }
+    }
+
+    repo::count_product_items(&ctx.pool, product.id).await.unwrap_or(0)
+}
+
+fn external_api_stock_label(ctx: &AppContext, lang: &str, stock: i64) -> String {
+    if stock >= 0 {
+        return stock.to_string();
+    }
+
+    tl(ctx, lang, "shop_stock_external_api", "có sẵn")
 }
 
 fn truncate_button_text(value: &str, max_chars: usize) -> String {

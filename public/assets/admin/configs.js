@@ -111,6 +111,7 @@
           { key: 'external_api_stock_api_id', label: 'API ID / secret bên shop nguồn', value: '' },
           { key: 'external_api_stock_product_id', label: 'ID sản phẩm bên shop nguồn', value: 'SP-GEF55PBV' },
           { key: 'external_api_stock_buy_url', label: 'Endpoint mua hàng bên shop nguồn', value: 'https://sumistore.me/api/tele-product/buy' },
+          { key: 'external_api_stock_detail_url', label: 'Endpoint xem tồn kho bên shop nguồn', value: 'https://sumistore.me/api/tele-products/{product_id}' },
         ]
       },
       {

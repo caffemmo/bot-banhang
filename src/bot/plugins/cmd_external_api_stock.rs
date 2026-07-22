@@ -15,6 +15,7 @@ use crate::domains::orders::models::Order;
 use crate::domains::products::models::Product;
 
 const DEFAULT_BUY_URL: &str = "https://sumistore.me/api/tele-product/buy";
+const DEFAULT_PRODUCT_DETAIL_URL: &str = "https://sumistore.me/api/tele-products/{product_id}";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -115,6 +116,56 @@ async fn buy_external_stock(ctx: &AppContext, quantity: i64) -> Result<String> {
     Ok(delivered)
 }
 
+pub async fn external_api_stock_count(ctx: &AppContext) -> Result<i64> {
+    let api_id = required_config(
+        ctx,
+        "external_api_stock_api_id",
+        "EXTERNAL_API_STOCK_API_ID",
+    )?;
+    let supplier_product_id = required_config(
+        ctx,
+        "external_api_stock_product_id",
+        "EXTERNAL_API_STOCK_PRODUCT_ID",
+    )?;
+    let detail_url_template = optional_config(
+        ctx,
+        "external_api_stock_detail_url",
+        "EXTERNAL_API_STOCK_DETAIL_URL",
+        DEFAULT_PRODUCT_DETAIL_URL,
+    );
+    let detail_url = product_detail_url(&detail_url_template, &supplier_product_id);
+
+    let response = Client::new()
+        .get(detail_url)
+        .header("X-Tele-API-ID", api_id)
+        .send()
+        .await
+        .context("không gọi được API xem tồn kho ngoài")?;
+
+    let status = response.status();
+    let raw = response
+        .text()
+        .await
+        .context("không đọc được response API xem tồn kho ngoài")?;
+    if !status.is_success() {
+        return Err(anyhow!(
+            "API xem tồn kho ngoài trả HTTP {}: {}",
+            status.as_u16(),
+            api_response_detail(&raw)
+        ));
+    }
+
+    let value: Value =
+        serde_json::from_str(&raw).context("API xem tồn kho ngoài trả dữ liệu không phải JSON")?;
+    if value.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(anyhow!(api_error_message(&value)));
+    }
+
+    json_i64_at_path(&value, &["product", "stock"])
+        .or_else(|| json_i64_at_path(&value, &["stock"]))
+        .ok_or_else(|| anyhow!("API xem tồn kho ngoài không trả product.stock"))
+}
+
 fn required_config(ctx: &AppContext, key: &str, env_key: &str) -> Result<String> {
     config_value(ctx, key, env_key, "")
         .trim()
@@ -138,6 +189,17 @@ fn config_value(ctx: &AppContext, key: &str, env_key: &str, default_value: &str)
     }
 
     std::env::var(env_key).unwrap_or_else(|_| default_value.to_string())
+}
+
+fn product_detail_url(template: &str, product_id: &str) -> String {
+    let trimmed = template.trim();
+    if trimmed.contains("{product_id}") {
+        return trimmed.replace("{product_id}", product_id);
+    }
+    if trimmed.trim_end_matches('/').ends_with(product_id) {
+        return trimmed.to_string();
+    }
+    format!("{}/{}", trimmed.trim_end_matches('/'), product_id)
 }
 
 fn hmac_signature(secret: &str, timestamp: i64, nonce: &str, body: &str) -> Result<String> {
@@ -308,6 +370,17 @@ fn api_error_message(value: &Value) -> String {
         (_, Some(message)) => message.to_string(),
         _ => truncate_detail(&value.to_string()),
     }
+}
+
+fn json_i64_at_path(value: &Value, path: &[&str]) -> Option<i64> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current
+        .as_i64()
+        .or_else(|| current.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .or_else(|| current.as_str()?.trim().parse::<i64>().ok())
 }
 
 fn api_response_detail(raw: &str) -> String {
