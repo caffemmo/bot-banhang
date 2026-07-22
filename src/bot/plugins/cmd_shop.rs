@@ -115,6 +115,45 @@ async fn notify_admins_for_no_reserve_order(
     }
 }
 
+async fn notify_admins_external_api_failure(
+    ctx: &AppContext,
+    order: &Order,
+    product: &Product,
+    reason: &str,
+) {
+    let text = format!(
+        "Canh bao lay hang API ngoai that bai\nOrder: {}\nUser: {}\nChat: {}\nMemo: {}\nProduct: {}\nDelivery type: {}\nSo tien don: {}\nLy do: {}\n\nKhach van thay thong bao chung va vi chua bi tru.",
+        order.id,
+        order.user_id,
+        order.chat_id,
+        order.bank_memo,
+        product.name,
+        orders_api::product_delivery_type(product),
+        format_vnd(order.amount),
+        truncate_admin_reason(reason)
+    );
+
+    for admin_id in external_api_failure_admin_ids(ctx) {
+        if let Err(err) = ctx.bot.send_message(ChatId(admin_id), text.clone()).await {
+            warn!("failed to notify admin {admin_id} about external API failure: {err}");
+        }
+    }
+}
+
+fn external_api_failure_admin_ids(ctx: &AppContext) -> Vec<i64> {
+    let mut ids = ctx.order_notification_admin_ids();
+    for admin_id in ctx.telegram_icon_admin_ids() {
+        if !ids.iter().any(|id| *id == admin_id) {
+            ids.push(admin_id);
+        }
+    }
+    ids
+}
+
+fn truncate_admin_reason(reason: &str) -> String {
+    reason.chars().take(500).collect()
+}
+
 fn render_qr_caption(base_caption: &str, countdown_line: &str) -> String {
     format!("{base_caption}\n\n{countdown_line}")
 }
@@ -1479,6 +1518,8 @@ async fn handle_pay_with_wallet(
         Ok(data) => data,
         Err(err) => {
             tracing::error!("wallet external API delivery failed before debit for order {order_id}: {err:#}");
+            notify_admins_external_api_failure(&ctx, &owp.order, &owp.product, &format!("{err:#}"))
+                .await;
             ctx.bot
                 .send_message(
                     chat_id,
