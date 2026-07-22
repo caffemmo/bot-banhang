@@ -1552,6 +1552,10 @@ async fn complete_wallet_payment_transaction(
 
     let delivered_data = if let Some(data) = &owp.order.delivered_data {
         data.clone()
+    } else if orders_api::product_delivery_type(&owp.product) == "external_api" {
+        format!(
+            "Đơn hàng đang được hệ thống xử lý.\nOrder: {order_id}\nVui lòng đợi trong giây lát."
+        )
     } else if orders_api::product_delivery_type(&owp.product) == "uploaded_file" {
         let taken_items = repo::take_product_items(&mut tx, owp.order.product_id, owp.order.qty)
             .await
