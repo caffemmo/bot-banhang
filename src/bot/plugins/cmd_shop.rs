@@ -309,9 +309,8 @@ async fn shop_handle_callback(
     let Some(data) = q.data.clone() else {
         return Ok(());
     };
-    let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
-
     let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+    let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
 
     if data == "start:shop" {
         if let Some(msg) = &q.message {
@@ -729,7 +728,45 @@ async fn shop_handle_callback(
     } else if let Some(order_id) = data.strip_prefix("paywallet:") {
         if let Some(msg) = &q.message {
             let user_id = q.from.id.0 as i64;
-            handle_pay_with_wallet(ctx.clone(), msg.chat().id, msg.id(), user_id, order_id).await?;
+            let ctx_task = ctx.clone();
+            let chat_id = msg.chat().id;
+            let msg_id = msg.id();
+            let order_id = order_id.to_string();
+            let processing_text = tl(
+                &ctx,
+                &lang,
+                "wallet_payment_processing",
+                "⏳ Đang xử lý thanh toán, vui lòng đợi vài giây...",
+            );
+            let processing_kb = InlineKeyboardMarkup::new(vec![vec![i18n::inline_button_callback(
+                &ctx,
+                &lang,
+                "start_btn_wallet",
+                "💳 Ví tiền",
+                "start:wallet",
+            )]]);
+            tokio::spawn(async move {
+                let _ = ctx_task
+                    .bot
+                    .edit_message_caption(chat_id, msg_id)
+                    .caption(processing_text)
+                    .reply_markup(processing_kb)
+                    .await;
+                if let Err(err) =
+                    handle_pay_with_wallet(ctx_task.clone(), chat_id, msg_id, user_id, &order_id)
+                        .await
+                {
+                    tracing::error!("paywallet background task failed for order {order_id}: {err:#}");
+                    let _ = ctx_task
+                        .bot
+                        .send_message(
+                            chat_id,
+                            "⚠️ Thanh toán chưa xử lý được. Vui lòng thử lại hoặc liên hệ hỗ trợ.",
+                        )
+                        .reply_markup(shop_action_result_keyboard(&ctx_task, "vi"))
+                        .await;
+                }
+            });
         }
     } else if let Some(rest) = data.strip_prefix("cryptopay:") {
         if let Some(msg) = &q.message {
