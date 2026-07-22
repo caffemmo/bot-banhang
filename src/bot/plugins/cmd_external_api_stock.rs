@@ -230,9 +230,9 @@ fn friendly_api_detail(raw: &str) -> String {
 }
 
 fn external_api_failure_delivery(order_id: &str, err: &anyhow::Error) -> String {
+    tracing::error!("order {order_id} external delivery needs manual handling: {err:#}");
     format!(
-        "Không lấy được hàng tự động từ API ngoài.\nOrder: {order_id}\nLỗi: {}\nVui lòng liên hệ admin để xử lý đơn này.",
-        friendly_api_detail(&err.to_string())
+        "Đơn hàng đang cần admin xử lý thủ công.\nOrder: {order_id}\nVui lòng liên hệ hỗ trợ để nhận hàng."
     )
 }
 

@@ -284,7 +284,7 @@
   "wallet_btn_topup_again": "💰 Top up again",
   "wallet_btn_topup_binance": "🟡 Top up Binance Pay",
   "wallet_btn_topup_usdt": "🟢 Top up USDT BEP20",
-  "shop_stock_external_api": "API stock",
+  "shop_stock_external_api": "available",
   "wallet_header": "💳 YOUR WALLET\n\nBalance: {balance}\n",
   "wallet_history_empty": "You have no top-up requests.",
   "wallet_history_header": "🕒 TOP-UP HISTORY\n\nYour recent top-up requests:\n",

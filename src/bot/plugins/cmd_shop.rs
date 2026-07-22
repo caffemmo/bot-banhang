@@ -487,7 +487,7 @@ async fn shop_handle_callback(
                         .unwrap_or(0)
                 };
                 let stock_label = if is_external_api {
-                    tl(&ctx, &lang, "shop_stock_external_api", "hàng API")
+                    tl(&ctx, &lang, "shop_stock_external_api", "có sẵn")
                 } else {
                     stock.to_string()
                 };
@@ -2921,7 +2921,7 @@ fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: 
         return tl(ctx, lang, "shop_stock_manual", "✅ có sẵn");
     }
     if delivery_type == "external_api" {
-        return tl(ctx, lang, "shop_stock_external_api", "hàng API");
+        return tl(ctx, lang, "shop_stock_external_api", "có sẵn");
     }
     trl(
         ctx,
