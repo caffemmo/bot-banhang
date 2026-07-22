@@ -83,7 +83,7 @@ pub async fn fulfill_paid_order(
 
     let mut plugin_delivered_data = None;
     for plugin in ctx.plugins.iter() {
-        if let Ok(Some(data)) = plugin
+        match plugin
             .on_order_paid(
                 ctx.clone(),
                 &order_with_product.order,
@@ -91,8 +91,28 @@ pub async fn fulfill_paid_order(
             )
             .await
         {
-            plugin_delivered_data = Some(data);
-            break;
+            Ok(Some(data)) => {
+                plugin_delivered_data = Some(data);
+                break;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                error!(
+                    "paid-order plugin {} failed for order {}: {err:#}",
+                    plugin.name(),
+                    order_with_product.order.id
+                );
+                if product_delivery_type(&order_with_product.product) == "external_api" {
+                    return credit_paid_order_to_wallet(
+                        &ctx,
+                        &order_with_product,
+                        OrderStatus::Cancel,
+                        paid_amount_vnd(&source, &order_with_product),
+                        "external API delivery failed",
+                    )
+                    .await;
+                }
+            }
         }
     }
 

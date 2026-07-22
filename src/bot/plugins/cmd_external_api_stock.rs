@@ -44,7 +44,7 @@ impl AppPlugin for ExternalApiStockPlugin {
                     order.id,
                     product.id
                 );
-                Ok(Some(external_api_failure_delivery(&order.id, &err)))
+                Err(err)
             }
         }
     }
@@ -216,13 +216,6 @@ fn friendly_api_detail(raw: &str) -> String {
         .chars()
         .take(180)
         .collect()
-}
-
-fn external_api_failure_delivery(order_id: &str, err: &anyhow::Error) -> String {
-    tracing::error!("order {order_id} external delivery needs manual handling: {err:#}");
-    format!(
-        "Đơn hàng đang cần admin xử lý thủ công.\nOrder: {order_id}\nVui lòng liên hệ hỗ trợ để nhận hàng."
-    )
 }
 
 trait NonEmptyString {

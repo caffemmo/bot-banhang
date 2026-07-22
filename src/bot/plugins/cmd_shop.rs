@@ -1475,8 +1475,35 @@ async fn handle_pay_with_wallet(
         return Ok(());
     }
 
+    let plugin_delivered_data = match resolve_wallet_plugin_delivery(&ctx, &owp).await {
+        Ok(data) => data,
+        Err(err) => {
+            tracing::error!("wallet external API delivery failed before debit for order {order_id}: {err:#}");
+            ctx.bot
+                .send_message(
+                    chat_id,
+                    tl(
+                        &ctx,
+                        &lang,
+                        "external_api_delivery_failed_before_payment",
+                        "⚠️ Chưa lấy được hàng từ hệ thống. Ví của bạn chưa bị trừ, vui lòng thử lại sau hoặc liên hệ hỗ trợ.",
+                    ),
+                )
+                .reply_markup(shop_action_result_keyboard(&ctx, &lang))
+                .await?;
+            return Ok(());
+        }
+    };
+
     let (delivered_data, reserved_item_ids, balance_after, paid_at) =
-        complete_wallet_payment_transaction(&ctx.pool, &owp, user_id, order_id).await?;
+        complete_wallet_payment_transaction(
+            &ctx.pool,
+            &owp,
+            user_id,
+            order_id,
+            plugin_delivered_data,
+        )
+        .await?;
 
     // Cập nhật message
     let done_text = format!(
@@ -1533,17 +1560,19 @@ async fn handle_pay_with_wallet(
         product: owp.product.clone(),
     };
     let mut final_delivered_data = delivered_data.clone();
-    for plugin in ctx.plugins.iter() {
-        match plugin
-            .on_order_paid(ctx.clone(), &updated_owp.order, &updated_owp.product)
-            .await
-        {
-            Ok(Some(data)) => {
-                final_delivered_data = data;
-                break;
+    if orders_api::product_delivery_type(&updated_owp.product) != "external_api" {
+        for plugin in ctx.plugins.iter() {
+            match plugin
+                .on_order_paid(ctx.clone(), &updated_owp.order, &updated_owp.product)
+                .await
+            {
+                Ok(Some(data)) => {
+                    final_delivered_data = data;
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => tracing::error!("wallet paid plugin {} failed: {e}", plugin.name()),
             }
-            Ok(None) => {}
-            Err(e) => tracing::error!("wallet paid plugin {} failed: {e}", plugin.name()),
         }
     }
     if final_delivered_data != delivered_data {
@@ -1577,22 +1606,51 @@ async fn handle_pay_with_wallet(
     Ok(())
 }
 
+async fn resolve_wallet_plugin_delivery(
+    ctx: &Arc<AppContext>,
+    owp: &OrderWithProduct,
+) -> Result<Option<String>> {
+    if orders_api::product_delivery_type(&owp.product) != "external_api" {
+        return Ok(None);
+    }
+
+    for plugin in ctx
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.name() == "ExternalApiStock")
+    {
+        match plugin
+            .on_order_paid(ctx.clone(), &owp.order, &owp.product)
+            .await
+        {
+            Ok(Some(data)) => return Ok(Some(data)),
+            Ok(None) => {}
+            Err(err) => return Err(anyhow!("plugin {} failed: {err:#}", plugin.name())),
+        }
+    }
+
+    Err(anyhow!("không có plugin lấy hàng API ngoài"))
+}
+
 async fn complete_wallet_payment_transaction(
     pool: &crate::db::DbPool,
     owp: &OrderWithProduct,
     user_id: i64,
     order_id: &str,
+    plugin_delivered_data: Option<String>,
 ) -> Result<(String, Option<String>, i64, chrono::DateTime<Utc>)> {
     let paid_at = Utc::now();
     let mut tx = pool.begin().await?;
     let mut reserved_item_ids = owp.order.reserved_item_ids.clone();
 
-    let delivered_data = if let Some(data) = &owp.order.delivered_data {
+    let delivered_data = if let Some(data) = plugin_delivered_data {
+        data
+    } else if let Some(data) = &owp.order.delivered_data {
         data.clone()
     } else if orders_api::product_delivery_type(&owp.product) == "external_api" {
-        format!(
-            "Đơn hàng đang được hệ thống xử lý.\nOrder: {order_id}\nVui lòng đợi trong giây lát."
-        )
+        return Err(anyhow!(
+            "Chưa lấy được hàng API ngoài cho đơn {order_id}"
+        ));
     } else if orders_api::product_delivery_type(&owp.product) == "uploaded_file" {
         let taken_items = repo::take_product_items(&mut tx, owp.order.product_id, owp.order.qty)
             .await
@@ -4583,7 +4641,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let err = complete_wallet_payment_transaction(&pool, &owp, 42, &order.id)
+        let err = complete_wallet_payment_transaction(&pool, &owp, 42, &order.id, None)
             .await
             .unwrap_err();
 
@@ -4666,7 +4724,7 @@ mod tests {
             .unwrap();
 
         let (delivered_data, reserved_item_ids, balance_after, _) =
-            complete_wallet_payment_transaction(&pool, &owp, 42, &order.id)
+            complete_wallet_payment_transaction(&pool, &owp, 42, &order.id, None)
                 .await
                 .unwrap();
 
