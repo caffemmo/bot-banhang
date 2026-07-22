@@ -316,24 +316,30 @@ fn normalize_payload(payload: IncomingWebhook, ctx: &AppContext) -> NormalizedPa
             paid_at: p.paid_at,
         },
         IncomingWebhook::SePay(p) => {
-            // SePay does not provide our internal memo field directly.
-            // We match by memo contained in the transfer content (or SePay "code" when configured).
-            // Convention: bot generates a memo like "DHXXXXXXXX" and user transfers with that in content.
+            // SePay can send its own transaction code separately from transfer content.
+            // Always prefer the memo inside content/description; fall back to code only if needed.
             let transfer_content = if p.content.trim().is_empty() {
                 p.description.as_deref().unwrap_or("")
             } else {
                 &p.content
             };
-            let memo = if p.code.as_deref().unwrap_or("").trim().is_empty() {
-                extract_memo_from_text(
-                    transfer_content,
-                    &ctx.order_memo_prefix(),
-                    ctx.order_memo_length(),
-                )
-                .unwrap_or_else(|| normalize_payment_memo(transfer_content))
-            } else {
-                normalize_payment_memo(&p.code.unwrap())
-            };
+            let memo = extract_memo_from_text(
+                transfer_content,
+                &ctx.order_memo_prefix(),
+                ctx.order_memo_length(),
+            )
+            .or_else(|| {
+                p.code.as_deref().and_then(|code| {
+                    extract_memo_from_text(code, &ctx.order_memo_prefix(), ctx.order_memo_length())
+                })
+            })
+            .or_else(|| {
+                p.code
+                    .as_deref()
+                    .map(normalize_payment_memo)
+                    .filter(|code| !code.is_empty())
+            })
+            .unwrap_or_else(|| normalize_payment_memo(transfer_content));
 
             let status = if p.transfer_type.to_lowercase() == "in" {
                 "paid".to_string()
@@ -924,6 +930,29 @@ mod tests {
     #[test]
     fn normalizes_payment_memo_for_matching() {
         assert_eq!(normalize_payment_memo("  napabc12345  "), "NAPABC12345");
+    }
+
+    #[test]
+    fn sepay_content_memo_wins_over_transaction_code() {
+        let ctx = test_ctx();
+        let payload = IncomingWebhook::SePay(SePayWebhook {
+            id: 1,
+            gateway: Some("TPB".to_string()),
+            transaction_date: Some("2026-07-22 12:00:00".to_string()),
+            account_number: Some("00001293892".to_string()),
+            code: Some("BANKTX123".to_string()),
+            content: "Khach nap tien NAPABC12345".to_string(),
+            transfer_type: "in".to_string(),
+            transfer_amount: 50_000,
+            accumulated: None,
+            sub_account: None,
+            reference_code: Some("REF123".to_string()),
+            description: None,
+        });
+
+        let normalized = normalize_payload(payload, &ctx);
+
+        assert_eq!(normalized.memo, "NAPABC12345");
     }
 
     #[test]
