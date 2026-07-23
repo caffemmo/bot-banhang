@@ -62,9 +62,6 @@ impl AppPlugin for StartAffiliatePlugin {
             }
         }
         send_start_menu(&ctx, msg.chat.id, &lang).await?;
-        if let Some(user) = msg.from() {
-            notify_monthly_netflix_gift(&ctx, msg.chat.id, user.id.0 as i64, &lang).await;
-        }
         Ok(true)
     }
 
@@ -97,8 +94,6 @@ impl AppPlugin for StartAffiliatePlugin {
                 if let Some(msg) = &q.message {
                     if joined {
                         send_start_menu(&ctx, msg.chat().id, &lang).await?;
-                        notify_monthly_netflix_gift(&ctx, msg.chat().id, q.from.id.0 as i64, &lang)
-                            .await;
                     } else {
                         send_required_channel_prompt(&ctx, msg.chat().id, &lang).await?;
                     }
@@ -297,21 +292,6 @@ async fn send_start_menu(ctx: &AppContext, chat_id: ChatId, lang: &str) -> Resul
     Ok(())
 }
 
-async fn notify_monthly_netflix_gift(
-    ctx: &Arc<AppContext>,
-    chat_id: ChatId,
-    user_id: i64,
-    lang: &str,
-) {
-    if let Err(err) =
-        cmd_netflix::notify_monthly_gift_if_eligible(ctx, chat_id, user_id, lang).await
-    {
-        tracing::warn!(
-            "failed to send monthly Netflix gift notice from affiliate start to user {user_id}: {err:#}"
-        );
-    }
-}
-
 fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
     let mut shop_row = vec![i18n::inline_button_callback_json(
         ctx,
@@ -326,6 +306,7 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
 
     let mut rows = vec![
         shop_row,
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
         vec![
             i18n::inline_button_callback_json(
                 ctx,

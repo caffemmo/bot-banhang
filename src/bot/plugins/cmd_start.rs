@@ -40,6 +40,7 @@ enum StartMenuAction {
     TopupHistory,
     Help,
     Language,
+    Promo,
 }
 
 fn t_lang(ctx: &AppContext, lang: &str, key: &str, default: &str) -> String {
@@ -312,6 +313,7 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
 
     let mut rows = vec![
         shop_row,
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -442,6 +444,10 @@ fn start_menu_button_specs_from_texts(
 
     let mut rows = vec![
         shop_row,
+        vec![(
+            texts.get_lang("start_btn_promo", lang, "🎁 Khuyến mãi"),
+            "netflix:monthly_gift_menu".to_string(),
+        )],
         vec![
             (
                 texts.get_lang("start_btn_topup", lang, "Top up"),
@@ -480,7 +486,7 @@ fn start_menu_button_specs_from_texts(
         ],
     ];
     if include_viameta {
-        rows[3].push((
+        rows[4].push((
             texts.get_lang("start_btn_viameta", lang, "Up tích xanh"),
             "viameta:menu".to_string(),
         ));
@@ -563,6 +569,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
     match callback {
         "start:shop" => "start_btn_shop",
         "netflix:menu" => "start_btn_netflix",
+        "netflix:monthly_gift_menu" => "start_btn_promo",
         "wallet:topup" => "start_btn_topup",
         "start:wallet" => "start_btn_wallet",
         "start:orders" => "start_btn_purchased",
@@ -737,6 +744,10 @@ fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuActio
             texts.get_lang("start_btn_topup_history", lang, "📜 Top-up history"),
         ),
         (
+            StartMenuAction::Promo,
+            texts.get_lang("start_btn_promo", lang, "🎁 Khuyến mãi"),
+        ),
+        (
             StartMenuAction::Help,
             texts.get_lang("start_btn_help", lang, "Help"),
         ),
@@ -864,6 +875,26 @@ impl AppPlugin for StartCommandPlugin {
                 StartMenuAction::Language => {
                     send_language_prompt(&ctx, msg.chat.id, &lang).await?;
                 }
+                StartMenuAction::Promo => {
+                    if let Some(user) = msg.from() {
+                        cmd_netflix::send_monthly_gift_menu(
+                            &ctx,
+                            msg.chat.id,
+                            user.id.0 as i64,
+                            &lang,
+                        )
+                        .await?;
+                    } else {
+                        send_message_with_start_reply_keyboard(
+                            &ctx,
+                            msg.chat.id,
+                            "user_unknown",
+                            t_lang(&ctx, &lang, "user_unknown", "Cannot identify user."),
+                            &lang,
+                        )
+                        .await?;
+                    }
+                }
             }
             if !matches!(action, StartMenuAction::Topup) {
                 let _ = dialogue.update(State::Idle).await;
@@ -910,19 +941,6 @@ impl AppPlugin for StartCommandPlugin {
                     if let Some(user) = msg.from() {
                         if user_has_joined_required_channel(&ctx, user.id).await {
                             send_start_menu(&ctx, msg.chat.id, &lang).await?;
-                            if let Err(err) = cmd_netflix::notify_monthly_gift_if_eligible(
-                                &ctx,
-                                msg.chat.id,
-                                user.id.0 as i64,
-                                &lang,
-                            )
-                            .await
-                            {
-                                tracing::warn!(
-                                    "failed to send monthly Netflix gift notice to user {}: {err:#}",
-                                    user.id.0
-                                );
-                            }
                         } else {
                             send_required_channel_prompt(&ctx, msg.chat.id, &lang).await?;
                         }
@@ -1249,6 +1267,7 @@ mod tests {
                 HashMap::from([
                     ("start_btn_shop".to_string(), "Xem san pham".to_string()),
                     ("start_btn_netflix".to_string(), "Xem Netflix".to_string()),
+                    ("start_btn_promo".to_string(), "Khuyen mai".to_string()),
                     ("start_btn_topup".to_string(), "Nap tien".to_string()),
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
@@ -1270,6 +1289,10 @@ mod tests {
                     ("Xem san pham".to_string(), "start:shop".to_string()),
                     ("Xem Netflix".to_string(), "netflix:menu".to_string()),
                 ],
+                vec![(
+                    "Khuyen mai".to_string(),
+                    "netflix:monthly_gift_menu".to_string()
+                )],
                 vec![
                     ("Nap tien".to_string(), "wallet:topup".to_string()),
                     ("Vi tien".to_string(), "start:wallet".to_string()),
@@ -1298,10 +1321,11 @@ mod tests {
 
         assert_eq!(rows[0][0]["callback_data"], "start:shop");
         assert_eq!(rows[0][1]["callback_data"], "netflix:menu");
-        assert_eq!(rows[3][0]["callback_data"], "start:help");
-        assert_eq!(rows[4][0]["callback_data"], "affiliate:register");
-        assert_eq!(rows[4][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
-        assert_eq!(rows[5][0]["callback_data"], "start:language");
+        assert_eq!(rows[1][0]["callback_data"], "netflix:monthly_gift_menu");
+        assert_eq!(rows[4][0]["callback_data"], "start:help");
+        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
+        assert_eq!(rows[5][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[6][0]["callback_data"], "start:language");
         assert!(!keyboard.to_string().contains("viameta:menu"));
         assert!(!keyboard.to_string().contains("shop_api"));
         assert!(!keyboard.to_string().contains("tut:user_home"));
@@ -1317,8 +1341,8 @@ mod tests {
         let keyboard = start_menu_keyboard_json(&ctx, "vi");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
-        assert_eq!(rows[3][0]["callback_data"], "start:help");
-        assert_eq!(rows[3][1]["callback_data"], "viameta:menu");
+        assert_eq!(rows[4][0]["callback_data"], "start:help");
+        assert_eq!(rows[4][1]["callback_data"], "viameta:menu");
     }
 
     #[test]
@@ -1335,6 +1359,7 @@ mod tests {
                 HashMap::from([
                     ("start_btn_shop".to_string(), "Xem san pham".to_string()),
                     ("start_btn_netflix".to_string(), "Xem Netflix".to_string()),
+                    ("start_btn_promo".to_string(), "Khuyen mai".to_string()),
                     ("start_btn_topup".to_string(), "Nap tien".to_string()),
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
@@ -1353,6 +1378,7 @@ mod tests {
             rows,
             vec![
                 vec!["Xem san pham".to_string(), "Xem Netflix".to_string()],
+                vec!["Khuyen mai".to_string()],
                 vec!["Nap tien".to_string(), "Vi tien".to_string()],
                 vec!["Da mua".to_string(), "Lich su nap".to_string()],
                 vec!["Huong dan".to_string(), "Up tich xanh".to_string()],
@@ -1390,8 +1416,8 @@ mod tests {
 
         assert_eq!(rows[0][0]["text"], "🛒 Xem sản phẩm");
         assert_eq!(rows[0][0]["icon_custom_emoji_id"], "6172437452590944785");
-        assert_eq!(rows[1][1]["text"], "💳 Ví tiền");
-        assert_eq!(rows[1][1]["icon_custom_emoji_id"], "6113868675792507468");
+        assert_eq!(rows[2][1]["text"], "💳 Ví tiền");
+        assert_eq!(rows[2][1]["icon_custom_emoji_id"], "6113868675792507468");
         assert!(!keyboard.to_string().contains("{6172437452590944785}"));
         assert!(!keyboard.to_string().contains("{6113868675792507468}"));
     }
@@ -1411,6 +1437,7 @@ mod tests {
                     ("start_btn_topup".to_string(), "Nap tien".to_string()),
                     ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
                     ("start_btn_orders".to_string(), "Don hang gan day".to_string()),
+                    ("start_btn_promo".to_string(), "Khuyen mai".to_string()),
                     ("start_btn_language".to_string(), "Ngon ngu".to_string()),
                 ]),
             )]),
@@ -1427,6 +1454,10 @@ mod tests {
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "Don hang gan day"),
             Some(StartMenuAction::Orders)
+        );
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "Khuyen mai"),
+            Some(StartMenuAction::Promo)
         );
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "Ngon ngu"),

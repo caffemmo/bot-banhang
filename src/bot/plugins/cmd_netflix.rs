@@ -109,6 +109,16 @@ impl AppPlugin for NetflixCommandPlugin {
             send_netflix_menu(&ctx, msg.chat.id, &lang).await?;
             return Ok(true);
         }
+        if text.eq_ignore_ascii_case("🎁 Khuyến mãi") || text.eq_ignore_ascii_case("Khuyến mãi") {
+            let lang = if let Some(user) = msg.from() {
+                i18n::user_lang(&ctx, user.id.0 as i64, user.language_code.as_deref()).await
+            } else {
+                ctx.normalize_language_code(None)
+            };
+            let user_id = msg.from().map(|user| user.id.0 as i64).unwrap_or(0);
+            send_monthly_gift_menu(&ctx, msg.chat.id, user_id, &lang).await?;
+            return Ok(true);
+        }
         Ok(false)
     }
 
@@ -135,6 +145,8 @@ impl AppPlugin for NetflixCommandPlugin {
 
         if data == "netflix:menu" {
             send_netflix_menu(&ctx, chat_id, &lang).await?;
+        } else if data == "netflix:monthly_gift_menu" {
+            send_monthly_gift_menu(&ctx, chat_id, user_id, &lang).await?;
         } else if data == "netflix:buy" {
             handle_netflix_buy(&ctx, chat_id, user_id, &lang).await?;
         } else if data == "netflix:pc_guide" {
@@ -222,13 +234,33 @@ pub fn netflix_button_json(ctx: &AppContext, lang: &str) -> Value {
     button
 }
 
-pub async fn notify_monthly_gift_if_eligible(
+pub fn monthly_gift_button_json(ctx: &AppContext, lang: &str) -> Value {
+    i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_promo",
+        "🎁 Khuyến mãi",
+        "netflix:monthly_gift_menu",
+    )
+}
+
+pub async fn send_monthly_gift_menu(
     ctx: &AppContext,
     chat_id: ChatId,
     user_id: i64,
     _lang: &str,
 ) -> Result<()> {
     if !netflix_monthly_gift_enabled(ctx) || !netflix_enabled(ctx) {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_monthly_gift_unavailable_message",
+                    "🎁 Hiện chưa có chương trình khuyến mãi.",
+                ),
+            )
+            .await?;
         return Ok(());
     }
     let status = monthly_gift_status(ctx, user_id).await?;
