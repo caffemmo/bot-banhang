@@ -9,7 +9,7 @@ use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, COOKIE, HeaderMap, PRAGMA, REFERER,
     SET_COOKIE, USER_AGENT,
 };
-use reqwest::{Client, RequestBuilder, StatusCode};
+use reqwest::{Client, Proxy, RequestBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use teloxide::payloads::{
@@ -726,6 +726,32 @@ fn viameta_proxy_url(ctx: &AppContext) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn viameta_proxy(ctx: &AppContext) -> Result<Option<Proxy>> {
+    let Some(proxy_url) = viameta_proxy_url(ctx) else {
+        return Ok(None);
+    };
+    let parsed = Url::parse(&proxy_url)
+        .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"))?;
+    let username = parsed.username().to_string();
+    let password = parsed.password().map(str::to_string);
+    if username.is_empty() {
+        return Proxy::all(parsed.as_str())
+            .map(Some)
+            .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"));
+    }
+
+    let mut proxy_base = parsed;
+    proxy_base
+        .set_username("")
+        .map_err(|_| anyhow!("proxy dịch vụ tích xanh không hợp lệ"))?;
+    proxy_base
+        .set_password(None)
+        .map_err(|_| anyhow!("proxy dịch vụ tích xanh không hợp lệ"))?;
+    Proxy::all(proxy_base.as_str())
+        .map(|proxy| Some(proxy.basic_auth(&username, password.as_deref().unwrap_or(""))))
+        .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"))
+}
+
 fn viameta_base_url(ctx: &AppContext) -> String {
     let configured = ctx
         .get_text("viameta_base_url", BASE_URL_DEFAULT)
@@ -998,11 +1024,8 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
         viameta_password(ctx).ok_or_else(|| anyhow!("dịch vụ chưa được cấu hình mật khẩu"))?;
     let base_url = viameta_base_url(ctx);
     let mut builder = Client::builder().user_agent(VIAXANH_USER_AGENT);
-    if let Some(proxy_url) = viameta_proxy_url(ctx) {
-        builder = builder.proxy(
-            reqwest::Proxy::all(&proxy_url)
-                .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"))?,
-        );
+    if let Some(proxy) = viameta_proxy(ctx)? {
+        builder = builder.proxy(proxy);
     }
     let client = builder.build()?;
     let mut cookies = BTreeMap::new();
@@ -1011,7 +1034,8 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
         .get(format!("{base_url}/login"))
         .viaxanh_headers(&base_url)
         .send()
-        .await?
+        .await
+        .map_err(|err| anyhow!("không kết nối được trang đăng nhập dịch vụ: {}", error_chain(&err)))?
         .error_for_status()?;
     merge_set_cookies(&mut cookies, login_page.headers());
     let _ = login_page.bytes().await?;
@@ -1023,7 +1047,8 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
         .header(COOKIE, cookie_header(&cookies))
         .form(&[("username", username.as_str()), ("password", password.as_str())])
         .send()
-        .await?
+        .await
+        .map_err(|err| anyhow!("không gửi được thông tin đăng nhập dịch vụ: {}", error_chain(&err)))?
         .error_for_status()?;
     merge_set_cookies(&mut cookies, login_response.headers());
     let login_html = login_response.text().await?;
@@ -1037,7 +1062,8 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
             .header(REFERER, format!("{base_url}/login"))
             .header(COOKIE, cookie_header(&cookies))
             .send()
-            .await?
+            .await
+            .map_err(|err| anyhow!("không tải được trang dịch vụ sau đăng nhập: {}", error_chain(&err)))?
             .error_for_status()?
             .text()
             .await?
@@ -1084,6 +1110,16 @@ fn cookie_header(cookies: &BTreeMap<String, String>) -> String {
         .map(|(name, value)| format!("{name}={value}"))
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut source = err.source();
+    while let Some(err) = source {
+        parts.push(err.to_string());
+        source = err.source();
+    }
+    parts.join(": ")
 }
 
 fn extract_meta_content(html: &str, name: &str) -> Option<String> {
