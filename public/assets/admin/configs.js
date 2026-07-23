@@ -142,19 +142,20 @@
         title: 'Dịch vụ tích xanh',
         icon: '⚡',
         fields: [
-          { key: 'viameta_base_url', label: 'Base URL Viameta', value: 'https://viameta.co/bot' },
-          { key: 'viameta_api_key', label: 'API key Viameta', value: '' },
+          { key: 'viameta_base_url', label: 'Base URL ViaXanh69', value: 'https://viaxanh69.com/uptichxanh' },
+          { key: 'viameta_username', label: 'Tài khoản ViaXanh69', value: '' },
+          { key: 'viameta_password', label: 'Mật khẩu ViaXanh69', value: '' },
           { key: 'viameta_menu_title', label: 'Nội dung tiêu đề menu dịch vụ', value: '⚡ Dịch vụ tích xanh' },
           { key: 'viameta_menu_description', label: 'Nội dung mô tả menu dịch vụ', value: 'Chọn dịch vụ bạn muốn dùng:' },
           { key: 'viameta_maintenance_message', label: 'Thông báo khi dịch vụ tắt', value: 'Dịch vụ này đang bảo trì, vui lòng quay lại sau.' },
           { key: 'viameta_getlink_fb_enabled', label: 'Bật Get link Facebook', value: '1' },
-          { key: 'viameta_getlink_fb_price', label: 'Giá Get link Facebook', value: '15000' },
+          { key: 'viameta_getlink_fb_price', label: 'Giá Get link Facebook', value: '5000' },
           { key: 'viameta_getlink_fb_description', label: 'Mô tả Get link Facebook', value: 'Gửi cookie Facebook có c_user để hệ thống lấy link xác minh.' },
           { key: 'viameta_uptick_fb_enabled', label: 'Bật Up tích Facebook', value: '1' },
-          { key: 'viameta_uptick_fb_price', label: 'Giá Up tích Facebook', value: '20000' },
+          { key: 'viameta_uptick_fb_price', label: 'Giá Up tích Facebook', value: '7000' },
           { key: 'viameta_uptick_fb_description', label: 'Mô tả Up tích Facebook', value: 'Gửi cookie Facebook có c_user, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.' },
           { key: 'viameta_uptick_ig_enabled', label: 'Bật Up tích Instagram', value: '1' },
-          { key: 'viameta_uptick_ig_price', label: 'Giá Up tích Instagram', value: '40000' },
+          { key: 'viameta_uptick_ig_price', label: 'Giá Up tích Instagram', value: '14000' },
           { key: 'viameta_uptick_ig_description', label: 'Mô tả Up tích Instagram', value: 'Gửi cookie Instagram có ds_user_id và sessionid, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.' },
         ]
       },
@@ -392,6 +393,9 @@
             value="${escapeAttr(value)}" min="1" step="1">
           <div class="form-text">Lấy ID này trong danh sách sản phẩm admin của bot mình.</div>
         `;
+      }
+      if (key === 'viameta_password') {
+        return `<input type="password" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" autocomplete="new-password">`;
       }
       const numericKeys = new Set([
         'viameta_getlink_fb_price',

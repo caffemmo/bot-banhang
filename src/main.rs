@@ -278,6 +278,12 @@ async fn seed_configs_from_env(pool: &db::DbPool, config: &config::Config) {
             Some(order_admin_ids.as_str()),
         );
     }
+    if let Ok(viameta_username) = std::env::var("VIAMETA_USERNAME") {
+        push_optional_seed(&mut seeds, "viameta_username", Some(viameta_username.as_str()));
+    }
+    if let Ok(viameta_password) = std::env::var("VIAMETA_PASSWORD") {
+        push_optional_seed(&mut seeds, "viameta_password", Some(viameta_password.as_str()));
+    }
 
     push_optional_seed(
         &mut seeds,

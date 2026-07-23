@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use rand::{Rng, distributions::Alphanumeric};
-use reqwest::header::CONTENT_TYPE;
+use reqwest::Client;
+use reqwest::header::{CONTENT_TYPE, COOKIE, HeaderMap, REFERER, SET_COOKIE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use teloxide::payloads::{
@@ -29,7 +31,8 @@ use crate::domains::orders::repo as orders_repo;
 use crate::domains::products::models::Product;
 use crate::domains::wallet::repo as wallet_repo;
 
-const BASE_URL_DEFAULT: &str = "https://viameta.co/bot";
+const BASE_URL_DEFAULT: &str = "https://viaxanh69.com/uptichxanh";
+const VIAXANH_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const CATEGORY: &str = "Viameta";
 const GETLINK_PRODUCT: &str = "VIAMETA - GetLink Facebook";
 const UPTICK_FB_PRODUCT: &str = "VIAMETA - Up Tick Facebook";
@@ -79,9 +82,9 @@ impl ViametaService {
 
     fn endpoint(self) -> &'static str {
         match self {
-            Self::GetlinkFb => "/ajax/getlink.php",
-            Self::UptickFb => "/ajax/uptick_fb.php",
-            Self::UptickIg => "/ajax/uptick_ig.php",
+            Self::GetlinkFb => "/api/getlink",
+            Self::UptickFb => "/api/fb",
+            Self::UptickIg => "/api/ig",
         }
     }
 
@@ -89,7 +92,7 @@ impl ViametaService {
         match self {
             Self::GetlinkFb => None,
             Self::UptickFb => Some("image"),
-            Self::UptickIg => Some("id_image"),
+            Self::UptickIg => Some("image"),
         }
     }
 
@@ -119,9 +122,9 @@ impl ViametaService {
 
     fn default_price(self) -> i64 {
         match self {
-            Self::GetlinkFb => 15_000,
-            Self::UptickFb => 20_000,
-            Self::UptickIg => 40_000,
+            Self::GetlinkFb => 5_000,
+            Self::UptickFb => 7_000,
+            Self::UptickIg => 14_000,
         }
     }
 
@@ -157,6 +160,14 @@ enum ViametaDelivery {
         link: String,
         deducted: Option<i64>,
     },
+}
+
+struct ViametaWebSession {
+    client: Client,
+    base_url: String,
+    cookie_header: String,
+    csrf_token: String,
+    balance_before: Option<i64>,
 }
 
 pub struct ViametaCommandPlugin;
@@ -359,7 +370,7 @@ impl AppPlugin for ViametaCommandPlugin {
                     refund_viameta_order(
                         &ctx,
                         order,
-                        "UID này đã từng get link nên Viameta không trừ phí",
+                        "UID này đã từng get link nên hệ thống không trừ phí",
                     )
                     .await?
                 } else {
@@ -673,22 +684,39 @@ fn config_bool(ctx: &AppContext, key: &str, default: bool) -> bool {
     }
 }
 
-fn viameta_api_key(ctx: &AppContext) -> Option<String> {
-    let configured = ctx.get_text("viameta_api_key", "");
+fn viameta_username(ctx: &AppContext) -> Option<String> {
+    let configured = ctx.get_text("viameta_username", "");
     if !configured.trim().is_empty() {
         return Some(configured.trim().to_string());
     }
-    std::env::var("VIAMETA_API_KEY")
+    std::env::var("VIAMETA_USERNAME")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn viameta_password(ctx: &AppContext) -> Option<String> {
+    let configured = ctx.get_text("viameta_password", "");
+    if !configured.trim().is_empty() {
+        return Some(configured.trim().to_string());
+    }
+    std::env::var("VIAMETA_PASSWORD")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
 }
 
 fn viameta_base_url(ctx: &AppContext) -> String {
-    ctx.get_text("viameta_base_url", BASE_URL_DEFAULT)
+    let configured = ctx
+        .get_text("viameta_base_url", BASE_URL_DEFAULT)
         .trim()
         .trim_end_matches('/')
-        .to_string()
+        .to_string();
+    if configured.is_empty() || configured == "https://viameta.co/bot" {
+        BASE_URL_DEFAULT.to_string()
+    } else {
+        configured
+    }
 }
 
 fn viameta_image_file(msg: &Message) -> Option<(FileId, &'static str)> {
@@ -900,20 +928,145 @@ async fn run_viameta_request(ctx: &AppContext, request: &ViametaRequest) -> Resu
     }
 }
 
-async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<ViametaDelivery> {
-    let api_key = viameta_api_key(ctx).ok_or_else(|| anyhow!("missing viameta_api_key"))?;
-    let url = format!("{}{}", viameta_base_url(ctx), ViametaService::GetlinkFb.endpoint());
-    let mut payload = json!({
-        "cookie": request.cookie,
-        "confirm": true,
-    });
-    if let Some(uid) = request.uid.as_deref().filter(|v| !v.trim().is_empty()) {
-        payload["uid"] = Value::String(uid.to_string());
+async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
+    let username =
+        viameta_username(ctx).ok_or_else(|| anyhow!("dịch vụ chưa được cấu hình tài khoản"))?;
+    let password =
+        viameta_password(ctx).ok_or_else(|| anyhow!("dịch vụ chưa được cấu hình mật khẩu"))?;
+    let base_url = viameta_base_url(ctx);
+    let client = Client::builder()
+        .user_agent(VIAXANH_USER_AGENT)
+        .build()?;
+    let mut cookies = BTreeMap::new();
+
+    let login_page = client
+        .get(format!("{base_url}/login"))
+        .send()
+        .await?
+        .error_for_status()?;
+    merge_set_cookies(&mut cookies, login_page.headers());
+    let _ = login_page.bytes().await?;
+
+    let login_response = client
+        .post(format!("{base_url}/login"))
+        .header(REFERER, format!("{base_url}/login"))
+        .header(COOKIE, cookie_header(&cookies))
+        .form(&[("username", username.as_str()), ("password", password.as_str())])
+        .send()
+        .await?
+        .error_for_status()?;
+    merge_set_cookies(&mut cookies, login_response.headers());
+    let login_html = login_response.text().await?;
+
+    let home_html = if login_html.contains("id=\"user-balance-display\"") {
+        login_html
+    } else {
+        client
+            .get(format!("{base_url}/"))
+            .header(REFERER, format!("{base_url}/login"))
+            .header(COOKIE, cookie_header(&cookies))
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?
+    };
+
+    if !home_html.contains("id=\"user-balance-display\"") {
+        return Err(anyhow!("đăng nhập hệ thống dịch vụ thất bại, kiểm tra cấu hình"));
     }
-    let value: Value = reqwest::Client::new()
+    let csrf_token = extract_meta_content(&home_html, "csrf-token")
+        .ok_or_else(|| anyhow!("không lấy được mã xác thực từ hệ thống dịch vụ"))?;
+    let balance_before = extract_element_text_by_id(&home_html, "user-balance-display")
+        .and_then(|text| parse_vnd_amount(&text));
+
+    Ok(ViametaWebSession {
+        client,
+        base_url,
+        cookie_header: cookie_header(&cookies),
+        csrf_token,
+        balance_before,
+    })
+}
+
+fn merge_set_cookies(cookies: &mut BTreeMap<String, String>, headers: &HeaderMap) {
+    for value in headers.get_all(SET_COOKIE).iter() {
+        let Ok(raw) = value.to_str() else {
+            continue;
+        };
+        let Some(pair) = raw.split(';').next() else {
+            continue;
+        };
+        let Some((name, cookie_value)) = pair.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.is_empty() {
+            cookies.insert(name.to_string(), cookie_value.trim().to_string());
+        }
+    }
+}
+
+fn cookie_header(cookies: &BTreeMap<String, String>) -> String {
+    cookies
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn extract_meta_content(html: &str, name: &str) -> Option<String> {
+    let marker = format!("name=\"{name}\"");
+    let idx = html.find(&marker)?;
+    let rest = &html[idx..];
+    extract_attr(rest, "content")
+}
+
+fn extract_element_text_by_id(html: &str, id: &str) -> Option<String> {
+    let marker = format!("id=\"{id}\"");
+    let idx = html.find(&marker)?;
+    let after_tag = html[idx..].find('>').map(|pos| idx + pos + 1)?;
+    let end = html[after_tag..].find('<').map(|pos| after_tag + pos)?;
+    Some(html[after_tag..end].trim().to_string())
+}
+
+fn extract_attr(html: &str, attr: &str) -> Option<String> {
+    let marker = format!("{attr}=\"");
+    let start = html.find(&marker)? + marker.len();
+    let end = html[start..].find('"')? + start;
+    Some(html[start..end].to_string())
+}
+
+fn parse_vnd_amount(value: &str) -> Option<i64> {
+    let digits: String = value.chars().filter(|ch| ch.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse::<i64>().ok()
+    }
+}
+
+fn response_balance(value: &Value) -> Option<i64> {
+    value
+        .get("balance")
+        .or_else(|| value.get("data").and_then(|data| data.get("balance")))
+        .and_then(|balance| {
+            balance
+                .as_i64()
+                .or_else(|| balance.as_str().and_then(parse_vnd_amount))
+        })
+}
+
+async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<ViametaDelivery> {
+    let session = login_viameta(ctx).await?;
+    let url = format!("{}{}", session.base_url, ViametaService::GetlinkFb.endpoint());
+    let value: Value = session
+        .client
         .post(url)
-        .header("X-Api-Key", api_key)
-        .json(&payload)
+        .header("X-CSRF-Token", session.csrf_token.clone())
+        .header(REFERER, format!("{}/", session.base_url))
+        .header(COOKIE, session.cookie_header.clone())
+        .form(&[("cookie", request.cookie.as_str())])
         .send()
         .await?
         .error_for_status()?
@@ -933,15 +1086,25 @@ async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<Viame
         return Err(anyhow!(api_error_message(&value)));
     }
 
-    let uid = json_string(&value, "uid").unwrap_or("-").to_string();
+    let uid = json_string(&value, "uid")
+        .or_else(|| value.get("data").and_then(|data| json_string(data, "uid")))
+        .map(ToString::to_string)
+        .or_else(|| uid_from_cookie(ViametaService::GetlinkFb, &request.cookie))
+        .unwrap_or_else(|| "-".to_string());
     let link = json_string(&value, "link")
+        .or_else(|| value.get("data").and_then(|data| json_string(data, "link")))
         .filter(|v| !v.trim().is_empty() && *v != "-")
         .ok_or_else(|| anyhow!("Không nhận được link kết quả"))?
         .to_string();
     let deducted = value
         .get("balance_deducted")
         .or_else(|| value.get("data").and_then(|data| data.get("balance_deducted")))
-        .and_then(Value::as_i64);
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            response_balance(&value)
+                .zip(session.balance_before)
+                .map(|(after, before)| (before - after).max(0))
+        });
 
     Ok(ViametaDelivery::GetlinkFb { uid, link, deducted })
 }
@@ -951,7 +1114,7 @@ async fn run_uptick(
     request: &ViametaRequest,
     service: ViametaService,
 ) -> Result<ViametaDelivery> {
-    let api_key = viameta_api_key(ctx).ok_or_else(|| anyhow!("missing viameta_api_key"))?;
+    let session = login_viameta(ctx).await?;
     let image_path = request
         .image_path
         .as_deref()
@@ -966,18 +1129,20 @@ async fn run_uptick(
     let field = service.image_field().ok_or_else(|| anyhow!("service has no image field"))?;
     let form = reqwest::multipart::Form::new()
         .text("cookie", request.cookie.clone())
-        .text("confirm", "true")
         .part(field.to_string(), reqwest::multipart::Part::bytes(image_bytes).file_name(file_name));
-    let url = format!("{}{}", viameta_base_url(ctx), service.endpoint());
+    let url = format!("{}{}", session.base_url, service.endpoint());
     tracing::info!(
         "sending Viameta uptick request service={} order={} image_field={}",
         service.as_str(),
         request.order_id,
         field
     );
-    let response = reqwest::Client::new()
+    let response = session
+        .client
         .post(url)
-        .header("X-Api-Key", api_key)
+        .header("X-CSRF-Token", session.csrf_token.clone())
+        .header(REFERER, format!("{}/", session.base_url))
+        .header(COOKIE, session.cookie_header.clone())
         .multipart(form)
         .send()
         .await?
@@ -1153,10 +1318,10 @@ fn format_uptick_delivery_message(
     confirmation_ref: Option<String>,
 ) -> String {
     let ref_line = confirmation_ref
-        .map(|value| format!("\n\nMã theo dõi Viameta: {}", value))
+        .map(|value| format!("\n\nMã theo dõi: {}", value))
         .unwrap_or_default();
     format!(
-        "✅ {} đã gửi yêu cầu{}\n\n{}\n\n⏳ Vui lòng chờ Viameta/Meta xử lý. Trạng thái tích xanh có thể chưa cập nhật ngay trong app.",
+        "✅ {} đã gửi yêu cầu{}\n\n{}\n\n⏳ Vui lòng chờ hệ thống xử lý. Trạng thái tích xanh có thể chưa cập nhật ngay trong app.",
         service.label(),
         ref_line,
         message
@@ -1309,15 +1474,15 @@ async fn send_getlink_delivery(
 fn getlink_fee_note(deducted: Option<i64>, free_retry_refund: Option<i64>, order_amount: i64) -> String {
     match (deducted, free_retry_refund) {
         (Some(0), Some(balance_after)) => format!(
-            "ℹ️ UID này đã từng get link trên Viameta nên lần get lại không tính phí.\n✅ Bot đã hoàn {} vào ví của bạn.\n💳 Số dư ví hiện tại: {}",
+            "ℹ️ UID này đã từng get link nên lần get lại không tính phí.\n✅ Bot đã hoàn {} vào ví của bạn.\n💳 Số dư ví hiện tại: {}",
             format_vnd(order_amount),
             format_vnd(balance_after)
         ),
         (Some(0), None) => {
-            "ℹ️ UID này đã từng get link trên Viameta nên lần get lại không tính phí. Đơn này đã được hoàn tiền trước đó.".to_string()
+            "ℹ️ UID này đã từng get link nên lần get lại không tính phí. Đơn này đã được hoàn tiền trước đó.".to_string()
         }
-        (Some(amount), _) => format!("Phí xử lý Viameta: {}", format_vnd(amount)),
-        (None, _) => "Phí xử lý Viameta: chưa có thông tin từ API.".to_string(),
+        (Some(amount), _) => format!("Phí xử lý: {}", format_vnd(amount)),
+        (None, _) => "Phí xử lý: chưa có thông tin.".to_string(),
     }
 }
 
