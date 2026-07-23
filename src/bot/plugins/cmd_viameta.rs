@@ -730,25 +730,8 @@ fn viameta_proxy(ctx: &AppContext) -> Result<Option<Proxy>> {
     let Some(proxy_url) = viameta_proxy_url(ctx) else {
         return Ok(None);
     };
-    let parsed = Url::parse(&proxy_url)
-        .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"))?;
-    let username = parsed.username().to_string();
-    let password = parsed.password().map(str::to_string);
-    if username.is_empty() {
-        return Proxy::all(parsed.as_str())
-            .map(Some)
-            .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"));
-    }
-
-    let mut proxy_base = parsed;
-    proxy_base
-        .set_username("")
-        .map_err(|_| anyhow!("proxy dịch vụ tích xanh không hợp lệ"))?;
-    proxy_base
-        .set_password(None)
-        .map_err(|_| anyhow!("proxy dịch vụ tích xanh không hợp lệ"))?;
-    Proxy::all(proxy_base.as_str())
-        .map(|proxy| Some(proxy.basic_auth(&username, password.as_deref().unwrap_or(""))))
+    Proxy::all(&proxy_url)
+        .map(Some)
         .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"))
 }
 
