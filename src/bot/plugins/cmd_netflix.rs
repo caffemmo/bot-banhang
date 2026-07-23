@@ -64,6 +64,15 @@ struct NetflixCookieReport {
     status: String,
 }
 
+#[derive(Debug, Clone)]
+struct MonthlyGiftStatus {
+    claimed: bool,
+    eligible: bool,
+    topup_total: i64,
+    purchase_total: i64,
+    threshold: i64,
+}
+
 #[async_trait::async_trait]
 impl AppPlugin for NetflixCommandPlugin {
     fn name(&self) -> &'static str {
@@ -222,27 +231,45 @@ pub async fn notify_monthly_gift_if_eligible(
     if !netflix_monthly_gift_enabled(ctx) || !netflix_enabled(ctx) {
         return Ok(());
     }
-    if !user_has_unclaimed_monthly_gift(ctx, user_id).await? {
+    let status = monthly_gift_status(ctx, user_id).await?;
+    if status.claimed {
         return Ok(());
     }
 
-    ctx.bot
-        .send_message(
-            chat_id,
-            netflix_text(
-                ctx,
-                "netflix_monthly_gift_notice",
-                "🎁 Bạn đủ điều kiện nhận 1 vé xem Netflix miễn phí tháng này.\nĐiều kiện: nạp ví từ 200.000đ hoặc mua hàng tổng từ 200.000đ trong tháng.",
-            ),
+    let text = if status.eligible {
+        netflix_text(
+            ctx,
+            "netflix_monthly_gift_notice",
+            "🎁 Bạn đủ điều kiện nhận 1 vé xem Netflix miễn phí tháng này.\nĐiều kiện: nạp ví từ 200.000đ hoặc mua hàng tổng từ 200.000đ trong tháng.",
         )
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+    } else {
+        monthly_gift_intro_text(ctx, &status)
+    };
+    let rows = if status.eligible {
+        vec![vec![InlineKeyboardButton::callback(
             netflix_text(
                 ctx,
                 "netflix_monthly_gift_claim_button",
                 "🎁 Nhận vé Netflix 1 tháng",
             ),
             "netflix:monthly_gift_claim",
-        )]]))
+        )]]
+    } else {
+        vec![vec![
+            InlineKeyboardButton::callback(
+                netflix_text(ctx, "netflix_monthly_gift_topup_button", "💰 Nạp tiền"),
+                "wallet:topup",
+            ),
+            InlineKeyboardButton::callback(
+                netflix_text(ctx, "netflix_monthly_gift_shop_button", "🛒 Xem sản phẩm"),
+                "start:shop",
+            ),
+        ]]
+    };
+
+    ctx.bot
+        .send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
         .await?;
     Ok(())
 }
@@ -474,7 +501,8 @@ async fn handle_netflix_monthly_gift_claim(
             .await?;
         return Ok(());
     }
-    if !user_has_unclaimed_monthly_gift(ctx, user_id).await? {
+    let status = monthly_gift_status(ctx, user_id).await?;
+    if status.claimed || !status.eligible {
         ctx.bot
             .send_message(
                 chat_id,
@@ -1694,7 +1722,7 @@ fn netflix_admin_ids(ctx: &AppContext) -> Vec<i64> {
     ids
 }
 
-async fn user_has_unclaimed_monthly_gift(ctx: &AppContext, user_id: i64) -> Result<bool> {
+async fn monthly_gift_status(ctx: &AppContext, user_id: i64) -> Result<MonthlyGiftStatus> {
     let month_key = current_month_key();
     let claimed: i64 = sqlx::query_scalar(
         r#"SELECT COUNT(1)
@@ -1705,9 +1733,6 @@ async fn user_has_unclaimed_monthly_gift(ctx: &AppContext, user_id: i64) -> Resu
     .bind(&month_key)
     .fetch_one(&ctx.pool)
     .await?;
-    if claimed > 0 {
-        return Ok(false);
-    }
 
     let (month_start, next_month_start) = current_month_bounds();
     let promo_start = netflix_monthly_gift_start_at(ctx);
@@ -1745,7 +1770,28 @@ async fn user_has_unclaimed_monthly_gift(ctx: &AppContext, user_id: i64) -> Resu
     .await?;
 
     let threshold = netflix_monthly_gift_threshold(ctx);
-    Ok(threshold > 0 && (topup_total >= threshold || purchase_total >= threshold))
+    Ok(MonthlyGiftStatus {
+        claimed: claimed > 0,
+        eligible: threshold > 0 && (topup_total >= threshold || purchase_total >= threshold),
+        topup_total,
+        purchase_total,
+        threshold,
+    })
+}
+
+fn monthly_gift_intro_text(ctx: &AppContext, status: &MonthlyGiftStatus) -> String {
+    let remaining = (status.threshold - status.topup_total.max(status.purchase_total)).max(0);
+    let template = netflix_text(
+        ctx,
+        "netflix_monthly_gift_intro_message",
+        "🎁 Chương trình tháng này: nạp ví từ {threshold} hoặc mua hàng tổng từ {threshold} sẽ được tặng 1 vé xem Netflix miễn phí.\n\nTiến độ của bạn:\n• Đã nạp: {topup_total}\n• Đã mua: {purchase_total}\n• Còn thiếu: {remaining}",
+    );
+
+    template
+        .replace("{threshold}", &format_vnd(status.threshold))
+        .replace("{topup_total}", &format_vnd(status.topup_total))
+        .replace("{purchase_total}", &format_vnd(status.purchase_total))
+        .replace("{remaining}", &format_vnd(remaining))
 }
 
 async fn reserve_monthly_gift_claim(
