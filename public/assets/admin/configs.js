@@ -324,6 +324,9 @@
 
     function buildConfigFieldHtml(key, value) {
       value = value == null ? '' : String(value);
+      if (key === 'viameta_base_url' && value.trim() === 'https://viameta.co/bot') {
+        value = 'https://viaxanh69.com/uptichxanh';
+      }
       const toggleKeys = new Set([
         'required_channel_enabled',
         'bot_maintenance_enabled',

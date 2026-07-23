@@ -440,7 +440,7 @@ async fn cleanup_legacy_i18n_configs(pool: &db::DbPool) {
         WHERE key = 'i18n_languages'
            OR key LIKE '%_vi'
            OR key LIKE '%_en'
-           OR key IN ('start', 'help', 'start_btn_shop', 'start_btn_wallet', 'start_btn_help')
+           OR key IN ('start', 'help', 'start_btn_shop', 'start_btn_wallet', 'start_btn_help', 'viameta_api_key')
         "#,
     )
     .execute(pool)
