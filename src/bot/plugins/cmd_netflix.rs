@@ -45,9 +45,21 @@ struct NetflixCookie {
 #[derive(Debug, Clone)]
 struct NetflixSession {
     id: i64,
+    user_id: i64,
+    chat_id: i64,
     log_id: String,
     cookie_number: Option<i64>,
     cookie: Option<String>,
+    pc_login_link: Option<String>,
+    mobile_login_link: Option<String>,
+    purchase_amount: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct NetflixCookieReport {
+    id: i64,
+    session: NetflixSession,
+    status: String,
 }
 
 #[async_trait::async_trait]
@@ -98,7 +110,7 @@ impl AppPlugin for NetflixCommandPlugin {
         let Some(data) = q.data.clone() else {
             return Ok(false);
         };
-        if !data.starts_with("netflix:") {
+        if !data.starts_with("netflix:") && !data.starts_with("netflixreport:") {
             return Ok(false);
         }
 
@@ -134,6 +146,21 @@ impl AppPlugin for NetflixCommandPlugin {
             .and_then(|raw| raw.parse::<i64>().ok())
         {
             handle_netflix_regen(&ctx, chat_id, user_id, id, &lang).await?;
+        } else if let Some(id) = data
+            .strip_prefix("netflix:report:")
+            .and_then(|raw| raw.parse::<i64>().ok())
+        {
+            handle_netflix_cookie_report(&ctx, chat_id, user_id, id).await?;
+        } else if let Some(id) = data
+            .strip_prefix("netflixreport:refund:")
+            .and_then(|raw| raw.parse::<i64>().ok())
+        {
+            handle_netflix_report_refund(&ctx, chat_id, user_id, id).await?;
+        } else if let Some(id) = data
+            .strip_prefix("netflixreport:ok:")
+            .and_then(|raw| raw.parse::<i64>().ok())
+        {
+            handle_netflix_report_no_error(&ctx, chat_id, user_id, id).await?;
         }
 
         Ok(true)
@@ -359,7 +386,7 @@ async fn handle_netflix_buy(
 
     match call_get_cookie_api(ctx, &api_key).await {
         Ok(cookie) => {
-            let session_id = save_netflix_session(ctx, user_id, chat_id.0, &cookie).await?;
+            let session_id = save_netflix_session(ctx, user_id, chat_id.0, &cookie, price).await?;
             send_netflix_cookie(ctx, chat_id, session_id, &cookie, price).await?;
         }
         Err(err) => {
@@ -552,6 +579,10 @@ async fn send_netflix_cookie(
             format!("netflix:regen:{session_id}"),
         )),
     );
+    rows.push(vec![InlineKeyboardButton::callback(
+        netflix_text(ctx, "netflix_report_cookie_button_text", "⚠️ Báo cookie lỗi"),
+        format!("netflix:report:{session_id}"),
+    )]);
     push_button_pair_row(
         &mut rows,
         netflix_pc_guide_button(ctx),
@@ -660,6 +691,198 @@ async fn handle_netflix_cookie(
     };
 
     send_netflix_cookie_value(ctx, chat_id, session_id, raw_cookie).await
+}
+
+async fn handle_netflix_cookie_report(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    user_id: i64,
+    session_id: i64,
+) -> Result<()> {
+    let Some(session) = get_netflix_session(ctx, session_id, user_id, chat_id.0).await? else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_session_missing_message",
+                    "Không tìm thấy phiên Netflix này.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    };
+
+    let report = create_or_reopen_netflix_report(ctx, &session).await?;
+    if report.status == "refunded" {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_report_already_refunded_message",
+                    "✅ Lượt Netflix này đã được hoàn tiền trước đó.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let sent = notify_admins_netflix_report(ctx, &report).await?;
+    let message_key = if sent {
+        "netflix_report_sent_message"
+    } else {
+        "netflix_report_no_admin_message"
+    };
+    let fallback = if sent {
+        "✅ Đã báo admin kiểm tra cookie. Bạn vui lòng chờ phản hồi."
+    } else {
+        "⚠️ Chưa cấu hình admin nhận báo lỗi Netflix. Vui lòng liên hệ hỗ trợ."
+    };
+    ctx.bot
+        .send_message(chat_id, netflix_text(ctx, message_key, fallback))
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
+                format!("netflix:regen:{session_id}"),
+            ),
+            InlineKeyboardButton::callback("⬅️ Menu Netflix", "netflix:menu"),
+        ]]))
+        .await?;
+
+    Ok(())
+}
+
+async fn handle_netflix_report_refund(
+    ctx: &AppContext,
+    admin_chat_id: ChatId,
+    admin_user_id: i64,
+    report_id: i64,
+) -> Result<()> {
+    if !ctx.is_telegram_admin(admin_user_id) {
+        ctx.bot
+            .send_message(admin_chat_id, "Bạn không có quyền admin.")
+            .await?;
+        return Ok(());
+    }
+
+    let Some(report) = get_netflix_report(ctx, report_id).await? else {
+        ctx.bot
+            .send_message(admin_chat_id, "Không tìm thấy báo lỗi Netflix.")
+            .await?;
+        return Ok(());
+    };
+    if report.status == "refunded" {
+        ctx.bot
+            .send_message(admin_chat_id, "Báo lỗi này đã hoàn tiền rồi.")
+            .await?;
+        return Ok(());
+    }
+
+    let amount = netflix_report_refund_amount(ctx, &report.session);
+    let balance_after = if amount > 0 {
+        refund_netflix_report(ctx, &report, admin_user_id, amount).await?
+    } else {
+        mark_netflix_report_status(ctx, report.id, "refunded", admin_user_id, Some(0)).await?;
+        wallet_repo::get_or_create_wallet(&ctx.pool, report.session.user_id)
+            .await?
+            .balance
+    };
+
+    ctx.bot
+        .send_message(
+            ChatId(report.session.chat_id),
+            format!(
+                "{}\n{}: <b>{}</b>\n{}: <b>{}</b>",
+                netflix_text(
+                    ctx,
+                    "netflix_report_refund_user_message",
+                    "✅ Admin xác nhận cookie lỗi và đã hoàn tiền vào ví của bạn."
+                ),
+                netflix_text(ctx, "netflix_report_refund_amount_label", "Số tiền hoàn"),
+                format_vnd(amount),
+                netflix_text(ctx, "netflix_report_balance_after_label", "Số dư ví"),
+                format_vnd(balance_after)
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                netflix_text(ctx, "netflix_buy_button_text", "🎬 Lấy Netflix"),
+                "netflix:buy",
+            ),
+            InlineKeyboardButton::callback("💳 Ví tiền", "start:wallet"),
+        ]]))
+        .await?;
+
+    ctx.bot
+        .send_message(
+            admin_chat_id,
+            format!(
+                "Đã hoàn {} cho user {}.",
+                format_vnd(amount),
+                report.session.user_id
+            ),
+        )
+        .await?;
+    Ok(())
+}
+
+async fn handle_netflix_report_no_error(
+    ctx: &AppContext,
+    admin_chat_id: ChatId,
+    admin_user_id: i64,
+    report_id: i64,
+) -> Result<()> {
+    if !ctx.is_telegram_admin(admin_user_id) {
+        ctx.bot
+            .send_message(admin_chat_id, "Bạn không có quyền admin.")
+            .await?;
+        return Ok(());
+    }
+
+    let Some(report) = get_netflix_report(ctx, report_id).await? else {
+        ctx.bot
+            .send_message(admin_chat_id, "Không tìm thấy báo lỗi Netflix.")
+            .await?;
+        return Ok(());
+    };
+    if report.status == "refunded" {
+        ctx.bot
+            .send_message(admin_chat_id, "Báo lỗi này đã hoàn tiền rồi, không thể báo không lỗi.")
+            .await?;
+        return Ok(());
+    }
+    mark_netflix_report_status(ctx, report.id, "no_error", admin_user_id, None).await?;
+
+    ctx.bot
+        .send_message(
+            ChatId(report.session.chat_id),
+            netflix_text(
+                ctx,
+                "netflix_report_no_error_user_message",
+                "✅ Admin đã kiểm tra và cookie không lỗi. Vui lòng bấm Tạo lại link hoặc Mở lại link cũ để lấy link mới rồi xem lại.",
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                netflix_text(ctx, "netflix_regen_button_text", "🔄 Tạo lại link"),
+                format!("netflix:regen:{}", report.session.id),
+            ),
+            InlineKeyboardButton::callback(
+                netflix_text(ctx, "netflix_reopen_latest_button_text", "🔄 Mở lại link cũ"),
+                "netflix:reopen_latest",
+            ),
+        ]]))
+        .await?;
+
+    ctx.bot
+        .send_message(
+            admin_chat_id,
+            format!("Đã báo user {}: cookie không lỗi.", report.session.user_id),
+        )
+        .await?;
+    Ok(())
 }
 
 async fn send_netflix_cookie_value(
@@ -893,6 +1116,7 @@ async fn ensure_netflix_schema(pool: &crate::db::DbPool) -> Result<()> {
             pc_login_link TEXT,
             mobile_login_link TEXT,
             token_expires INTEGER,
+            purchase_amount INTEGER,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )"#,
@@ -906,6 +1130,27 @@ async fn ensure_netflix_schema(pool: &crate::db::DbPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    let _ = sqlx::query("ALTER TABLE netflix_sessions ADD COLUMN purchase_amount INTEGER")
+        .execute(pool)
+        .await;
+
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS netflix_cookie_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            admin_id INTEGER,
+            admin_note TEXT,
+            refunded_amount INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -914,8 +1159,18 @@ async fn get_latest_netflix_session(
     user_id: i64,
     chat_id: i64,
 ) -> Result<Option<NetflixSession>> {
-    let row = sqlx::query_as::<_, (i64, String, Option<i64>, Option<String>)>(
-        r#"SELECT id, log_id, cookie_number, cookie
+    let row = sqlx::query_as::<_, (
+        i64,
+        i64,
+        i64,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    )>(
+        r#"SELECT id, user_id, chat_id, log_id, cookie_number, cookie, pc_login_link, mobile_login_link, purchase_amount
         FROM netflix_sessions
         WHERE user_id = ? AND chat_id = ?
         ORDER BY id DESC
@@ -926,12 +1181,7 @@ async fn get_latest_netflix_session(
     .fetch_optional(&ctx.pool)
     .await?;
 
-    Ok(row.map(|(id, log_id, cookie_number, cookie)| NetflixSession {
-        id,
-        log_id,
-        cookie_number,
-        cookie,
-    }))
+    Ok(row.map(netflix_session_from_row))
 }
 
 async fn save_netflix_session(
@@ -939,11 +1189,12 @@ async fn save_netflix_session(
     user_id: i64,
     chat_id: i64,
     cookie: &NetflixCookie,
+    purchase_amount: i64,
 ) -> Result<i64> {
     let id = sqlx::query_scalar::<_, i64>(
         r#"INSERT INTO netflix_sessions
-        (user_id, chat_id, log_id, cookie_number, cookie, pc_login_link, mobile_login_link, token_expires, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        (user_id, chat_id, log_id, cookie_number, cookie, pc_login_link, mobile_login_link, token_expires, purchase_amount, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         RETURNING id"#,
     )
     .bind(user_id)
@@ -954,6 +1205,7 @@ async fn save_netflix_session(
     .bind(&cookie.pc_login_link)
     .bind(&cookie.mobile_login_link)
     .bind(cookie.token_expires)
+    .bind(purchase_amount)
     .fetch_one(&ctx.pool)
     .await?;
     Ok(id)
@@ -965,8 +1217,18 @@ async fn get_netflix_session(
     user_id: i64,
     chat_id: i64,
 ) -> Result<Option<NetflixSession>> {
-    let row = sqlx::query_as::<_, (i64, String, Option<i64>, Option<String>)>(
-        r#"SELECT id, log_id, cookie_number, cookie
+    let row = sqlx::query_as::<_, (
+        i64,
+        i64,
+        i64,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    )>(
+        r#"SELECT id, user_id, chat_id, log_id, cookie_number, cookie, pc_login_link, mobile_login_link, purchase_amount
         FROM netflix_sessions
         WHERE id = ? AND user_id = ? AND chat_id = ?"#,
     )
@@ -976,12 +1238,44 @@ async fn get_netflix_session(
     .fetch_optional(&ctx.pool)
     .await?;
 
-    Ok(row.map(|(id, log_id, cookie_number, cookie)| NetflixSession {
+    Ok(row.map(netflix_session_from_row))
+}
+
+fn netflix_session_from_row(
+    row: (
+        i64,
+        i64,
+        i64,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    ),
+) -> NetflixSession {
+    let (
         id,
+        user_id,
+        chat_id,
         log_id,
         cookie_number,
         cookie,
-    }))
+        pc_login_link,
+        mobile_login_link,
+        purchase_amount,
+    ) = row;
+    NetflixSession {
+        id,
+        user_id,
+        chat_id,
+        log_id,
+        cookie_number,
+        cookie,
+        pc_login_link,
+        mobile_login_link,
+        purchase_amount,
+    }
 }
 
 async fn update_netflix_session_links(
@@ -1003,6 +1297,248 @@ async fn update_netflix_session_links(
     .execute(&ctx.pool)
     .await?;
     Ok(())
+}
+
+async fn create_or_reopen_netflix_report(
+    ctx: &AppContext,
+    session: &NetflixSession,
+) -> Result<NetflixCookieReport> {
+    let (id, status) = sqlx::query_as::<_, (i64, String)>(
+        r#"INSERT INTO netflix_cookie_reports (session_id, user_id, chat_id, status, updated_at)
+        VALUES (?, ?, ?, 'pending', datetime('now'))
+        ON CONFLICT(session_id) DO UPDATE SET
+            status = CASE
+                WHEN netflix_cookie_reports.status = 'refunded' THEN netflix_cookie_reports.status
+                ELSE 'pending'
+            END,
+            updated_at = datetime('now')
+        RETURNING id, status"#,
+    )
+    .bind(session.id)
+    .bind(session.user_id)
+    .bind(session.chat_id)
+    .fetch_one(&ctx.pool)
+    .await?;
+
+    Ok(NetflixCookieReport {
+        id,
+        session: session.clone(),
+        status,
+    })
+}
+
+async fn get_netflix_report(ctx: &AppContext, report_id: i64) -> Result<Option<NetflixCookieReport>> {
+    let row = sqlx::query_as::<_, (
+        i64,
+        String,
+        i64,
+        i64,
+        i64,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    )>(
+        r#"SELECT r.id, r.status, s.id, s.user_id, s.chat_id, s.log_id, s.cookie_number,
+            s.cookie, s.pc_login_link, s.mobile_login_link, s.purchase_amount
+        FROM netflix_cookie_reports r
+        JOIN netflix_sessions s ON s.id = r.session_id
+        WHERE r.id = ?"#,
+    )
+    .bind(report_id)
+    .fetch_optional(&ctx.pool)
+    .await?;
+
+    Ok(row.map(
+        |(
+            id,
+            status,
+            session_id,
+            user_id,
+            chat_id,
+            log_id,
+            cookie_number,
+            cookie,
+            pc_login_link,
+            mobile_login_link,
+            purchase_amount,
+        )| NetflixCookieReport {
+            id,
+            status,
+            session: NetflixSession {
+                id: session_id,
+                user_id,
+                chat_id,
+                log_id,
+                cookie_number,
+                cookie,
+                pc_login_link,
+                mobile_login_link,
+                purchase_amount,
+            },
+        },
+    ))
+}
+
+async fn notify_admins_netflix_report(
+    ctx: &AppContext,
+    report: &NetflixCookieReport,
+) -> Result<bool> {
+    let admin_ids = netflix_admin_ids(ctx);
+    if admin_ids.is_empty() {
+        return Ok(false);
+    }
+
+    let mut rows = Vec::new();
+    push_button_pair_row(
+        &mut rows,
+        report
+            .session
+            .pc_login_link
+            .as_deref()
+            .and_then(url_button_link)
+            .map(|link| {
+                InlineKeyboardButton::url(
+                    netflix_text(ctx, "netflix_report_admin_open_pc_button", "💻 Mở PC"),
+                    link,
+                )
+            }),
+        report
+            .session
+            .mobile_login_link
+            .as_deref()
+            .and_then(url_button_link)
+            .map(|link| {
+                InlineKeyboardButton::url(
+                    netflix_text(ctx, "netflix_report_admin_open_mobile_button", "📱 Mở Mobile"),
+                    link,
+                )
+            }),
+    );
+    rows.push(vec![
+        InlineKeyboardButton::callback(
+            netflix_text(ctx, "netflix_report_admin_refund_button", "💸 Cookie lỗi - Hoàn tiền"),
+            format!("netflixreport:refund:{}", report.id),
+        ),
+        InlineKeyboardButton::callback(
+            netflix_text(ctx, "netflix_report_admin_no_error_button", "✅ Không lỗi"),
+            format!("netflixreport:ok:{}", report.id),
+        ),
+    ]);
+
+    let text = format!(
+        "{}\nReport ID: {}\nSession ID: {}\nUser: {}\nChat: {}\nCookie số: {}\nLog ID: <code>{}</code>\nGiá đã trừ: <b>{}</b>\n\nAdmin mở PC/Mobile để kiểm tra. Nếu cookie lỗi thì bấm hoàn tiền; nếu không lỗi thì bấm không lỗi để nhắn user tạo lại link.",
+        netflix_text(
+            ctx,
+            "netflix_report_admin_title",
+            "⚠️ USER BÁO COOKIE NETFLIX LỖI"
+        ),
+        report.id,
+        report.session.id,
+        report.session.user_id,
+        report.session.chat_id,
+        report
+            .session
+            .cookie_number
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        html_escape(&report.session.log_id),
+        format_vnd(netflix_report_refund_amount(ctx, &report.session))
+    );
+
+    let mut sent = false;
+    for admin_id in admin_ids {
+        if let Err(err) = ctx.bot
+            .send_message(ChatId(admin_id), text.clone())
+            .parse_mode(ParseMode::Html)
+            .reply_markup(InlineKeyboardMarkup::new(rows.clone()))
+            .await
+        {
+            tracing::warn!("send netflix cookie report to admin {admin_id} failed: {err}");
+        } else {
+            sent = true;
+        }
+    }
+    Ok(sent)
+}
+
+async fn mark_netflix_report_status(
+    ctx: &AppContext,
+    report_id: i64,
+    status: &str,
+    admin_id: i64,
+    refunded_amount: Option<i64>,
+) -> Result<()> {
+    sqlx::query(
+        r#"UPDATE netflix_cookie_reports
+        SET status = ?, admin_id = ?, refunded_amount = COALESCE(?, refunded_amount), updated_at = datetime('now')
+        WHERE id = ? AND status != 'refunded'"#,
+    )
+    .bind(status)
+    .bind(admin_id)
+    .bind(refunded_amount)
+    .bind(report_id)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(())
+}
+
+async fn refund_netflix_report(
+    ctx: &AppContext,
+    report: &NetflixCookieReport,
+    admin_id: i64,
+    amount: i64,
+) -> Result<i64> {
+    let mut tx = ctx.pool.begin().await?;
+    let updated_report_id = sqlx::query_scalar::<_, i64>(
+        r#"UPDATE netflix_cookie_reports
+        SET status = 'refunded', admin_id = ?, refunded_amount = ?, updated_at = datetime('now')
+        WHERE id = ? AND status != 'refunded'
+        RETURNING id"#,
+    )
+    .bind(admin_id)
+    .bind(amount)
+    .bind(report.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if updated_report_id.is_none() {
+        tx.rollback().await?;
+        return Ok(wallet_repo::get_or_create_wallet(&ctx.pool, report.session.user_id)
+            .await?
+            .balance);
+    }
+
+    let note = format!("Hoàn tiền Netflix cookie lỗi report #{}", report.id);
+    let refund_order_id = format!("netflix-report-{}", report.id);
+    let balance_after = wallet_repo::credit_wallet(
+        &mut tx,
+        report.session.user_id,
+        amount,
+        "refund",
+        Some(&refund_order_id),
+        None,
+        Some(&note),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(balance_after)
+}
+
+fn netflix_report_refund_amount(ctx: &AppContext, session: &NetflixSession) -> i64 {
+    session.purchase_amount.unwrap_or_else(|| netflix_price(ctx)).max(0)
+}
+
+fn netflix_admin_ids(ctx: &AppContext) -> Vec<i64> {
+    let mut ids = ctx.order_notification_admin_ids();
+    for admin_id in ctx.telegram_icon_admin_ids() {
+        if !ids.iter().any(|existing| *existing == admin_id) {
+            ids.push(admin_id);
+        }
+    }
+    ids
 }
 
 async fn refund_netflix_purchase(
