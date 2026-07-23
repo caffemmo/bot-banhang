@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+use chrono::{Datelike, TimeZone, Utc};
 use rand::{Rng, distributions::Alphanumeric};
 use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, PRAGMA, REFERER, USER_AGENT,
@@ -27,6 +28,7 @@ use crate::domains::wallet::repo as wallet_repo;
 const GET_COOKIE_URL_DEFAULT: &str = "https://api.tiembanh4k.com/api/ctv-api/get-cookie";
 const REGENERATE_URL_DEFAULT: &str =
     "https://backend-c0r3-7xpq9zn2025.onrender.com/api/ctv-api/regenerate-token";
+const MONTHLY_GIFT_START_AT_DEFAULT: &str = "2026-07-23T00:00:00+07:00";
 const API_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
 
 pub struct NetflixCommandPlugin;
@@ -161,6 +163,8 @@ impl AppPlugin for NetflixCommandPlugin {
             .and_then(|raw| raw.parse::<i64>().ok())
         {
             handle_netflix_report_no_error(&ctx, chat_id, user_id, id).await?;
+        } else if data == "netflix:monthly_gift_claim" {
+            handle_netflix_monthly_gift_claim(&ctx, chat_id, user_id, &lang).await?;
         }
 
         Ok(true)
@@ -207,6 +211,40 @@ pub fn netflix_button_json(ctx: &AppContext, lang: &str) -> Value {
         obj.insert("icon_custom_emoji_id".to_string(), Value::String(icon_id));
     }
     button
+}
+
+pub async fn notify_monthly_gift_if_eligible(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    user_id: i64,
+    _lang: &str,
+) -> Result<()> {
+    if !netflix_monthly_gift_enabled(ctx) || !netflix_enabled(ctx) {
+        return Ok(());
+    }
+    if !user_has_unclaimed_monthly_gift(ctx, user_id).await? {
+        return Ok(());
+    }
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            netflix_text(
+                ctx,
+                "netflix_monthly_gift_notice",
+                "🎁 Bạn đủ điều kiện nhận 1 vé xem Netflix miễn phí tháng này.\nĐiều kiện: nạp ví từ 200.000đ hoặc mua hàng tổng từ 200.000đ trong tháng.",
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+            netflix_text(
+                ctx,
+                "netflix_monthly_gift_claim_button",
+                "🎁 Nhận vé Netflix 1 tháng",
+            ),
+            "netflix:monthly_gift_claim",
+        )]]))
+        .await?;
+    Ok(())
 }
 
 fn netflix_default_button_label(lang: &str) -> &'static str {
@@ -409,6 +447,107 @@ async fn handle_netflix_buy(
                         "netflix:buy",
                     ),
                     InlineKeyboardButton::callback("⬅️ Quay lại", "netflix:menu"),
+                ]]))
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_netflix_monthly_gift_claim(
+    ctx: &AppContext,
+    chat_id: ChatId,
+    user_id: i64,
+    _lang: &str,
+) -> Result<()> {
+    if !netflix_monthly_gift_enabled(ctx) || !netflix_enabled(ctx) {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_monthly_gift_unavailable_message",
+                    "⚠️ Vé Netflix miễn phí hiện chưa khả dụng.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+    if !user_has_unclaimed_monthly_gift(ctx, user_id).await? {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_monthly_gift_not_eligible_message",
+                    "⚠️ Bạn chưa đủ điều kiện hoặc đã nhận vé Netflix miễn phí tháng này.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+    let Some(api_key) = netflix_api_key(ctx) else {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(ctx, "netflix_get_error_message", "⚠️ Get lỗi, vui lòng thử lại sau."),
+            )
+            .await?;
+        return Ok(());
+    };
+
+    let month_key = current_month_key();
+    if !reserve_monthly_gift_claim(ctx, user_id, &month_key).await? {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_monthly_gift_not_eligible_message",
+                    "⚠️ Bạn chưa đủ điều kiện hoặc đã nhận vé Netflix miễn phí tháng này.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            netflix_text(
+                ctx,
+                "netflix_monthly_gift_loading_message",
+                "⏳ Đang lấy vé Netflix miễn phí cho bạn...",
+            ),
+        )
+        .await?;
+
+    match call_get_cookie_api(ctx, &api_key).await {
+        Ok(cookie) => {
+            let session_id = save_netflix_session(ctx, user_id, chat_id.0, &cookie, 0).await?;
+            complete_monthly_gift_claim(ctx, user_id, &month_key, session_id).await?;
+            send_netflix_cookie(ctx, chat_id, session_id, &cookie, 0).await?;
+        }
+        Err(err) => {
+            release_monthly_gift_claim(ctx, user_id, &month_key).await?;
+            tracing::error!("monthly netflix gift claim failed for user {user_id}: {err:#}");
+            ctx.bot
+                .send_message(
+                    chat_id,
+                    html_escape(&netflix_text(
+                        ctx,
+                        "netflix_get_error_message",
+                        "⚠️ Get lỗi, vui lòng thử lại sau.",
+                    )),
+                )
+                .parse_mode(ParseMode::Html)
+                .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                    InlineKeyboardButton::callback(
+                        netflix_text(ctx, "netflix_retry_button_text", "🔄 Thử lại"),
+                        "netflix:monthly_gift_claim",
+                    ),
+                    InlineKeyboardButton::callback("⬅️ Menu Netflix", "netflix:menu"),
                 ]]))
                 .await?;
         }
@@ -1151,6 +1290,20 @@ async fn ensure_netflix_schema(pool: &crate::db::DbPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS netflix_monthly_gifts (
+            user_id INTEGER NOT NULL,
+            month_key TEXT NOT NULL,
+            session_id INTEGER,
+            claimed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, month_key)
+        )"#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -1539,6 +1692,164 @@ fn netflix_admin_ids(ctx: &AppContext) -> Vec<i64> {
         }
     }
     ids
+}
+
+async fn user_has_unclaimed_monthly_gift(ctx: &AppContext, user_id: i64) -> Result<bool> {
+    let month_key = current_month_key();
+    let claimed: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(1)
+        FROM netflix_monthly_gifts
+        WHERE user_id = ? AND month_key = ? AND claimed_at IS NOT NULL"#,
+    )
+    .bind(user_id)
+    .bind(&month_key)
+    .fetch_one(&ctx.pool)
+    .await?;
+    if claimed > 0 {
+        return Ok(false);
+    }
+
+    let (month_start, next_month_start) = current_month_bounds();
+    let promo_start = netflix_monthly_gift_start_at(ctx);
+    let topup_total: i64 = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(amount), 0)
+        FROM wallet_transactions
+        WHERE user_id = ?
+          AND type = 'topup'
+          AND amount > 0
+          AND julianday(created_at) >= julianday(?)
+          AND julianday(created_at) >= julianday(?)
+          AND julianday(created_at) < julianday(?)"#,
+    )
+    .bind(user_id)
+    .bind(&month_start)
+    .bind(&promo_start)
+    .bind(&next_month_start)
+    .fetch_one(&ctx.pool)
+    .await?;
+
+    let purchase_total: i64 = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(amount), 0)
+        FROM orders
+        WHERE user_id = ?
+          AND status = 'paid'
+          AND julianday(COALESCE(paid_at, created_at)) >= julianday(?)
+          AND julianday(COALESCE(paid_at, created_at)) >= julianday(?)
+          AND julianday(COALESCE(paid_at, created_at)) < julianday(?)"#,
+    )
+    .bind(user_id)
+    .bind(&month_start)
+    .bind(&promo_start)
+    .bind(&next_month_start)
+    .fetch_one(&ctx.pool)
+    .await?;
+
+    let threshold = netflix_monthly_gift_threshold(ctx);
+    Ok(threshold > 0 && (topup_total >= threshold || purchase_total >= threshold))
+}
+
+async fn reserve_monthly_gift_claim(
+    ctx: &AppContext,
+    user_id: i64,
+    month_key: &str,
+) -> Result<bool> {
+    sqlx::query(
+        r#"DELETE FROM netflix_monthly_gifts
+        WHERE user_id = ? AND month_key = ? AND claimed_at IS NULL"#,
+    )
+    .bind(user_id)
+    .bind(month_key)
+    .execute(&ctx.pool)
+    .await?;
+
+    let result = sqlx::query(
+        r#"INSERT OR IGNORE INTO netflix_monthly_gifts
+        (user_id, month_key, created_at, updated_at)
+        VALUES (?, ?, datetime('now'), datetime('now'))"#,
+    )
+    .bind(user_id)
+    .bind(month_key)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+async fn complete_monthly_gift_claim(
+    ctx: &AppContext,
+    user_id: i64,
+    month_key: &str,
+    session_id: i64,
+) -> Result<()> {
+    sqlx::query(
+        r#"UPDATE netflix_monthly_gifts
+        SET session_id = ?, claimed_at = datetime('now'), updated_at = datetime('now')
+        WHERE user_id = ? AND month_key = ?"#,
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(month_key)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(())
+}
+
+async fn release_monthly_gift_claim(
+    ctx: &AppContext,
+    user_id: i64,
+    month_key: &str,
+) -> Result<()> {
+    sqlx::query(
+        r#"DELETE FROM netflix_monthly_gifts
+        WHERE user_id = ? AND month_key = ? AND claimed_at IS NULL"#,
+    )
+    .bind(user_id)
+    .bind(month_key)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(())
+}
+
+fn netflix_monthly_gift_enabled(ctx: &AppContext) -> bool {
+    config_bool(ctx, "netflix_monthly_gift_enabled", true)
+}
+
+fn netflix_monthly_gift_threshold(ctx: &AppContext) -> i64 {
+    ctx.get_text("netflix_monthly_gift_threshold", "200000")
+        .trim()
+        .parse::<i64>()
+        .unwrap_or(200_000)
+        .max(0)
+}
+
+fn netflix_monthly_gift_start_at(ctx: &AppContext) -> String {
+    netflix_text(
+        ctx,
+        "netflix_monthly_gift_start_at",
+        MONTHLY_GIFT_START_AT_DEFAULT,
+    )
+}
+
+fn current_month_key() -> String {
+    let now = Utc::now();
+    format!("{:04}-{:02}", now.year(), now.month())
+}
+
+fn current_month_bounds() -> (String, String) {
+    let now = Utc::now();
+    let month_start = Utc
+        .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
+        .single()
+        .unwrap_or(now);
+    let (next_year, next_month) = if now.month() == 12 {
+        (now.year() + 1, 1)
+    } else {
+        (now.year(), now.month() + 1)
+    };
+    let next_month_start = Utc
+        .with_ymd_and_hms(next_year, next_month, 1, 0, 0, 0)
+        .single()
+        .unwrap_or(now);
+    (month_start.to_rfc3339(), next_month_start.to_rfc3339())
 }
 
 async fn refund_netflix_purchase(

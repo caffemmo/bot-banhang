@@ -910,6 +910,19 @@ impl AppPlugin for StartCommandPlugin {
                     if let Some(user) = msg.from() {
                         if user_has_joined_required_channel(&ctx, user.id).await {
                             send_start_menu(&ctx, msg.chat.id, &lang).await?;
+                            if let Err(err) = cmd_netflix::notify_monthly_gift_if_eligible(
+                                &ctx,
+                                msg.chat.id,
+                                user.id.0 as i64,
+                                &lang,
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    "failed to send monthly Netflix gift notice to user {}: {err:#}",
+                                    user.id.0
+                                );
+                            }
                         } else {
                             send_required_channel_prompt(&ctx, msg.chat.id, &lang).await?;
                         }
