@@ -404,6 +404,7 @@ fn is_non_translation_config_key(key: &str) -> bool {
             | "viameta_base_url"
             | "viameta_username"
             | "viameta_password"
+            | "viameta_proxy_url"
             | "viameta_menu_title"
             | "viameta_menu_description"
             | "viameta_maintenance_message"

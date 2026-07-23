@@ -284,6 +284,9 @@ async fn seed_configs_from_env(pool: &db::DbPool, config: &config::Config) {
     if let Ok(viameta_password) = std::env::var("VIAMETA_PASSWORD") {
         push_optional_seed(&mut seeds, "viameta_password", Some(viameta_password.as_str()));
     }
+    if let Ok(viameta_proxy_url) = std::env::var("VIAMETA_PROXY_URL") {
+        push_optional_seed(&mut seeds, "viameta_proxy_url", Some(viameta_proxy_url.as_str()));
+    }
 
     push_optional_seed(
         &mut seeds,

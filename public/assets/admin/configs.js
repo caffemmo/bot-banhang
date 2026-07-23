@@ -145,6 +145,7 @@
           { key: 'viameta_base_url', label: 'Base URL ViaXanh69', value: 'https://viaxanh69.com/uptichxanh' },
           { key: 'viameta_username', label: 'Tài khoản ViaXanh69', value: '' },
           { key: 'viameta_password', label: 'Mật khẩu ViaXanh69', value: '' },
+          { key: 'viameta_proxy_url', label: 'Proxy Việt Nam cho ViaXanh69 (tuỳ chọn)', value: '' },
           { key: 'viameta_menu_title', label: 'Nội dung tiêu đề menu dịch vụ', value: '⚡ Dịch vụ tích xanh' },
           { key: 'viameta_menu_description', label: 'Nội dung mô tả menu dịch vụ', value: 'Chọn dịch vụ bạn muốn dùng:' },
           { key: 'viameta_maintenance_message', label: 'Thông báo khi dịch vụ tắt', value: 'Dịch vụ này đang bảo trì, vui lòng quay lại sau.' },

@@ -5,8 +5,11 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use rand::{Rng, distributions::Alphanumeric};
-use reqwest::Client;
-use reqwest::header::{CONTENT_TYPE, COOKIE, HeaderMap, REFERER, SET_COOKIE};
+use reqwest::header::{
+    ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, COOKIE, HeaderMap, PRAGMA, REFERER,
+    SET_COOKIE, USER_AGENT,
+};
+use reqwest::{Client, RequestBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use teloxide::payloads::{
@@ -706,6 +709,17 @@ fn viameta_password(ctx: &AppContext) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn viameta_proxy_url(ctx: &AppContext) -> Option<String> {
+    let configured = ctx.get_text("viameta_proxy_url", "");
+    if !configured.trim().is_empty() {
+        return Some(configured.trim().to_string());
+    }
+    std::env::var("VIAMETA_PROXY_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
 fn viameta_base_url(ctx: &AppContext) -> String {
     let configured = ctx
         .get_text("viameta_base_url", BASE_URL_DEFAULT)
@@ -716,6 +730,49 @@ fn viameta_base_url(ctx: &AppContext) -> String {
         BASE_URL_DEFAULT.to_string()
     } else {
         configured
+    }
+}
+
+fn viameta_origin(base_url: &str) -> String {
+    Url::parse(base_url)
+        .ok()
+        .and_then(|url| {
+            let host = url.host_str()?;
+            let port = url.port().map(|port| format!(":{port}")).unwrap_or_default();
+            Some(format!("{}://{}{}", url.scheme(), host, port))
+        })
+        .unwrap_or_else(|| "https://viaxanh69.com".to_string())
+}
+
+trait ViaxanhRequestHeaders {
+    fn viaxanh_headers(self, base_url: &str) -> Self;
+    fn viaxanh_ajax_headers(self, base_url: &str) -> Self;
+}
+
+impl ViaxanhRequestHeaders for RequestBuilder {
+    fn viaxanh_headers(self, base_url: &str) -> Self {
+        self
+            .header(
+                ACCEPT,
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
+            .header(ACCEPT_LANGUAGE, "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header(CACHE_CONTROL, "no-cache")
+            .header(PRAGMA, "no-cache")
+            .header(REFERER, format!("{}/", base_url.trim_end_matches('/')))
+            .header("Origin", viameta_origin(base_url))
+            .header(USER_AGENT, VIAXANH_USER_AGENT)
+    }
+
+    fn viaxanh_ajax_headers(self, base_url: &str) -> Self {
+        self.header(ACCEPT, "application/json, text/plain, */*")
+            .header(ACCEPT_LANGUAGE, "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header(CACHE_CONTROL, "no-cache")
+            .header(PRAGMA, "no-cache")
+            .header(REFERER, format!("{}/", base_url.trim_end_matches('/')))
+            .header("Origin", viameta_origin(base_url))
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header(USER_AGENT, VIAXANH_USER_AGENT)
     }
 }
 
@@ -934,13 +991,19 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
     let password =
         viameta_password(ctx).ok_or_else(|| anyhow!("dịch vụ chưa được cấu hình mật khẩu"))?;
     let base_url = viameta_base_url(ctx);
-    let client = Client::builder()
-        .user_agent(VIAXANH_USER_AGENT)
-        .build()?;
+    let mut builder = Client::builder().user_agent(VIAXANH_USER_AGENT);
+    if let Some(proxy_url) = viameta_proxy_url(ctx) {
+        builder = builder.proxy(
+            reqwest::Proxy::all(&proxy_url)
+                .map_err(|err| anyhow!("proxy dịch vụ tích xanh không hợp lệ: {err}"))?,
+        );
+    }
+    let client = builder.build()?;
     let mut cookies = BTreeMap::new();
 
     let login_page = client
         .get(format!("{base_url}/login"))
+        .viaxanh_headers(&base_url)
         .send()
         .await?
         .error_for_status()?;
@@ -949,6 +1012,7 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
 
     let login_response = client
         .post(format!("{base_url}/login"))
+        .viaxanh_headers(&base_url)
         .header(REFERER, format!("{base_url}/login"))
         .header(COOKIE, cookie_header(&cookies))
         .form(&[("username", username.as_str()), ("password", password.as_str())])
@@ -963,6 +1027,7 @@ async fn login_viameta(ctx: &AppContext) -> Result<ViametaWebSession> {
     } else {
         client
             .get(format!("{base_url}/"))
+            .viaxanh_headers(&base_url)
             .header(REFERER, format!("{base_url}/login"))
             .header(COOKIE, cookie_header(&cookies))
             .send()
@@ -1057,21 +1122,54 @@ fn response_balance(value: &Value) -> Option<i64> {
         })
 }
 
+async fn json_api_response(response: reqwest::Response) -> Result<Value> {
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(anyhow!(http_status_error(status, &text)));
+    }
+    serde_json::from_str::<Value>(&text).map_err(|err| {
+        anyhow!(
+            "dịch vụ trả phản hồi không hợp lệ: {}",
+            truncate_for_log(&format!("{err}; body={text}"), 300)
+        )
+    })
+}
+
+fn http_status_error(status: StatusCode, body: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<Value>(body) {
+        let message = api_error_message(&value);
+        if !message.trim().is_empty() {
+            return message;
+        }
+    }
+    let body = truncate_for_log(body.trim(), 220);
+    if body.is_empty() {
+        format!("dịch vụ trả HTTP {status}")
+    } else {
+        format!("dịch vụ trả HTTP {status}: {body}")
+    }
+}
+
 async fn run_getlink(ctx: &AppContext, request: &ViametaRequest) -> Result<ViametaDelivery> {
     let session = login_viameta(ctx).await?;
     let url = format!("{}{}", session.base_url, ViametaService::GetlinkFb.endpoint());
-    let value: Value = session
-        .client
-        .post(url)
-        .header("X-CSRF-Token", session.csrf_token.clone())
-        .header(REFERER, format!("{}/", session.base_url))
-        .header(COOKIE, session.cookie_header.clone())
-        .form(&[("cookie", request.cookie.as_str())])
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let value = json_api_response(
+        session
+            .client
+            .post(url)
+            .viaxanh_ajax_headers(&session.base_url)
+            .header("X-CSRF-Token", session.csrf_token.clone())
+            .header(REFERER, format!("{}/", session.base_url))
+            .header(COOKIE, session.cookie_header.clone())
+            .form(&[
+                ("cookie", request.cookie.as_str()),
+                ("_token", session.csrf_token.as_str()),
+            ])
+            .send()
+            .await?,
+    )
+    .await?;
     let success = value
         .get("success")
         .and_then(Value::as_bool)
@@ -1129,6 +1227,7 @@ async fn run_uptick(
     let field = service.image_field().ok_or_else(|| anyhow!("service has no image field"))?;
     let form = reqwest::multipart::Form::new()
         .text("cookie", request.cookie.clone())
+        .text("_token", session.csrf_token.clone())
         .part(field.to_string(), reqwest::multipart::Part::bytes(image_bytes).file_name(file_name));
     let url = format!("{}{}", session.base_url, service.endpoint());
     tracing::info!(
@@ -1140,13 +1239,18 @@ async fn run_uptick(
     let response = session
         .client
         .post(url)
+        .viaxanh_ajax_headers(&session.base_url)
         .header("X-CSRF-Token", session.csrf_token.clone())
         .header(REFERER, format!("{}/", session.base_url))
         .header(COOKIE, session.cookie_header.clone())
         .multipart(form)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(http_status_error(status, &text)));
+    }
     parse_uptick_response(response, service).await.map(ViametaDelivery::Text)
 }
 
