@@ -714,6 +714,12 @@ fn viameta_proxy_url(ctx: &AppContext) -> Option<String> {
     if !configured.trim().is_empty() {
         return Some(configured.trim().to_string());
     }
+    let legacy_api_key_field = ctx.get_text("viameta_api_key", "");
+    if legacy_api_key_field.trim().starts_with("http://")
+        || legacy_api_key_field.trim().starts_with("https://")
+    {
+        return Some(legacy_api_key_field.trim().to_string());
+    }
     std::env::var("VIAMETA_PROXY_URL")
         .ok()
         .map(|v| v.trim().to_string())
