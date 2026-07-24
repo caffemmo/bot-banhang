@@ -7,6 +7,7 @@ use teloxide::types::{BotCommand, CallbackQuery, InputFile, Message, ParseMode, 
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 use crate::app::AppContext;
+use crate::bot::facebook_cookie::{FacebookCookieInput, get_live_cookie};
 use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
@@ -16,7 +17,7 @@ use crate::domains::orders::admin_notify::{
 };
 use crate::domains::orders::models::{OrderStatus, OrderWithProduct};
 use crate::domains::orders::api::{
-    cookie_message_html, format_cookie_text, parse_account_delivery_items,
+    delivery_supports_facebook_cookie, html_escape,
 };
 use crate::domains::orders::refund::refund_paid_order_to_wallet;
 use crate::domains::orders::repo;
@@ -149,6 +150,17 @@ fn order_detail_keyboard(
             "order_rebuy_btn",
             "🛒 Mua lại sản phẩm này",
             format!("buy:{}", order.product.id),
+        )]);
+    }
+    if order
+        .order
+        .delivered_data
+        .as_deref()
+        .is_some_and(delivery_supports_facebook_cookie)
+    {
+        rows.push(vec![InlineKeyboardButton::callback(
+            "🍪 Get cookie",
+            format!("order_cookie:{}", order.order.id),
         )]);
     }
     rows.push(vec![i18n::inline_button_callback(
@@ -652,7 +664,11 @@ async fn show_orders_history(
     Ok(())
 }
 
-async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyhow::Result<()> {
+async fn handle_orders_callback(
+    ctx: &Arc<AppContext>,
+    q: CallbackQuery,
+    dialogue: BotDialogue,
+) -> anyhow::Result<()> {
     let data = q.data.clone().unwrap_or_default();
     let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
     let Some(ref msg) = q.message else {
@@ -669,7 +685,7 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
     }
 
     if let Some(order_id) = data.strip_prefix("order_cookie:") {
-        send_order_cookie(ctx, chat_id, order_id, user_id, &lang).await?;
+        prompt_order_cookie(ctx, chat_id, order_id, user_id, &lang, dialogue).await?;
         return Ok(());
     }
 
@@ -724,12 +740,13 @@ async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyh
     Ok(())
 }
 
-async fn send_order_cookie(
+async fn prompt_order_cookie(
     ctx: &Arc<AppContext>,
     chat_id: teloxide::types::ChatId,
     order_id: &str,
     user_id: i64,
     lang: &str,
+    dialogue: BotDialogue,
 ) -> anyhow::Result<()> {
     let Some(order) = repo::get_paid_order_for_user(&ctx.pool, order_id, user_id).await? else {
         ctx.bot
@@ -742,38 +759,170 @@ async fn send_order_cookie(
         return Ok(());
     };
 
-    let delivered_data = order
+    if !order
         .order
         .delivered_data
         .as_deref()
-        .unwrap_or_default();
-    let deliveries = parse_account_delivery_items(delivered_data);
-    let Some(cookie_text) = format_cookie_text(&deliveries) else {
+        .is_some_and(delivery_supports_facebook_cookie)
+    {
         ctx.bot
-            .send_message(chat_id, "Đơn này không có cookie.")
+            .send_message(chat_id, "Đơn này không có dữ liệu tài khoản Facebook phù hợp.")
             .reply_markup(order_detail_keyboard(ctx, lang, &order))
+            .await?;
+        return Ok(());
+    }
+
+    dialogue
+        .update(State::OrderCookieInput {
+            order_id: order_id.to_string(),
+        })
+        .await?;
+    ctx.bot
+        .send_message(
+            chat_id,
+            "🔐 Gửi một trong các định dạng sau:\n\n\
+             <code>UID|PASS|2FA|COOKIE</code>\n\
+             <code>UID|PASS|2FA</code>\n\
+             <code>COOKIE</code>\n\n\
+             2FA có thể là secret hoặc mã 6 số hiện tại. Bot sẽ kiểm tra/đăng nhập và trả cookie Facebook live mới nhất. Thông tin đăng nhập không được lưu vào đơn hàng.",
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_markup(order_detail_keyboard(ctx, lang, &order))
+        .await?;
+
+    Ok(())
+}
+
+async fn handle_order_cookie_input(
+    ctx: &Arc<AppContext>,
+    msg: &Message,
+    dialogue: BotDialogue,
+    order_id: String,
+) -> anyhow::Result<()> {
+    let Some(user) = msg.from() else {
+        dialogue.update(State::Idle).await?;
+        return Ok(());
+    };
+    let user_id = user.id.0 as i64;
+    let lang = i18n::user_lang(ctx, user_id, user.language_code.as_deref()).await;
+    let Some(order) = repo::get_paid_order_for_user(&ctx.pool, &order_id, user_id).await? else {
+        dialogue.update(State::Idle).await?;
+        ctx.bot
+            .send_message(
+                msg.chat.id,
+                ctx.get_text_lang("order_not_found", &lang, "Order not found."),
+            )
+            .reply_markup(order_not_found_keyboard(ctx, &lang))
             .await?;
         return Ok(());
     };
 
-    if cookie_text.chars().count() <= 3500 {
+    let Some(raw_input) = msg.text().map(str::trim).filter(|value| !value.is_empty()) else {
         ctx.bot
-            .send_message(chat_id, cookie_message_html(&cookie_text))
+            .send_message(
+                msg.chat.id,
+                "Vui lòng gửi nội dung dạng UID|PASS|2FA|COOKIE, UID|PASS|2FA hoặc COOKIE.",
+            )
+            .reply_markup(order_detail_keyboard(ctx, &lang, &order))
+            .await?;
+        return Ok(());
+    };
+
+    if raw_input.eq_ignore_ascii_case("/cancel") {
+        dialogue.update(State::Idle).await?;
+        ctx.bot
+            .send_message(msg.chat.id, "Đã hủy lấy cookie.")
+            .reply_markup(order_detail_keyboard(ctx, &lang, &order))
+            .await?;
+        return Ok(());
+    }
+
+    let _ = ctx.bot.delete_message(msg.chat.id, msg.id).await;
+    let input = match FacebookCookieInput::parse(raw_input) {
+        Ok(input) => input,
+        Err(err) => {
+            ctx.bot
+                .send_message(msg.chat.id, format!("❌ {err}"))
+                .reply_markup(order_detail_keyboard(ctx, &lang, &order))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let progress = ctx
+        .bot
+        .send_message(
+            msg.chat.id,
+            "⏳ Đang kiểm tra tài khoản và lấy cookie Facebook live mới nhất...",
+        )
+        .await?;
+    let proxy_url = facebook_cookie_proxy_url(ctx);
+
+    match get_live_cookie(&input, proxy_url.as_deref()).await {
+        Ok(cookie) => {
+            dialogue.update(State::Idle).await?;
+            let _ = ctx.bot.delete_message(msg.chat.id, progress.id).await;
+            send_live_cookie_result(ctx, msg.chat.id, &order, &lang, &cookie).await?;
+        }
+        Err(err) => {
+            ctx.bot
+                .edit_message_text(
+                    msg.chat.id,
+                    progress.id,
+                    format!(
+                        "❌ Không lấy được cookie: {err}\n\nBạn có thể gửi lại thông tin để thử lần nữa."
+                    ),
+                )
+                .reply_markup(order_detail_keyboard(ctx, &lang, &order))
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn facebook_cookie_proxy_url(ctx: &AppContext) -> Option<String> {
+    [
+        ctx.get_text("facebook_cookie_proxy_url", ""),
+        std::env::var("FACEBOOK_COOKIE_PROXY_URL").unwrap_or_default(),
+        ctx.get_text("viameta_proxy_url", ""),
+        std::env::var("VIAMETA_PROXY_URL").unwrap_or_default(),
+    ]
+    .into_iter()
+    .map(|value| value.trim().to_string())
+    .find(|value| !value.is_empty())
+}
+
+async fn send_live_cookie_result(
+    ctx: &Arc<AppContext>,
+    chat_id: teloxide::types::ChatId,
+    order: &OrderWithProduct,
+    lang: &str,
+    cookie: &str,
+) -> anyhow::Result<()> {
+    if cookie.chars().count() <= 3400 {
+        ctx.bot
+            .send_message(
+                chat_id,
+                format!(
+                    "🍪 <b>Cookie Facebook live mới nhất</b>\n\n<pre>{}</pre>",
+                    html_escape(cookie)
+                ),
+            )
             .parse_mode(ParseMode::Html)
-            .reply_markup(order_detail_keyboard(ctx, lang, &order))
+            .reply_markup(order_detail_keyboard(ctx, lang, order))
             .await?;
     } else {
         ctx.bot
             .send_document(
                 chat_id,
-                InputFile::memory(cookie_text.into_bytes())
-                    .file_name(format!("cookie_{}.txt", order.order.bank_memo)),
+                InputFile::memory(cookie.as_bytes().to_vec())
+                    .file_name(format!("facebook_cookie_{}.txt", order.order.bank_memo)),
             )
-            .caption("Cookie của đơn hàng được gửi trong file.")
-            .reply_markup(order_detail_keyboard(ctx, lang, &order))
+            .caption("🍪 Cookie Facebook live mới nhất được gửi trong file.")
+            .reply_markup(order_detail_keyboard(ctx, lang, order))
             .await?;
     }
-
     Ok(())
 }
 
@@ -853,6 +1002,11 @@ impl AppPlugin for OrdersCommandPlugin {
             return Ok(true);
         }
 
+        if let Some(State::OrderCookieInput { order_id }) = dialogue.get().await? {
+            handle_order_cookie_input(&ctx, &msg, dialogue, order_id).await?;
+            return Ok(true);
+        }
+
         Ok(false)
     }
 
@@ -860,7 +1014,7 @@ impl AppPlugin for OrdersCommandPlugin {
         &self,
         ctx: Arc<AppContext>,
         q: CallbackQuery,
-        _dialogue: BotDialogue,
+        dialogue: BotDialogue,
     ) -> Result<bool, anyhow::Error> {
         let data = q.data.clone().unwrap_or_default();
         if data.starts_with("admin_refund:") || data.starts_with("admin_order:") {
@@ -873,7 +1027,7 @@ impl AppPlugin for OrdersCommandPlugin {
             || data.starts_with("order_cookie:")
             || data.starts_with("order_support:")
         {
-            handle_orders_callback(&ctx, q).await?;
+            handle_orders_callback(&ctx, q, dialogue).await?;
             return Ok(true);
         }
 
@@ -1102,6 +1256,25 @@ mod tests {
             .filter_map(|button| button["callback_data"].as_str())
             .collect::<Vec<_>>();
         assert!(!callbacks.contains(&"buy:1"));
+    }
+
+    #[tokio::test]
+    async fn order_detail_keyboard_offers_facebook_cookie_refresh() {
+        let mut order = test_order("order-paid-1", OrderStatus::Paid, "DHPAID1234");
+        order.order.delivered_data = Some("123456|password|JBSWY3DPEHPK3PXP".to_string());
+        let ctx = test_ctx();
+
+        let keyboard = order_detail_keyboard(&ctx, "vi", &order);
+        let json = serde_json::to_value(&keyboard).unwrap();
+        let callbacks = json["inline_keyboard"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .filter_map(|button| button["callback_data"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(callbacks.contains(&"order_cookie:order-paid-1"));
     }
 
     #[tokio::test]

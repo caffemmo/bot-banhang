@@ -4910,6 +4910,7 @@ impl AppPlugin for ShopCommandPlugin {
             State::CreatingTutContent { .. } => {}
             State::ViametaCollectingCookie { .. } => {}
             State::ViametaCollectingImage { .. } => {}
+            State::OrderCookieInput { .. } => {}
             State::FacebookUnlockIssue => {}
             State::FacebookUnlockCustomerUsername => {}
             State::FacebookUnlockDetails { .. } => {}

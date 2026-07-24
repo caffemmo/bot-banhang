@@ -19,6 +19,7 @@ use crate::domains::users::repo as users_repo;
 
 pub mod i18n;
 pub mod chat_ui;
+pub mod facebook_cookie;
 pub mod plugins;
 pub mod storage;
 pub mod texts;
@@ -56,6 +57,9 @@ pub enum State {
     ViametaCollectingImage {
         service: String,
         cookie: String,
+    },
+    OrderCookieInput {
+        order_id: String,
     },
     FacebookUnlockIssue,
     FacebookUnlockCustomerUsername,
@@ -117,11 +121,23 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         move |msg: Message, dialogue: BotDialogue| {
             let ctx = ctx.clone();
             async move {
-                let raw_msg = serde_json::to_value(&msg).ok();
+                let sensitive_cookie_input = matches!(
+                    dialogue.get().await.ok().flatten(),
+                    Some(State::OrderCookieInput { .. })
+                );
+                let raw_msg = if sensitive_cookie_input {
+                    None
+                } else {
+                    serde_json::to_value(&msg).ok()
+                };
                 let from_user_id = msg.from().map(|u| u.id.0 as i64);
                 let chat_id = Some(msg.chat.id.0);
                 let msg_date = Some(msg.date.to_rfc3339());
-                let text = msg.text().map(|t| t.trim()).filter(|t| !t.is_empty());
+                let text = if sensitive_cookie_input {
+                    Some("[SENSITIVE FACEBOOK COOKIE INPUT REDACTED]")
+                } else {
+                    msg.text().map(|t| t.trim()).filter(|t| !t.is_empty())
+                };
 
                 if let Some(raw) = raw_msg.as_ref() {
                     let _ = chat_repo::insert_update_log(
