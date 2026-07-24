@@ -57,8 +57,6 @@ fn facebook_cookie_proxy_url(ctx: &AppContext) -> Option<String> {
     [
         ctx.get_text("facebook_cookie_proxy_url", ""),
         std::env::var("FACEBOOK_COOKIE_PROXY_URL").unwrap_or_default(),
-        ctx.get_text("viameta_proxy_url", ""),
-        std::env::var("VIAMETA_PROXY_URL").unwrap_or_default(),
     ]
     .into_iter()
     .map(|value| value.trim().to_string())
@@ -127,7 +125,7 @@ async fn handle_facebook_cookie_input(
                     msg.chat.id,
                     progress.id,
                     format!(
-                        "❌ Không lấy được cookie: {err}\n\nBạn có thể gửi lại thông tin để thử lần nữa."
+                        "❌ Không lấy được cookie: {err:#}\n\nBạn có thể gửi lại thông tin để thử lần nữa."
                     ),
                 )
                 .reply_markup(facebook_cookie_keyboard())
