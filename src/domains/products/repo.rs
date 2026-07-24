@@ -700,7 +700,6 @@ pub async fn insert_product(
             .bind(id)
             .fetch_one(pool)
             .await?
-            .flatten()
             .unwrap_or(1);
     sqlx::query("UPDATE products SET sort_order = ? WHERE id = ?")
         .bind(first_sort_order - 1)
