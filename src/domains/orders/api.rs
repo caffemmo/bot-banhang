@@ -509,12 +509,10 @@ pub async fn send_product_file(
     }
 
     if product_delivery_type(&owp.product) == "stock_item" {
-        let supports_cookie_login = delivery_supports_facebook_cookie(delivered_data);
         let rows = stock_delivery_fallback_keyboard_rows(
             &owp.order.id,
             owp.product.id,
             &continue_shopping_btn,
-            supports_cookie_login,
         );
 
         let text = format_stock_delivery_message_html(ctx, owp, delivered_data);
@@ -523,7 +521,6 @@ pub async fn send_product_file(
                 &owp.order.id,
                 owp.product.id,
                 &continue_shopping_btn,
-                supports_cookie_login,
             );
             let payload = json!({
                 "chat_id": owp.order.chat_id,
@@ -773,54 +770,44 @@ fn stock_delivery_keyboard_json(
     order_id: &str,
     product_id: i64,
     continue_shopping_btn: &str,
-    supports_cookie_login: bool,
 ) -> Value {
-    let mut rows = vec![vec![json!({
-        "text": "📋 Copy sản phẩm",
-        "callback_data": format!("delivery_copy:{order_id}"),
-    })]];
-    if supports_cookie_login {
-        rows.push(vec![json!({
-            "text": "🍪 Get cookie",
-            "callback_data": format!("order_cookie:{order_id}"),
-        })]);
-    }
-    rows.push(vec![json!({
-        "text": "📘 Hướng dẫn sử dụng",
-        "callback_data": format!("usage:{product_id}"),
-    })]);
-    rows.push(vec![json!({
-        "text": continue_shopping_btn,
-        "callback_data": "start:shop",
-    })]);
-    json!({ "inline_keyboard": rows })
+    json!({
+        "inline_keyboard": [
+            [{
+                "text": "📋 Copy sản phẩm",
+                "callback_data": format!("delivery_copy:{order_id}"),
+            }],
+            [{
+                "text": "📘 Hướng dẫn sử dụng",
+                "callback_data": format!("usage:{product_id}"),
+            }],
+            [{
+                "text": continue_shopping_btn,
+                "callback_data": "start:shop",
+            }]
+        ]
+    })
 }
 
 fn stock_delivery_fallback_keyboard_rows(
     order_id: &str,
     product_id: i64,
     continue_shopping_btn: &str,
-    supports_cookie_login: bool,
 ) -> Vec<Vec<InlineKeyboardButton>> {
-    let mut rows = vec![vec![InlineKeyboardButton::callback(
-        "📋 Copy sản phẩm",
-        format!("delivery_copy:{order_id}"),
-    )]];
-    if supports_cookie_login {
-        rows.push(vec![InlineKeyboardButton::callback(
-            "🍪 Get cookie",
-            format!("order_cookie:{order_id}"),
-        )]);
-    }
-    rows.push(vec![InlineKeyboardButton::callback(
-        "📘 Hướng dẫn sử dụng",
-        format!("usage:{product_id}"),
-    )]);
-    rows.push(vec![InlineKeyboardButton::callback(
-        continue_shopping_btn.to_string(),
-        "start:shop",
-    )]);
-    rows
+    vec![
+        vec![InlineKeyboardButton::callback(
+            "📋 Copy sản phẩm",
+            format!("delivery_copy:{order_id}"),
+        )],
+        vec![InlineKeyboardButton::callback(
+            "📘 Hướng dẫn sử dụng",
+            format!("usage:{product_id}"),
+        )],
+        vec![InlineKeyboardButton::callback(
+            continue_shopping_btn.to_string(),
+            "start:shop",
+        )],
+    ]
 }
 
 fn format_vnd(amount: i64) -> String {
@@ -842,10 +829,6 @@ pub fn parse_account_delivery_items(delivered_data: &str) -> Vec<AccountDelivery
         .lines()
         .filter_map(parse_account_stock_line)
         .collect()
-}
-
-pub fn delivery_supports_facebook_cookie(delivered_data: &str) -> bool {
-    !parse_account_delivery_items(delivered_data).is_empty() || looks_like_cookie(delivered_data)
 }
 
 pub fn format_cookie_text(deliveries: &[AccountDelivery]) -> Option<String> {
@@ -1232,27 +1215,14 @@ mod tests {
     }
 
     #[test]
-    fn stock_delivery_keyboard_adds_cookie_button_for_facebook_accounts() {
-        let keyboard =
-            stock_delivery_keyboard_json("order-1", 42, "🛒 Tiếp tục mua hàng", true);
+    fn stock_delivery_keyboard_adds_copy_usage_and_continue_buttons() {
+        let keyboard = stock_delivery_keyboard_json("order-1", 42, "🛒 Tiếp tục mua hàng");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["text"], "📋 Copy sản phẩm");
         assert_eq!(rows[0][0]["callback_data"], "delivery_copy:order-1");
-        assert_eq!(rows[1][0]["callback_data"], "order_cookie:order-1");
-        assert_eq!(rows[2][0]["callback_data"], "usage:42");
-        assert_eq!(rows[3][0]["callback_data"], "start:shop");
-    }
-
-    #[test]
-    fn facebook_cookie_button_supports_credentials_or_cookie_stock() {
-        assert!(delivery_supports_facebook_cookie(
-            "123456|password|JBSWY3DPEHPK3PXP"
-        ));
-        assert!(delivery_supports_facebook_cookie(
-            "c_user=123; xs=abc; fr=def"
-        ));
-        assert!(!delivery_supports_facebook_cookie("license-key-only"));
+        assert_eq!(rows[1][0]["callback_data"], "usage:42");
+        assert_eq!(rows[2][0]["callback_data"], "start:shop");
     }
 
     #[test]

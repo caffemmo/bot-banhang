@@ -12,6 +12,7 @@ use url::Url;
 use crate::app::AppContext;
 use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
+use crate::bot::plugins::cmd_facebook_cookie;
 use crate::bot::plugins::cmd_netflix;
 use crate::bot::plugins::cmd_orders;
 use crate::bot::plugins::cmd_shop;
@@ -34,6 +35,7 @@ enum StartEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartMenuAction {
     Shop,
+    FacebookCookie,
     Topup,
     Wallet,
     Orders,
@@ -346,6 +348,13 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 "wallet:topup_history",
             ),
         ],
+        vec![i18n::inline_button_callback_json(
+            ctx,
+            lang,
+            "start_btn_facebook_cookie",
+            "🍪 Get link cookie",
+            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
+        )],
     ];
 
     let mut support_row = vec![i18n::inline_button_callback_json(
@@ -468,6 +477,10 @@ fn start_menu_button_specs_from_texts(
                 "wallet:topup_history".to_string(),
             ),
         ],
+        vec![(
+            texts.get_lang("start_btn_facebook_cookie", lang, "🍪 Get link cookie"),
+            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string(),
+        )],
         vec![
             (
                 texts.get_lang("start_btn_help", lang, "Help"),
@@ -486,7 +499,7 @@ fn start_menu_button_specs_from_texts(
         ],
     ];
     if include_viameta {
-        rows[4].push((
+        rows[5].push((
             texts.get_lang("start_btn_viameta", lang, "Up tích xanh"),
             "viameta:menu".to_string(),
         ));
@@ -557,6 +570,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
                     json!({"text": "📦 Purchased"}),
                     json!({"text": "📜 Top-up history"}),
                 ],
+                vec![json!({"text": "🍪 Get link cookie"})],
                 vec![
                     json!({"text": "Help"}),
                 ],
@@ -574,6 +588,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "start:wallet" => "start_btn_wallet",
         "start:orders" => "start_btn_purchased",
         "wallet:topup_history" => "start_btn_topup_history",
+        "facebook_cookie:get" => "start_btn_facebook_cookie",
         "viameta:menu" => "start_btn_viameta",
         "affiliate:register" => "start_btn_affiliate_register",
         "start:help" => "start_btn_help",
@@ -724,6 +739,10 @@ fn start_menu_action_labels(texts: &BotTexts, lang: &str) -> Vec<(StartMenuActio
             texts.get_lang("start_btn_shop", lang, "🛒 Shop"),
         ),
         (
+            StartMenuAction::FacebookCookie,
+            texts.get_lang("start_btn_facebook_cookie", lang, "🍪 Get link cookie"),
+        ),
+        (
             StartMenuAction::Topup,
             texts.get_lang("start_btn_topup", lang, "💰 Top up"),
         ),
@@ -799,6 +818,14 @@ impl AppPlugin for StartCommandPlugin {
                         0,
                         None,
                         &lang,
+                    )
+                    .await?;
+                }
+                StartMenuAction::FacebookCookie => {
+                    cmd_facebook_cookie::prompt_facebook_cookie(
+                        &ctx,
+                        msg.chat.id,
+                        dialogue.clone(),
                     )
                     .await?;
                 }
@@ -896,7 +923,10 @@ impl AppPlugin for StartCommandPlugin {
                     }
                 }
             }
-            if !matches!(action, StartMenuAction::Topup) {
+            if !matches!(
+                action,
+                StartMenuAction::Topup | StartMenuAction::FacebookCookie
+            ) {
                 let _ = dialogue.update(State::Idle).await;
             }
             return Ok(true);
@@ -1322,10 +1352,14 @@ mod tests {
         assert_eq!(rows[0][0]["callback_data"], "start:shop");
         assert_eq!(rows[0][1]["callback_data"], "netflix:menu");
         assert_eq!(rows[1][0]["callback_data"], "netflix:monthly_gift_menu");
-        assert_eq!(rows[4][0]["callback_data"], "start:help");
-        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
-        assert_eq!(rows[5][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
-        assert_eq!(rows[6][0]["callback_data"], "start:language");
+        assert_eq!(
+            rows[4][0]["callback_data"],
+            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
+        );
+        assert_eq!(rows[5][0]["callback_data"], "start:help");
+        assert_eq!(rows[6][0]["callback_data"], "affiliate:register");
+        assert_eq!(rows[6][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[7][0]["callback_data"], "start:language");
         assert!(!keyboard.to_string().contains("viameta:menu"));
         assert!(!keyboard.to_string().contains("shop_api"));
         assert!(!keyboard.to_string().contains("tut:user_home"));
@@ -1341,8 +1375,12 @@ mod tests {
         let keyboard = start_menu_keyboard_json(&ctx, "vi");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
-        assert_eq!(rows[4][0]["callback_data"], "start:help");
-        assert_eq!(rows[4][1]["callback_data"], "viameta:menu");
+        assert_eq!(
+            rows[4][0]["callback_data"],
+            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
+        );
+        assert_eq!(rows[5][0]["callback_data"], "start:help");
+        assert_eq!(rows[5][1]["callback_data"], "viameta:menu");
     }
 
     #[test]
@@ -1364,6 +1402,7 @@ mod tests {
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
                     ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
+                    ("start_btn_facebook_cookie".to_string(), "Lay cookie".to_string()),
                     ("start_btn_viameta".to_string(), "Up tich xanh".to_string()),
                     ("start_btn_affiliate_register".to_string(), "CTV".to_string()),
                     ("start_btn_help".to_string(), "Huong dan".to_string()),
@@ -1381,6 +1420,7 @@ mod tests {
                 vec!["Khuyen mai".to_string()],
                 vec!["Nap tien".to_string(), "Vi tien".to_string()],
                 vec!["Da mua".to_string(), "Lich su nap".to_string()],
+                vec!["Lay cookie".to_string()],
                 vec!["Huong dan".to_string(), "Up tich xanh".to_string()],
                 vec!["CTV".to_string(), "Ngon ngu".to_string()],
             ]
@@ -1438,6 +1478,7 @@ mod tests {
                     ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
                     ("start_btn_orders".to_string(), "Don hang gan day".to_string()),
                     ("start_btn_promo".to_string(), "Khuyen mai".to_string()),
+                    ("start_btn_facebook_cookie".to_string(), "Lay cookie".to_string()),
                     ("start_btn_language".to_string(), "Ngon ngu".to_string()),
                 ]),
             )]),
@@ -1458,6 +1499,10 @@ mod tests {
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "Khuyen mai"),
             Some(StartMenuAction::Promo)
+        );
+        assert_eq!(
+            start_menu_action_from_text(&texts, "vi", "Lay cookie"),
+            Some(StartMenuAction::FacebookCookie)
         );
         assert_eq!(
             start_menu_action_from_text(&texts, "vi", "Ngon ngu"),
