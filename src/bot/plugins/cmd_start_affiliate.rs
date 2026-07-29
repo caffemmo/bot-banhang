@@ -11,6 +11,7 @@ use url::Url;
 
 use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
+use crate::bot::plugins::cmd_facebook_cookie;
 use crate::bot::plugins::cmd_netflix;
 use crate::bot::{BotDialogue, chat_ui, i18n};
 
@@ -304,9 +305,17 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
         shop_row.push(cmd_netflix::netflix_button_json(ctx, lang));
     }
 
+    let cookie_button = i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_facebook_cookie",
+        "🍪 Get link cookie",
+        cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
+    );
+
     let mut rows = vec![
         shop_row,
-        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang), cookie_button],
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -356,25 +365,30 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
             "✅ Up tích xanh",
             "viameta:menu",
         ));
+    } else {
+        support_row.push(start_community_button_json(ctx, lang));
     }
     rows.push(support_row);
-    rows.push(vec![
-        i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_affiliate_register",
-            "🤝 Đăng kí CTV",
-            AFFILIATE_REGISTER_CALLBACK,
-        ),
-        start_community_button_json(ctx, lang),
-    ]);
-    rows.push(vec![i18n::inline_button_callback_json(
+    let affiliate_button = i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_affiliate_register",
+        "🤝 Đăng kí CTV",
+        AFFILIATE_REGISTER_CALLBACK,
+    );
+    let language_button = i18n::inline_button_callback_json(
         ctx,
         lang,
         "start_btn_language",
         "🌐 Language",
         "start:language",
-    )]);
+    );
+    if start_viameta_enabled(ctx) {
+        rows.push(vec![affiliate_button, start_community_button_json(ctx, lang)]);
+        rows.push(vec![language_button]);
+    } else {
+        rows.push(vec![affiliate_button, language_button]);
+    }
 
     json!({ "inline_keyboard": rows })
 }
