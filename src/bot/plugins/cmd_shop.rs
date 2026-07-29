@@ -2940,7 +2940,7 @@ fn shop_product_list_price_entities(text: &str) -> Vec<MessageEntity> {
             if price_end > price_start {
                 let price_offset = offset + line[..price_start].encode_utf16().count();
                 let price_len = line[price_start..price_end].encode_utf16().count();
-                entities.push(MessageEntity::italic(price_offset, price_len));
+                entities.push(MessageEntity::code(price_offset, price_len));
             }
         }
         offset += line.encode_utf16().count() + 1;
@@ -3680,6 +3680,51 @@ mod tests {
         assert!(text.contains("MEITU"));
         assert!(text.contains("• Meitu SVIP — 70.000đ (✅ có sẵn)"));
         assert!(!text.contains("💵 Số dư"));
+    }
+
+    #[test]
+    fn product_list_price_entities_make_prices_copyable_code() {
+        let ctx = test_ctx();
+        let product = Product {
+            id: 42,
+            name: "Product".to_string(),
+            price: 5_000,
+            is_active: Some(1),
+            requires_input: Some(0),
+            input_prompt: None,
+            description: None,
+            image_url: None,
+            delivery_type: Some("stock_item".to_string()),
+            file_path: None,
+            file_name: None,
+            file_mime: None,
+            category_id: None,
+            category: Some("Tool".to_string()),
+            category_emoji: None,
+            category_custom_emoji_id: None,
+            button_emoji: None,
+            button_custom_emoji_id: None,
+            created_at: None,
+            sort_order: None,
+            show_sold_count: Some(0),
+        };
+        let text = format_product_list_text(&ctx, "vi", &[(product, 1)], 0, 0);
+
+        let entities = shop_product_list_price_entities(&text);
+        assert_eq!(entities.len(), 1);
+        let price_entity = &entities[0];
+        let price_utf16 = text
+            .encode_utf16()
+            .skip(price_entity.offset)
+            .take(price_entity.length)
+            .collect::<Vec<_>>();
+        let price_text = String::from_utf16(&price_utf16).unwrap();
+
+        assert!(matches!(
+            &price_entity.kind,
+            teloxide::types::MessageEntityKind::Code
+        ));
+        assert_eq!(price_text, format_vnd(5_000));
     }
 
     #[tokio::test]
