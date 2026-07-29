@@ -193,6 +193,10 @@ fn start_viameta_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("start_viameta_enabled", "0"))
 }
 
+fn start_facebook_cookie_enabled(ctx: &AppContext) -> bool {
+    required_channel_enabled_value(&ctx.get_text("start_facebook_cookie_enabled", "1"))
+}
+
 fn required_channel_ids(ctx: &AppContext) -> Vec<String> {
     required_channel_candidates(
         &ctx.get_text("required_channel_id", "@zvwboo"),
@@ -313,9 +317,14 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
         cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
     );
 
+    let mut promo_row = vec![cmd_netflix::monthly_gift_button_json(ctx, lang)];
+    if start_facebook_cookie_enabled(ctx) {
+        promo_row.push(cookie_button);
+    }
+
     let mut rows = vec![
         shop_row,
-        vec![cmd_netflix::monthly_gift_button_json(ctx, lang), cookie_button],
+        promo_row,
         vec![
             i18n::inline_button_callback_json(
                 ctx,

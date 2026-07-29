@@ -7,6 +7,7 @@
           { key: 'bot_maintenance_enabled', label: 'Bao tri bot (chi admin dung duoc)', value: '0' },
           { key: 'bot_maintenance_message', label: 'Thong bao bao tri bot', value: 'Bot dang bao tri, vui long quay lai sau.' },
           { key: 'start_viameta_enabled', label: 'Hiện nút Up tích xanh ở menu bot', value: '0' },
+          { key: 'start_facebook_cookie_enabled', label: 'Hiện nút Get link cookie ở menu bot', value: '1' },
           { key: 'stock_auto_broadcast_enabled', label: 'Tự động thông báo khi nhập kho', value: '0' },
         ]
       },
@@ -334,6 +335,7 @@
         'telegram_i18n_emojis_enabled',
         'stock_auto_broadcast_enabled',
         'start_viameta_enabled',
+        'start_facebook_cookie_enabled',
         'netflix_enabled',
         'netflix_pc_guide_enabled',
         'netflix_language_vi_guide_enabled',

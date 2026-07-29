@@ -123,6 +123,10 @@ fn start_viameta_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("start_viameta_enabled", "0"))
 }
 
+fn start_facebook_cookie_enabled(ctx: &AppContext) -> bool {
+    required_channel_enabled_value(&ctx.get_text("start_facebook_cookie_enabled", "1"))
+}
+
 fn required_channel_ids(ctx: &AppContext) -> Vec<String> {
     required_channel_candidates(
         &ctx.get_text("required_channel_id", "@zvwboo"),
@@ -321,9 +325,14 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
         cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
     );
 
+    let mut promo_row = vec![cmd_netflix::monthly_gift_button_json(ctx, lang)];
+    if start_facebook_cookie_enabled(ctx) {
+        promo_row.push(cookie_button);
+    }
+
     let mut rows = vec![
         shop_row,
-        vec![cmd_netflix::monthly_gift_button_json(ctx, lang), cookie_button],
+        promo_row,
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -445,6 +454,7 @@ fn start_menu_button_specs_from_texts(
     lang: &str,
     include_netflix: bool,
     include_viameta: bool,
+    include_facebook_cookie: bool,
 ) -> Vec<Vec<(String, String)>> {
     let mut shop_row = vec![(
         texts.get_lang("start_btn_shop", lang, "Shop"),
@@ -506,6 +516,14 @@ fn start_menu_button_specs_from_texts(
             ),
         ],
     ];
+    if !include_facebook_cookie {
+        rows.iter_mut().for_each(|row| {
+            row.retain(|(_label, callback)| {
+                callback != cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
+            });
+        });
+        rows.retain(|row| !row.is_empty());
+    }
     if include_viameta {
         rows[5].push((
             texts.get_lang("start_btn_viameta", lang, "Up tích xanh"),
@@ -555,6 +573,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
                 lang,
                 cmd_netflix::netflix_enabled(ctx),
                 start_viameta_enabled(ctx),
+                start_facebook_cookie_enabled(ctx),
             )
                 .into_iter()
                 .map(|row| {
@@ -606,7 +625,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
 }
 
 fn start_reply_keyboard_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<String>> {
-    start_menu_button_specs_from_texts(texts, lang, true, true)
+    start_menu_button_specs_from_texts(texts, lang, true, true, true)
         .into_iter()
         .map(|row| {
             row.into_iter()
@@ -1319,7 +1338,7 @@ mod tests {
             )]),
         );
 
-        let rows = start_menu_button_specs_from_texts(&texts, "vi", true, true);
+        let rows = start_menu_button_specs_from_texts(&texts, "vi", true, true, true);
 
         assert_eq!(
             rows,
@@ -1379,6 +1398,24 @@ mod tests {
         assert!(!keyboard.to_string().contains("shop_api"));
         assert!(!keyboard.to_string().contains("tut:user_home"));
         assert!(!keyboard.to_string().contains("childbot:guide"));
+    }
+
+    #[tokio::test]
+    async fn start_menu_keyboard_hides_facebook_cookie_when_admin_toggle_disabled() {
+        let ctx = test_ctx_with_texts_and_configs(
+            BotTexts::default(),
+            HashMap::from([(
+                "start_facebook_cookie_enabled".to_string(),
+                "0".to_string(),
+            )]),
+        );
+        let keyboard = start_menu_keyboard_json(&ctx, "vi");
+        let rows = keyboard["inline_keyboard"].as_array().unwrap();
+
+        assert_eq!(rows[1].as_array().unwrap().len(), 1);
+        assert!(!keyboard
+            .to_string()
+            .contains(cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK));
     }
 
     #[tokio::test]

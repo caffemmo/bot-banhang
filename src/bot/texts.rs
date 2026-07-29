@@ -402,6 +402,7 @@ fn is_non_translation_config_key(key: &str) -> bool {
             | "required_channel_id"
             | "required_channel_url"
             | "start_viameta_enabled"
+            | "start_facebook_cookie_enabled"
             | "viameta_base_url"
             | "viameta_username"
             | "viameta_password"
