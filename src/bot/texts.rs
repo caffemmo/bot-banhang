@@ -190,6 +190,7 @@ impl BotTexts {
                 .translations
                 .get(&candidate)
                 .and_then(|entries| entries.get(key))
+                .filter(|value| !value.trim().is_empty())
             {
                 return value.clone();
             }
@@ -560,6 +561,25 @@ mod tests {
 
         assert_eq!(texts.get_lang("start", "en", "Fallback"), "Default");
         assert_eq!(texts.get_lang("missing", "en", "Fallback"), "Fallback");
+    }
+
+    #[test]
+    fn localized_get_skips_blank_admin_values() {
+        let texts = BotTexts::from_language_maps(
+            default_languages(),
+            HashMap::from([
+                (
+                    "vi".to_string(),
+                    HashMap::from([("start".to_string(), "   \n".to_string())]),
+                ),
+                (
+                    "en".to_string(),
+                    HashMap::from([("start".to_string(), "Hello".to_string())]),
+                ),
+            ]),
+        );
+
+        assert_eq!(texts.get_lang("start", "vi", "Default"), "Hello");
     }
 
     #[test]

@@ -7,6 +7,8 @@ use teloxide::requests::{JsonRequest, Requester};
 use teloxide::types::{ChatId, CustomEmojiId, InlineKeyboardButton, KeyboardButton, MessageEntity};
 
 const DEFAULT_CUSTOM_EMOJI_FALLBACK: &str = "✨";
+const TELEGRAM_MESSAGE_TEXT_LIMIT: usize = 4096;
+const EMPTY_MESSAGE_FALLBACK: &str = "Message unavailable. Please contact admin.";
 
 pub async fn user_lang(
     ctx: &AppContext,
@@ -526,8 +528,77 @@ pub async fn send_message_with_json_keyboard(
     reply_markup: Value,
 ) -> anyhow::Result<()> {
     let payload = message_payload_with_json_keyboard(ctx, chat_id, key, text, reply_markup)?;
-    send_raw_telegram_method(ctx, "sendMessage", payload).await?;
+    send_message_payload_with_retry(ctx, payload).await?;
     Ok(())
+}
+
+pub async fn send_message_payload_with_retry(
+    ctx: &AppContext,
+    payload: Value,
+) -> anyhow::Result<Value> {
+    match send_raw_telegram_method(ctx, "sendMessage", payload.clone()).await {
+        Ok(response) => Ok(response),
+        Err(first_err) => {
+            let safe_payload = safe_message_payload_for_retry(payload.clone());
+            if safe_payload == payload {
+                return Err(first_err);
+            }
+            tracing::warn!("Telegram sendMessage failed, retrying with safe payload: {first_err}");
+            send_raw_telegram_method(ctx, "sendMessage", safe_payload)
+                .await
+                .map_err(|retry_err| anyhow::anyhow!("{first_err}; retry failed: {retry_err}"))
+        }
+    }
+}
+
+pub fn safe_message_payload_for_retry(mut payload: Value) -> Value {
+    let Some(obj) = payload.as_object_mut() else {
+        return payload;
+    };
+
+    obj.remove("entities");
+    obj.remove("parse_mode");
+
+    let text = obj
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        obj.insert(
+            "text".to_string(),
+            Value::String(EMPTY_MESSAGE_FALLBACK.to_string()),
+        );
+    } else if text.chars().count() > TELEGRAM_MESSAGE_TEXT_LIMIT {
+        obj.insert(
+            "text".to_string(),
+            Value::String(text.chars().take(TELEGRAM_MESSAGE_TEXT_LIMIT).collect()),
+        );
+    }
+
+    if let Some(reply_markup) = obj.get_mut("reply_markup") {
+        strip_button_custom_emoji_fields(reply_markup);
+    }
+
+    payload
+}
+
+fn strip_button_custom_emoji_fields(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("icon_custom_emoji_id");
+            for child in map.values_mut() {
+                strip_button_custom_emoji_fields(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_button_custom_emoji_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub async fn send_raw_telegram_method(
@@ -874,6 +945,37 @@ mod tests {
         assert_eq!(
             payload["reply_markup"]["inline_keyboard"][0][0]["icon_custom_emoji_id"],
             "5368324170671202287"
+        );
+    }
+
+    #[test]
+    fn safe_message_retry_payload_removes_fragile_telegram_fields() {
+        let payload = json!({
+            "chat_id": 1,
+            "text": "",
+            "entities": [{
+                "type": "custom_emoji",
+                "offset": 0,
+                "length": 1,
+                "custom_emoji_id": "12345678"
+            }],
+            "reply_markup": {
+                "inline_keyboard": [[{
+                    "text": "Shop",
+                    "callback_data": "start:shop",
+                    "icon_custom_emoji_id": "12345678"
+                }]]
+            }
+        });
+
+        let safe = safe_message_payload_for_retry(payload);
+
+        assert_eq!(safe["text"], EMPTY_MESSAGE_FALLBACK);
+        assert!(safe.get("entities").is_none());
+        assert!(
+            safe["reply_markup"]["inline_keyboard"][0][0]
+                .get("icon_custom_emoji_id")
+                .is_none()
         );
     }
 

@@ -53,7 +53,7 @@ pub async fn send_clean_menu_payload(
     payload: Value,
 ) -> Result<()> {
     delete_previous_menu(ctx, chat_id).await;
-    let response = i18n::send_raw_telegram_method(ctx, "sendMessage", payload).await?;
+    let response = i18n::send_message_payload_with_retry(ctx, payload).await?;
     remember_menu_from_response(ctx, chat_id, &response).await?;
     Ok(())
 }
