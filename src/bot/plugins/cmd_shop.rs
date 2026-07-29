@@ -10,7 +10,7 @@ use teloxide::prelude::*;
 use teloxide::requests::Requester;
 use teloxide::types::{
     CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message,
-    MessageEntity, MessageId, ParseMode,
+    MessageEntity, MessageEntityKind, MessageId, ParseMode,
 };
 use tokio::time::{Duration as TokioDuration, sleep};
 use tracing::warn;
@@ -201,7 +201,7 @@ async fn send_product_prompt(
     text: String,
     keyboard: InlineKeyboardMarkup,
 ) -> Result<()> {
-    let rich = i18n::rich_text_for_key(ctx, "", text);
+    let rich = product_prompt_rich_text(ctx, text);
     if let Some(image_url) = image_url {
         if let Some(path) = product_image_file_path(image_url) {
             let mut request = ctx
@@ -230,6 +230,18 @@ async fn send_product_prompt(
     }
     request.await?;
     Ok(())
+}
+
+fn product_prompt_rich_text(ctx: &AppContext, text: String) -> i18n::RichText {
+    let mut rich = i18n::rich_text_for_key(ctx, "", text);
+    rich.entities
+        .extend(product_description_blockquote_entities(&rich.text));
+    rich.entities.sort_by(|left, right| {
+        left.offset
+            .cmp(&right.offset)
+            .then_with(|| right.length.cmp(&left.length))
+    });
+    rich
 }
 
 fn mmss(remaining_secs: i64) -> String {
@@ -2948,6 +2960,56 @@ fn shop_product_list_price_entities(text: &str) -> Vec<MessageEntity> {
     entities
 }
 
+fn product_description_blockquote_entities(text: &str) -> Vec<MessageEntity> {
+    let lines = text.split('\n').collect::<Vec<_>>();
+    let mut entities = Vec::new();
+    let mut line_offsets = Vec::with_capacity(lines.len());
+    let mut offset = 0usize;
+
+    for line in &lines {
+        line_offsets.push(offset);
+        offset += line.encode_utf16().count() + 1;
+    }
+
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        if !is_product_description_heading(line) {
+            index += 1;
+            continue;
+        }
+
+        let start = line_offsets[index];
+        let mut end_index = index;
+        while end_index + 1 < lines.len() && !lines[end_index + 1].trim().is_empty() {
+            end_index += 1;
+        }
+
+        let end = line_offsets[end_index] + lines[end_index].encode_utf16().count();
+        if end > start {
+            entities.push(MessageEntity::new(
+                MessageEntityKind::Blockquote,
+                start,
+                end - start,
+            ));
+        }
+        index = end_index + 1;
+    }
+
+    entities
+}
+
+fn is_product_description_heading(line: &str) -> bool {
+    let normalized = line.trim().to_ascii_lowercase();
+    normalized.contains("description:")
+        || line.contains("Mô tả:")
+        || line.contains("mô tả:")
+        || line.contains("MÔ TẢ:")
+        || line.contains("Mo ta:")
+        || line.contains("mo ta:")
+        || line.contains("MO TA:")
+}
+
 fn category_buttons_from_products(products: &[(Product, i64)]) -> Vec<ShopCategoryButton> {
     let mut categories = Vec::new();
     for (product, _stock) in products {
@@ -3761,7 +3823,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shop_product_list_payload_italicizes_product_prices() {
+    async fn shop_product_list_payload_marks_product_prices_as_code() {
         let ctx = test_ctx();
         let text = "📋 MENU SẢN PHẨM\n━━━━━━━━━━━━━━━━━━━━\n\nPLUS\n• Plus — 2.000đ (còn 5)";
         let payload =
@@ -3771,7 +3833,7 @@ mod tests {
         let price_offset = text.find("2.000đ").unwrap();
 
         assert!(entities.iter().any(|entity| {
-            entity["type"] == "italic"
+            entity["type"] == "code"
                 && entity["offset"] == text[..price_offset].encode_utf16().count()
                 && entity["length"] == "2.000đ".encode_utf16().count()
         }));
@@ -3795,13 +3857,49 @@ mod tests {
             &ctx,
             "vi",
         );
-        let rich = i18n::rich_text_for_key(&ctx, "", text);
+        let rich = product_prompt_rich_text(&ctx, text);
 
         assert!(rich.text.contains("Test ✨"));
         assert!(rich.text.contains("Mo ta ✨"));
         assert!(!rich.text.contains("{5375135722514685501}"));
         assert!(!rich.text.contains("{5420147074266044260}"));
-        assert_eq!(rich.entities.len(), 2);
+        assert!(rich
+            .entities
+            .iter()
+            .any(|entity| matches!(entity.kind, MessageEntityKind::Blockquote)));
+        assert_eq!(
+            rich.entities
+                .iter()
+                .filter(|entity| matches!(entity.kind, MessageEntityKind::CustomEmoji { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn product_description_entities_wrap_description_until_blank_line() {
+        let text = concat!(
+            "✅ Bạn chọn Tool - 10.000đ\n",
+            "📦 Còn lại: 1\n",
+            "💬 Mô tả:\n",
+            "Dòng 1\n",
+            "Dòng 2\n\n",
+            "⌨️ Nhập số lượng muốn mua:"
+        );
+
+        let entities = product_description_blockquote_entities(text);
+
+        assert_eq!(entities.len(), 1);
+        assert!(matches!(entities[0].kind, MessageEntityKind::Blockquote));
+        let quote_utf16 = text
+            .encode_utf16()
+            .skip(entities[0].offset)
+            .take(entities[0].length)
+            .collect::<Vec<_>>();
+        let quote_text = String::from_utf16(&quote_utf16).unwrap();
+        assert!(quote_text.starts_with("💬 Mô tả:"));
+        assert!(quote_text.contains("Dòng 2"));
+        assert!(!quote_text.contains("Nhập số lượng"));
     }
 
     #[tokio::test]
