@@ -313,9 +313,17 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
         shop_row.push(cmd_netflix::netflix_button_json(ctx, lang));
     }
 
+    let cookie_button = i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_facebook_cookie",
+        "ðŸª Get link cookie",
+        cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
+    );
+
     let mut rows = vec![
         shop_row,
-        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang), cookie_button],
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -348,13 +356,6 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
                 "wallet:topup_history",
             ),
         ],
-        vec![i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_facebook_cookie",
-            "🍪 Get link cookie",
-            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
-        )],
     ];
 
     let mut support_row = vec![i18n::inline_button_callback_json(
@@ -372,25 +373,30 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
             "✅ Up tích xanh",
             "viameta:menu",
         ));
+    } else {
+        support_row.push(start_community_button_json(ctx, lang));
     }
     rows.push(support_row);
-    rows.push(vec![
-        i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_affiliate_register",
-            "🤝 Đăng kí CTV",
-            "affiliate:register",
-        ),
-        start_community_button_json(ctx, lang),
-    ]);
-    rows.push(vec![i18n::inline_button_callback_json(
+    let affiliate_button = i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_affiliate_register",
+        "🤝 Đăng kí CTV",
+        "affiliate:register",
+    );
+    let language_button = i18n::inline_button_callback_json(
         ctx,
         lang,
         "start_btn_language",
         "🌐 Language",
         "start:language",
-    )]);
+    );
+    if start_viameta_enabled(ctx) {
+        rows.push(vec![affiliate_button, start_community_button_json(ctx, lang)]);
+        rows.push(vec![language_button]);
+    } else {
+        rows.push(vec![affiliate_button, language_button]);
+    }
 
     json!({ "inline_keyboard": rows })
 }
@@ -453,10 +459,16 @@ fn start_menu_button_specs_from_texts(
 
     let mut rows = vec![
         shop_row,
-        vec![(
-            texts.get_lang("start_btn_promo", lang, "🎁 Khuyến mãi"),
-            "netflix:monthly_gift_menu".to_string(),
-        )],
+        vec![
+            (
+                texts.get_lang("start_btn_promo", lang, "🎁 Khuyến mãi"),
+                "netflix:monthly_gift_menu".to_string(),
+            ),
+            (
+                texts.get_lang("start_btn_facebook_cookie", lang, "🍪 Get link cookie"),
+                cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string(),
+            ),
+        ],
         vec![
             (
                 texts.get_lang("start_btn_topup", lang, "Top up"),
@@ -477,10 +489,6 @@ fn start_menu_button_specs_from_texts(
                 "wallet:topup_history".to_string(),
             ),
         ],
-        vec![(
-            texts.get_lang("start_btn_facebook_cookie", lang, "🍪 Get link cookie"),
-            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string(),
-        )],
         vec![
             (
                 texts.get_lang("start_btn_help", lang, "Help"),
@@ -565,16 +573,16 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
         .unwrap_or_else(|_| {
             vec![
                 vec![json!({"text": "🛒 Shop"})],
+                vec![
+                    json!({"text": "🎁 Khuyến mãi"}),
+                    json!({"text": "🍪 Get link cookie"}),
+                ],
                 vec![json!({"text": "💰 Top up"}), json!({"text": "💳 Wallet"})],
                 vec![
                     json!({"text": "📦 Purchased"}),
                     json!({"text": "📜 Top-up history"}),
                 ],
-                vec![json!({"text": "🍪 Get link cookie"})],
-                vec![
-                    json!({"text": "Help"}),
-                ],
-                vec![json!({"text": "🌐 Language"})],
+                vec![json!({"text": "Help"}), json!({"text": "🌐 Language"})],
             ]
         })
 }
@@ -1298,6 +1306,7 @@ mod tests {
                     ("start_btn_shop".to_string(), "Xem san pham".to_string()),
                     ("start_btn_netflix".to_string(), "Xem Netflix".to_string()),
                     ("start_btn_promo".to_string(), "Khuyen mai".to_string()),
+                    ("start_btn_facebook_cookie".to_string(), "Lay cookie".to_string()),
                     ("start_btn_topup".to_string(), "Nap tien".to_string()),
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
@@ -1319,10 +1328,16 @@ mod tests {
                     ("Xem san pham".to_string(), "start:shop".to_string()),
                     ("Xem Netflix".to_string(), "netflix:menu".to_string()),
                 ],
-                vec![(
-                    "Khuyen mai".to_string(),
-                    "netflix:monthly_gift_menu".to_string()
-                )],
+                vec![
+                    (
+                        "Khuyen mai".to_string(),
+                        "netflix:monthly_gift_menu".to_string()
+                    ),
+                    (
+                        "Lay cookie".to_string(),
+                        cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string()
+                    ),
+                ],
                 vec![
                     ("Nap tien".to_string(), "wallet:topup".to_string()),
                     ("Vi tien".to_string(), "start:wallet".to_string()),
@@ -1353,13 +1368,13 @@ mod tests {
         assert_eq!(rows[0][1]["callback_data"], "netflix:menu");
         assert_eq!(rows[1][0]["callback_data"], "netflix:monthly_gift_menu");
         assert_eq!(
-            rows[4][0]["callback_data"],
+            rows[1][1]["callback_data"],
             cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
         );
-        assert_eq!(rows[5][0]["callback_data"], "start:help");
-        assert_eq!(rows[6][0]["callback_data"], "affiliate:register");
-        assert_eq!(rows[6][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
-        assert_eq!(rows[7][0]["callback_data"], "start:language");
+        assert_eq!(rows[4][0]["callback_data"], "start:help");
+        assert_eq!(rows[4][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
+        assert_eq!(rows[5][1]["callback_data"], "start:language");
         assert!(!keyboard.to_string().contains("viameta:menu"));
         assert!(!keyboard.to_string().contains("shop_api"));
         assert!(!keyboard.to_string().contains("tut:user_home"));
@@ -1376,11 +1391,14 @@ mod tests {
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(
-            rows[4][0]["callback_data"],
+            rows[1][1]["callback_data"],
             cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
         );
-        assert_eq!(rows[5][0]["callback_data"], "start:help");
-        assert_eq!(rows[5][1]["callback_data"], "viameta:menu");
+        assert_eq!(rows[4][0]["callback_data"], "start:help");
+        assert_eq!(rows[4][1]["callback_data"], "viameta:menu");
+        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
+        assert_eq!(rows[5][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
+        assert_eq!(rows[6][0]["callback_data"], "start:language");
     }
 
     #[test]
@@ -1417,10 +1435,9 @@ mod tests {
             rows,
             vec![
                 vec!["Xem san pham".to_string(), "Xem Netflix".to_string()],
-                vec!["Khuyen mai".to_string()],
+                vec!["Khuyen mai".to_string(), "Lay cookie".to_string()],
                 vec!["Nap tien".to_string(), "Vi tien".to_string()],
                 vec!["Da mua".to_string(), "Lich su nap".to_string()],
-                vec!["Lay cookie".to_string()],
                 vec!["Huong dan".to_string(), "Up tich xanh".to_string()],
                 vec!["CTV".to_string(), "Ngon ngu".to_string()],
             ]
