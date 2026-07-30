@@ -265,6 +265,16 @@ pub async fn send_monthly_gift_menu(
     }
     let status = monthly_gift_status(ctx, user_id).await?;
     if status.claimed {
+        ctx.bot
+            .send_message(
+                chat_id,
+                netflix_text(
+                    ctx,
+                    "netflix_monthly_gift_not_eligible_message",
+                    "⚠️ Bạn chưa đủ điều kiện hoặc đã nhận vé Netflix miễn phí tháng này.",
+                ),
+            )
+            .await?;
         return Ok(());
     }
 
