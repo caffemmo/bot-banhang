@@ -35,7 +35,6 @@ use crate::domains::wallet::repo as wallet_repo;
 
 use crate::bot::{chat_ui, i18n};
 use crate::bot::plugins::AppPlugin;
-use crate::bot::plugins::cmd_external_api_stock;
 use crate::bot::plugins::cmd_sale_hunt;
 use crate::bot::{BotDialogue, State};
 use teloxide::types::BotCommand;
@@ -532,7 +531,7 @@ async fn shop_handle_callback(
                 let is_external_api = delivery_type == "external_api";
                 let stock = product_stock_for_display(&ctx, &product).await;
                 let stock_label = if is_external_api {
-                    external_api_stock_label(&ctx, &lang, stock)
+                    tl(&ctx, &lang, "shop_stock_manual", "✅ có sẵn")
                 } else {
                     stock.to_string()
                 };
@@ -3115,7 +3114,7 @@ fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: 
         return tl(ctx, lang, "shop_stock_manual", "✅ có sẵn");
     }
     if delivery_type == "external_api" {
-        return external_api_stock_label(ctx, lang, stock);
+        return tl(ctx, lang, "shop_stock_manual", "✅ có sẵn");
     }
     trl(
         ctx,
@@ -3128,27 +3127,10 @@ fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: 
 
 async fn product_stock_for_display(ctx: &AppContext, product: &Product) -> i64 {
     if orders_api::product_delivery_type(product) == "external_api" {
-        match cmd_external_api_stock::external_api_stock_count(ctx).await {
-            Ok(stock) => return stock.max(0),
-            Err(err) => {
-                warn!(
-                    "failed to load external API stock count for product {}: {err:#}",
-                    product.id
-                );
-                return -1;
-            }
-        }
+        return -1;
     }
 
     repo::count_product_items(&ctx.pool, product.id).await.unwrap_or(0)
-}
-
-fn external_api_stock_label(ctx: &AppContext, lang: &str, stock: i64) -> String {
-    if stock >= 0 {
-        return stock.to_string();
-    }
-
-    tl(ctx, lang, "shop_stock_external_api", "có sẵn")
 }
 
 fn truncate_button_text(value: &str, max_chars: usize) -> String {

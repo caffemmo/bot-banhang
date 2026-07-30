@@ -6,7 +6,6 @@
           { key: 'base_url', label: 'Base URL', value: '' },
           { key: 'bot_maintenance_enabled', label: 'Bao tri bot (chi admin dung duoc)', value: '0' },
           { key: 'bot_maintenance_message', label: 'Thong bao bao tri bot', value: 'Bot dang bao tri, vui long quay lai sau.' },
-          { key: 'start_viameta_enabled', label: 'Hiện nút Up tích xanh ở menu bot', value: '0' },
           { key: 'start_facebook_cookie_enabled', label: 'Hiện nút Get link cookie ở menu bot', value: '1' },
           { key: 'stock_auto_broadcast_enabled', label: 'Tự động thông báo khi nhập kho', value: '0' },
         ]
@@ -29,15 +28,6 @@
           { key: 'required_channel_enabled', label: 'Bật yêu cầu tham gia channel', value: '1' },
           { key: 'required_channel_id', label: 'Channel ID / username', value: '@xxxx' },
           { key: 'required_channel_url', label: 'Link channel', value: 'https://t.me/xxxx' },
-        ]
-      },
-      {
-        title: 'TUT VIP',
-        icon: '📚',
-        fields: [
-          { key: 'vip_tut_channel_id', label: 'Kênh/nhóm đăng teaser TUT', value: '' },
-          { key: 'vip_tut_price', label: 'Giá gói VIP TUT', value: '99000' },
-          { key: 'vip_tut_days', label: 'Số ngày VIP TUT', value: '30' },
         ]
       },
       {
@@ -125,52 +115,6 @@
           { key: 'netflix_report_refund_amount_label', label: 'Text nhãn số tiền hoàn Netflix', value: 'Số tiền hoàn' },
           { key: 'netflix_report_balance_after_label', label: 'Text nhãn số dư sau hoàn Netflix', value: 'Số dư ví' },
           { key: 'netflix_report_no_error_user_message', label: 'Text user khi admin báo không lỗi', value: '✅ Admin đã kiểm tra và cookie không lỗi. Vui lòng bấm Tạo lại link hoặc Mở lại link cũ để lấy link mới rồi xem lại.' },
-        ]
-      },
-      {
-        title: 'Hàng API ngoài',
-        icon: '🔗',
-        fields: [
-          { key: 'external_api_stock_enabled', label: 'Bật lấy hàng từ API ngoài', value: '0' },
-          { key: 'external_api_stock_local_product_id', label: 'ID sản phẩm trong bot mình', value: '' },
-          { key: 'external_api_stock_api_id', label: 'API ID / secret bên shop nguồn', value: '' },
-          { key: 'external_api_stock_product_id', label: 'ID sản phẩm bên shop nguồn', value: 'SP-GEF55PBV' },
-          { key: 'external_api_stock_buy_url', label: 'Endpoint mua hàng bên shop nguồn', value: 'https://sumistore.me/api/tele-product/buy' },
-          { key: 'external_api_stock_detail_url', label: 'Endpoint xem tồn kho bên shop nguồn', value: 'https://sumistore.me/api/tele-products/{product_id}' },
-        ]
-      },
-      {
-        title: 'Dịch vụ tích xanh',
-        icon: '⚡',
-        fields: [
-          { key: 'viameta_base_url', label: 'Base URL ViaXanh69', value: 'https://viaxanh69.com/uptichxanh' },
-          { key: 'viameta_username', label: 'Tài khoản ViaXanh69', value: '' },
-          { key: 'viameta_password', label: 'Mật khẩu ViaXanh69', value: '' },
-          { key: 'viameta_proxy_url', label: 'Proxy Việt Nam cho ViaXanh69 (tuỳ chọn)', value: '' },
-          { key: 'viameta_menu_title', label: 'Nội dung tiêu đề menu dịch vụ', value: '⚡ Dịch vụ tích xanh' },
-          { key: 'viameta_menu_description', label: 'Nội dung mô tả menu dịch vụ', value: 'Chọn dịch vụ bạn muốn dùng:' },
-          { key: 'viameta_maintenance_message', label: 'Thông báo khi dịch vụ tắt', value: 'Dịch vụ này đang bảo trì, vui lòng quay lại sau.' },
-          { key: 'viameta_getlink_fb_enabled', label: 'Bật Get link Facebook', value: '1' },
-          { key: 'viameta_getlink_fb_price', label: 'Giá Get link Facebook', value: '5000' },
-          { key: 'viameta_getlink_fb_description', label: 'Mô tả Get link Facebook', value: 'Gửi cookie Facebook có c_user để hệ thống lấy link xác minh.' },
-          { key: 'viameta_uptick_fb_enabled', label: 'Bật Up tích Facebook', value: '1' },
-          { key: 'viameta_uptick_fb_price', label: 'Giá Up tích Facebook', value: '7000' },
-          { key: 'viameta_uptick_fb_description', label: 'Mô tả Up tích Facebook', value: 'Gửi cookie Facebook có c_user, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.' },
-          { key: 'viameta_uptick_ig_enabled', label: 'Bật Up tích Instagram', value: '1' },
-          { key: 'viameta_uptick_ig_price', label: 'Giá Up tích Instagram', value: '14000' },
-          { key: 'viameta_uptick_ig_description', label: 'Mô tả Up tích Instagram', value: 'Gửi cookie Instagram có ds_user_id và sessionid, sau đó gửi ảnh giấy tờ JPG/PNG rõ nét dưới 5MB.' },
-        ]
-      },
-      {
-        title: 'Mở khóa Facebook',
-        icon: '🔓',
-        fields: [
-          { key: 'facebook_unlock_platform_fee_percent', label: 'Phí sàn khi case thành công (%)', value: '10' },
-          { key: 'facebook_unlock_worker_max_active_cases', label: 'Số case tối đa mỗi dịch vụ đang xử lý (0 = tắt)', value: '3' },
-          { key: 'facebook_unlock_customer_max_open_cases', label: 'Số case mở tối đa mỗi khách (0 = tắt)', value: '3' },
-          { key: 'facebook_unlock_customer_create_cooldown_seconds', label: 'Thời gian chờ tạo case mới của khách, giây (0 = tắt)', value: '120' },
-          { key: 'facebook_unlock_case_note_min_chars', label: 'Số ký tự tối thiểu phần ghi chú case', value: '10' },
-          { key: 'facebook_unlock_worker_ids', label: 'Telegram IDs người dịch vụ nhận case', value: '' },
         ]
       },
       {
@@ -292,9 +236,6 @@
     function isWideConfigField(key) {
       return new Set([
         'bot_maintenance_message',
-        'viameta_menu_title',
-        'viameta_menu_description',
-        'viameta_maintenance_message',
         'netflix_menu_title',
         'netflix_menu_description',
         'netflix_menu_note',
@@ -318,23 +259,16 @@
         'netflix_cookie_title',
         'netflix_cookie_file_caption',
         'netflix_cookie_missing_message',
-        'viameta_getlink_fb_description',
-        'viameta_uptick_fb_description',
-        'viameta_uptick_ig_description',
       ]).has(key);
     }
 
     function buildConfigFieldHtml(key, value) {
       value = value == null ? '' : String(value);
-      if (key === 'viameta_base_url' && value.trim() === 'https://viameta.co/bot') {
-        value = 'https://viaxanh69.com/uptichxanh';
-      }
       const toggleKeys = new Set([
         'required_channel_enabled',
         'bot_maintenance_enabled',
         'telegram_i18n_emojis_enabled',
         'stock_auto_broadcast_enabled',
-        'start_viameta_enabled',
         'start_facebook_cookie_enabled',
         'netflix_enabled',
         'netflix_pc_guide_enabled',
@@ -342,11 +276,7 @@
         'netflix_mobile_guide_enabled',
         'netflix_mobile_language_guide_enabled',
         'netflix_reopen_latest_enabled',
-        'external_api_stock_enabled',
         'order_notifications_enabled',
-        'viameta_getlink_fb_enabled',
-        'viameta_uptick_fb_enabled',
-        'viameta_uptick_ig_enabled',
       ]);
       if (toggleKeys.has(key)) {
         const isSelected1 = value === '1' || value.toLowerCase() === 'true' ? 'selected' : '';
@@ -379,45 +309,14 @@
           <div class="form-text">Độ dài phần random sau prefix, từ 10 đến 16 ký tự.</div>
         `;
       }
-      if (key === 'facebook_unlock_worker_max_active_cases') {
-        return `
-          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
-            value="${escapeAttr(value)}" min="0" max="100" step="1">
-          <div class="form-text">Nhập 0 để tắt giới hạn. Mặc định nên để 3.</div>
-        `;
-      }
-      if (['facebook_unlock_customer_max_open_cases', 'facebook_unlock_customer_create_cooldown_seconds', 'facebook_unlock_case_note_min_chars'].includes(key)) {
-        return `
-          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
-            value="${escapeAttr(value)}" min="0" max="100000" step="1">
-          <div class="form-text">Nhập 0 để tắt giới hạn này.</div>
-        `;
-      }
-      if (key === 'external_api_stock_local_product_id') {
-        return `
-          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
-            value="${escapeAttr(value)}" min="1" step="1">
-          <div class="form-text">Lấy ID này trong danh sách sản phẩm admin của bot mình.</div>
-        `;
-      }
-      if (key === 'viameta_password') {
-        return `<input type="password" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" autocomplete="new-password">`;
-      }
       const numericKeys = new Set([
-        'viameta_getlink_fb_price',
-        'viameta_uptick_fb_price',
-        'viameta_uptick_ig_price',
         'netflix_price',
-        'facebook_unlock_platform_fee_percent',
       ]);
       if (numericKeys.has(key)) {
         return `<input type="number" class="form-control config-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value)}" min="0" step="1000">`;
       }
       const multilineKeys = new Set([
         'bot_maintenance_message',
-        'viameta_menu_title',
-        'viameta_menu_description',
-        'viameta_maintenance_message',
         'netflix_menu_title',
         'netflix_menu_description',
         'netflix_menu_note',
@@ -441,9 +340,6 @@
         'netflix_cookie_title',
         'netflix_cookie_file_caption',
         'netflix_cookie_missing_message',
-        'viameta_getlink_fb_description',
-        'viameta_uptick_fb_description',
-        'viameta_uptick_ig_description',
       ]);
       const isTextarea = multilineKeys.has(key) || key.endsWith('_description') || value.includes('\n') || value.length > 70;
       if (isTextarea) {
@@ -491,45 +387,6 @@
           return 'Số ký tự random mã CK đơn hàng phải nằm trong khoảng 10 đến 16.';
         }
         payload.order_memo_length = String(length);
-      }
-
-      for (const key of ['viameta_getlink_fb_price', 'viameta_uptick_fb_price', 'viameta_uptick_ig_price']) {
-        if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
-        const value = Number(String(payload[key] || '').trim());
-        if (!Number.isInteger(value) || value < 0) {
-          return 'Giá dịch vụ phải là số nguyên từ 0 trở lên.';
-        }
-        payload[key] = String(value);
-      }
-
-      if (Object.prototype.hasOwnProperty.call(payload, 'facebook_unlock_platform_fee_percent')) {
-        const value = Number(String(payload.facebook_unlock_platform_fee_percent || '').trim());
-        if (!Number.isInteger(value) || value < 0 || value > 100) {
-          return 'Phí sàn mở khóa Facebook phải là số nguyên từ 0 đến 100.';
-        }
-        payload.facebook_unlock_platform_fee_percent = String(value);
-      }
-
-      if (Object.prototype.hasOwnProperty.call(payload, 'facebook_unlock_worker_max_active_cases')) {
-        const value = Number(String(payload.facebook_unlock_worker_max_active_cases || '').trim());
-        if (!Number.isInteger(value) || value < 0 || value > 100) {
-          return 'Số case tối đa mỗi dịch vụ phải là số nguyên từ 0 đến 100.';
-        }
-        payload.facebook_unlock_worker_max_active_cases = String(value);
-      }
-
-      const customerLimitRules = [
-        ['facebook_unlock_customer_max_open_cases', 'Số case mở tối đa mỗi khách', 100],
-        ['facebook_unlock_customer_create_cooldown_seconds', 'Thời gian chờ tạo case mới', 86400],
-        ['facebook_unlock_case_note_min_chars', 'Số ký tự tối thiểu phần ghi chú case', 1000],
-      ];
-      for (const [key, label, max] of customerLimitRules) {
-        if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
-        const value = Number(String(payload[key] || '').trim());
-        if (!Number.isInteger(value) || value < 0 || value > max) {
-          return `${label} phải là số nguyên từ 0 đến ${max}.`;
-        }
-        payload[key] = String(value);
       }
 
       return null;

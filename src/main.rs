@@ -144,10 +144,6 @@ fn public_bot_commands() -> Vec<BotCommand> {
             description: "Tra cứu đơn theo mã".to_string(),
         },
         BotCommand {
-            command: "viameta".to_string(),
-            description: "Dịch vụ tích xanh".to_string(),
-        },
-        BotCommand {
             command: "help".to_string(),
             description: "Hướng dẫn".to_string(),
         },
@@ -278,16 +274,6 @@ async fn seed_configs_from_env(pool: &db::DbPool, config: &config::Config) {
             Some(order_admin_ids.as_str()),
         );
     }
-    if let Ok(viameta_username) = std::env::var("VIAMETA_USERNAME") {
-        push_optional_seed(&mut seeds, "viameta_username", Some(viameta_username.as_str()));
-    }
-    if let Ok(viameta_password) = std::env::var("VIAMETA_PASSWORD") {
-        push_optional_seed(&mut seeds, "viameta_password", Some(viameta_password.as_str()));
-    }
-    if let Ok(viameta_proxy_url) = std::env::var("VIAMETA_PROXY_URL") {
-        push_optional_seed(&mut seeds, "viameta_proxy_url", Some(viameta_proxy_url.as_str()));
-    }
-
     push_optional_seed(
         &mut seeds,
         "bep20_merchant_wallet",
@@ -443,7 +429,7 @@ async fn cleanup_legacy_i18n_configs(pool: &db::DbPool) {
         WHERE key = 'i18n_languages'
            OR key LIKE '%_vi'
            OR key LIKE '%_en'
-           OR key IN ('start', 'help', 'start_btn_shop', 'start_btn_wallet', 'start_btn_help', 'viameta_api_key')
+           OR key IN ('start', 'help', 'start_btn_shop', 'start_btn_wallet', 'start_btn_help')
         "#,
     )
     .execute(pool)

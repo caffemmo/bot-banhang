@@ -119,10 +119,6 @@ fn required_channel_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("required_channel_enabled", "1"))
 }
 
-fn start_viameta_enabled(ctx: &AppContext) -> bool {
-    required_channel_enabled_value(&ctx.get_text("start_viameta_enabled", "0"))
-}
-
 fn start_facebook_cookie_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("start_facebook_cookie_enabled", "1"))
 }
@@ -367,24 +363,10 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
         ],
     ];
 
-    let mut support_row = vec![i18n::inline_button_callback_json(
-        ctx,
-        lang,
-        "start_btn_help",
-        "Help",
-        "start:help",
-    )];
-    if start_viameta_enabled(ctx) {
-        support_row.push(i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_viameta",
-            "✅ Up tích xanh",
-            "viameta:menu",
-        ));
-    } else {
-        support_row.push(start_community_button_json(ctx, lang));
-    }
+    let support_row = vec![
+        i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
+        start_community_button_json(ctx, lang),
+    ];
     rows.push(support_row);
     let affiliate_button = i18n::inline_button_callback_json(
         ctx,
@@ -400,12 +382,7 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
         "🌐 Language",
         "start:language",
     );
-    if start_viameta_enabled(ctx) {
-        rows.push(vec![affiliate_button, start_community_button_json(ctx, lang)]);
-        rows.push(vec![language_button]);
-    } else {
-        rows.push(vec![affiliate_button, language_button]);
-    }
+    rows.push(vec![affiliate_button, language_button]);
 
     json!({ "inline_keyboard": rows })
 }
@@ -453,7 +430,6 @@ fn start_menu_button_specs_from_texts(
     texts: &BotTexts,
     lang: &str,
     include_netflix: bool,
-    include_viameta: bool,
     include_facebook_cookie: bool,
 ) -> Vec<Vec<(String, String)>> {
     let mut shop_row = vec![(
@@ -524,12 +500,6 @@ fn start_menu_button_specs_from_texts(
         });
         rows.retain(|row| !row.is_empty());
     }
-    if include_viameta {
-        rows[5].push((
-            texts.get_lang("start_btn_viameta", lang, "Up tích xanh"),
-            "viameta:menu".to_string(),
-        ));
-    }
     rows
 }
 
@@ -572,7 +542,6 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
                 &texts,
                 lang,
                 cmd_netflix::netflix_enabled(ctx),
-                start_viameta_enabled(ctx),
                 start_facebook_cookie_enabled(ctx),
             )
                 .into_iter()
@@ -616,7 +585,6 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
         "start:orders" => "start_btn_purchased",
         "wallet:topup_history" => "start_btn_topup_history",
         "facebook_cookie:get" => "start_btn_facebook_cookie",
-        "viameta:menu" => "start_btn_viameta",
         "affiliate:register" => "start_btn_affiliate_register",
         "start:help" => "start_btn_help",
         "start:language" => "start_btn_language",
@@ -625,7 +593,7 @@ fn start_menu_button_key_for_callback(callback: &str) -> &'static str {
 }
 
 fn start_reply_keyboard_specs_from_texts(texts: &BotTexts, lang: &str) -> Vec<Vec<String>> {
-    start_menu_button_specs_from_texts(texts, lang, true, true, true)
+    start_menu_button_specs_from_texts(texts, lang, true, true)
         .into_iter()
         .map(|row| {
             row.into_iter()
@@ -1330,7 +1298,6 @@ mod tests {
                     ("start_btn_wallet".to_string(), "Vi tien".to_string()),
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
                     ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
-                    ("start_btn_viameta".to_string(), "Up tich xanh".to_string()),
                     ("start_btn_affiliate_register".to_string(), "CTV".to_string()),
                     ("start_btn_help".to_string(), "Huong dan".to_string()),
                     ("start_btn_language".to_string(), "Ngon ngu".to_string()),
@@ -1338,7 +1305,7 @@ mod tests {
             )]),
         );
 
-        let rows = start_menu_button_specs_from_texts(&texts, "vi", true, true, true);
+        let rows = start_menu_button_specs_from_texts(&texts, "vi", true, true);
 
         assert_eq!(
             rows,
@@ -1365,10 +1332,7 @@ mod tests {
                     ("Da mua".to_string(), "start:orders".to_string()),
                     ("Lich su nap".to_string(), "wallet:topup_history".to_string()),
                 ],
-                vec![
-                    ("Huong dan".to_string(), "start:help".to_string()),
-                    ("Up tich xanh".to_string(), "viameta:menu".to_string()),
-                ],
+                vec![("Huong dan".to_string(), "start:help".to_string())],
                 vec![
                     ("CTV".to_string(), "affiliate:register".to_string()),
                     ("Ngon ngu".to_string(), "start:language".to_string()),
@@ -1378,7 +1342,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_menu_keyboard_hides_viameta_by_default_and_shows_community() {
+    async fn start_menu_keyboard_shows_community_in_support_row() {
         let ctx = test_ctx_with_texts(BotTexts::default());
         let keyboard = start_menu_keyboard_json(&ctx, "vi");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
@@ -1394,7 +1358,6 @@ mod tests {
         assert_eq!(rows[4][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
         assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
         assert_eq!(rows[5][1]["callback_data"], "start:language");
-        assert!(!keyboard.to_string().contains("viameta:menu"));
         assert!(!keyboard.to_string().contains("shop_api"));
         assert!(!keyboard.to_string().contains("tut:user_home"));
         assert!(!keyboard.to_string().contains("childbot:guide"));
@@ -1418,26 +1381,6 @@ mod tests {
             .contains(cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK));
     }
 
-    #[tokio::test]
-    async fn start_menu_keyboard_shows_viameta_when_admin_toggle_enabled() {
-        let ctx = test_ctx_with_texts_and_configs(
-            BotTexts::default(),
-            HashMap::from([("start_viameta_enabled".to_string(), "1".to_string())]),
-        );
-        let keyboard = start_menu_keyboard_json(&ctx, "vi");
-        let rows = keyboard["inline_keyboard"].as_array().unwrap();
-
-        assert_eq!(
-            rows[1][1]["callback_data"],
-            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
-        );
-        assert_eq!(rows[4][0]["callback_data"], "start:help");
-        assert_eq!(rows[4][1]["callback_data"], "viameta:menu");
-        assert_eq!(rows[5][0]["callback_data"], "affiliate:register");
-        assert_eq!(rows[5][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
-        assert_eq!(rows[6][0]["callback_data"], "start:language");
-    }
-
     #[test]
     fn reply_keyboard_specs_match_main_start_actions() {
         let texts = BotTexts::from_language_maps(
@@ -1458,7 +1401,6 @@ mod tests {
                     ("start_btn_purchased".to_string(), "Da mua".to_string()),
                     ("start_btn_topup_history".to_string(), "Lich su nap".to_string()),
                     ("start_btn_facebook_cookie".to_string(), "Lay cookie".to_string()),
-                    ("start_btn_viameta".to_string(), "Up tich xanh".to_string()),
                     ("start_btn_affiliate_register".to_string(), "CTV".to_string()),
                     ("start_btn_help".to_string(), "Huong dan".to_string()),
                     ("start_btn_language".to_string(), "Ngon ngu".to_string()),
@@ -1475,7 +1417,7 @@ mod tests {
                 vec!["Khuyen mai".to_string(), "Lay cookie".to_string()],
                 vec!["Nap tien".to_string(), "Vi tien".to_string()],
                 vec!["Da mua".to_string(), "Lich su nap".to_string()],
-                vec!["Huong dan".to_string(), "Up tich xanh".to_string()],
+                vec!["Huong dan".to_string()],
                 vec!["CTV".to_string(), "Ngon ngu".to_string()],
             ]
         );

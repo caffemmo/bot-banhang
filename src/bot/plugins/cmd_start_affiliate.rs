@@ -189,10 +189,6 @@ fn required_channel_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("required_channel_enabled", "1"))
 }
 
-fn start_viameta_enabled(ctx: &AppContext) -> bool {
-    required_channel_enabled_value(&ctx.get_text("start_viameta_enabled", "0"))
-}
-
 fn start_facebook_cookie_enabled(ctx: &AppContext) -> bool {
     required_channel_enabled_value(&ctx.get_text("start_facebook_cookie_enabled", "1"))
 }
@@ -359,24 +355,10 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
         ],
     ];
 
-    let mut support_row = vec![i18n::inline_button_callback_json(
-        ctx,
-        lang,
-        "start_btn_help",
-        "Help",
-        "start:help",
-    )];
-    if start_viameta_enabled(ctx) {
-        support_row.push(i18n::inline_button_callback_json(
-            ctx,
-            lang,
-            "start_btn_viameta",
-            "✅ Up tích xanh",
-            "viameta:menu",
-        ));
-    } else {
-        support_row.push(start_community_button_json(ctx, lang));
-    }
+    let support_row = vec![
+        i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
+        start_community_button_json(ctx, lang),
+    ];
     rows.push(support_row);
     let affiliate_button = i18n::inline_button_callback_json(
         ctx,
@@ -392,12 +374,7 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
         "🌐 Language",
         "start:language",
     );
-    if start_viameta_enabled(ctx) {
-        rows.push(vec![affiliate_button, start_community_button_json(ctx, lang)]);
-        rows.push(vec![language_button]);
-    } else {
-        rows.push(vec![affiliate_button, language_button]);
-    }
+    rows.push(vec![affiliate_button, language_button]);
 
     json!({ "inline_keyboard": rows })
 }
