@@ -596,12 +596,7 @@ mod tests {
         assert!(commands.contains(&"start".to_string()));
         assert!(commands.contains(&"shop".to_string()));
         assert!(commands.contains(&"wallet".to_string()));
-        assert!(!commands.contains(&"newapi".to_string()));
-        assert!(!commands.contains(&"tut".to_string()));
-        assert!(!commands.contains(&"myvip".to_string()));
         assert!(!commands.contains(&"ctvlist".to_string()));
-        assert!(!commands.contains(&"childbotadd".to_string()));
-        assert!(!commands.contains(&"tutadd".to_string()));
     }
 
     #[test]

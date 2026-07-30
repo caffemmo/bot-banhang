@@ -5,7 +5,7 @@
         title: 'Chung',
         match: key => [
           'callback_ack', 'action_invalid', 'error', 'unauthorized', 'session_expired',
-          'user_unknown', 'user_unknown_retry', 'back_btn', 'fallback_default', 'ping_pong',
+          'user_unknown', 'user_unknown_retry', 'back_btn', 'fallback_default',
         ].includes(key),
       },
       {
@@ -121,7 +121,6 @@
     function isKeyboardButtonI18nKey(key) {
       return KEYBOARD_BUTTON_I18N_KEYS.has(key)
         || key.startsWith('start_btn_')
-        || key.startsWith('fbunlock_btn_')
         || key.startsWith('shop_btn_')
         || key.startsWith('topup_btn_')
         || key.startsWith('wallet_btn_');
