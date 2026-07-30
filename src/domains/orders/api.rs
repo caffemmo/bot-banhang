@@ -743,7 +743,7 @@ fn format_stock_delivery_message_body(
 🕘 Thời gian: {paid_time}\n\n\
 📌 Sản phẩm:\n\
 {product_data}\n\n\
-👉 Bấm nút 📋 Copy sản phẩm để bot tách theo dấu | và gửi từng phần.",
+👉 Bấm nút 📋 Tách sản phẩm để bot tách theo dấu | và gửi từng phần.",
         format_vnd(amount),
     )
 }
@@ -760,15 +760,6 @@ pub fn split_stock_delivery_fields(delivered_data: &str) -> Vec<String> {
 
 pub fn stock_delivery_copy_items(product: &Product, delivered_data: &str) -> Vec<String> {
     let formatted = format_delivered_data_for_product(product, delivered_data);
-    if product_delivery_format(product) == DELIVERY_FORMAT_FACEBOOK_UID_PASS_2FA_MAIL {
-        return formatted
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(ToString::to_string)
-            .collect();
-    }
-
     split_stock_delivery_fields(&formatted)
 }
 
@@ -862,7 +853,7 @@ fn stock_delivery_keyboard_json(
     json!({
         "inline_keyboard": [
             [{
-                "text": "📋 Copy sản phẩm",
+                "text": "📋 Tách sản phẩm",
                 "callback_data": format!("delivery_copy:{order_id}"),
             }],
             [{
@@ -884,7 +875,7 @@ fn stock_delivery_fallback_keyboard_rows(
 ) -> Vec<Vec<InlineKeyboardButton>> {
     vec![
         vec![InlineKeyboardButton::callback(
-            "📋 Copy sản phẩm",
+            "📋 Tách sản phẩm",
             format!("delivery_copy:{order_id}"),
         )],
         vec![InlineKeyboardButton::callback(
@@ -1331,7 +1322,7 @@ mod tests {
         let keyboard = stock_delivery_keyboard_json("order-1", 42, "🛒 Tiếp tục mua hàng");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
-        assert_eq!(rows[0][0]["text"], "📋 Copy sản phẩm");
+        assert_eq!(rows[0][0]["text"], "📋 Tách sản phẩm");
         assert_eq!(rows[0][0]["callback_data"], "delivery_copy:order-1");
         assert_eq!(rows[1][0]["callback_data"], "usage:42");
         assert_eq!(rows[2][0]["callback_data"], "start:shop");
@@ -1382,6 +1373,47 @@ mod tests {
         assert_eq!(
             formatted,
             "61590890279164|123456Aa@|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|mail@smvmail.com"
+        );
+    }
+
+    #[test]
+    fn facebook_delivery_copy_items_split_formatted_output() {
+        let product = Product {
+            id: 1,
+            name: "Facebook clone".to_string(),
+            price: 10_000,
+            is_active: Some(1),
+            requires_input: Some(0),
+            input_prompt: None,
+            description: None,
+            image_url: None,
+            delivery_type: Some("stock_item".to_string()),
+            delivery_format: Some(DELIVERY_FORMAT_FACEBOOK_UID_PASS_2FA_MAIL.to_string()),
+            file_path: None,
+            file_name: None,
+            file_mime: None,
+            category_id: None,
+            category: None,
+            category_emoji: None,
+            category_custom_emoji_id: None,
+            button_emoji: None,
+            button_custom_emoji_id: None,
+            created_at: None,
+            sort_order: None,
+            show_sold_count: None,
+        };
+        let raw = "61590890279164|pass123|c_user=1; xs=abc|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|mail@smvmail.com";
+
+        let items = stock_delivery_copy_items(&product, raw);
+
+        assert_eq!(
+            items,
+            vec![
+                "61590890279164",
+                "pass123",
+                "VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65",
+                "mail@smvmail.com"
+            ]
         );
     }
 }

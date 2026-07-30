@@ -885,7 +885,7 @@ async fn send_split_delivered_product(
     }
 
     ctx.bot
-        .send_message(chat_id, "📋 Sản phẩm đã tách theo dấu |:")
+        .send_message(chat_id, "📋 Đã tách sản phẩm theo dấu |:")
         .await?;
     for field in fields {
         for chunk in split_copy_message_chunks(&field, 3500) {
