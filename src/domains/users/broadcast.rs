@@ -1558,6 +1558,7 @@ mod tests {
             description: None,
             image_url: None,
             delivery_type: Some("stock_item".to_string()),
+            delivery_format: None,
             file_path: None,
             file_name: None,
             file_mime: None,

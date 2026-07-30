@@ -36,6 +36,7 @@ pub struct ProductPayload {
     pub description: Option<String>,
     pub image_url: Option<String>,
     pub delivery_type: Option<String>,
+    pub delivery_format: Option<String>,
     pub file_path: Option<String>,
     pub file_name: Option<String>,
     pub file_mime: Option<String>,
@@ -71,6 +72,7 @@ pub struct ProductListItem {
     pub description: Option<String>,
     pub image_url: Option<String>,
     pub delivery_type: Option<String>,
+    pub delivery_format: Option<String>,
     pub file_path: Option<String>,
     pub file_name: Option<String>,
     pub file_mime: Option<String>,
@@ -98,6 +100,7 @@ impl From<Product> for ProductListItem {
             description: value.description,
             image_url: value.image_url,
             delivery_type: value.delivery_type,
+            delivery_format: value.delivery_format,
             file_path: value.file_path,
             file_name: value.file_name,
             file_mime: value.file_mime,
@@ -268,6 +271,8 @@ pub async fn create_product(
     let legacy_requires_input = normalize_bool_value(payload.requires_input, 0)?;
     let delivery_type =
         normalize_delivery_type(payload.delivery_type.as_deref(), legacy_requires_input)?;
+    let delivery_format =
+        normalize_delivery_format(payload.delivery_format.as_deref(), &delivery_type)?;
     let requires_input = requires_input_for_delivery_type(&delivery_type);
     let input_prompt = payload.input_prompt.as_deref();
     let description = payload.description.as_deref();
@@ -288,6 +293,7 @@ pub async fn create_product(
         description,
         image_url,
         Some(&delivery_type),
+        Some(&delivery_format),
         payload.file_path.as_deref(),
         payload.file_name.as_deref(),
         payload.file_mime.as_deref(),
@@ -317,6 +323,8 @@ pub async fn update_product_handler(
     let legacy_requires_input = normalize_bool_value(payload.requires_input, 0)?;
     let delivery_type =
         normalize_delivery_type(payload.delivery_type.as_deref(), legacy_requires_input)?;
+    let delivery_format =
+        normalize_delivery_format(payload.delivery_format.as_deref(), &delivery_type)?;
     let requires_input = requires_input_for_delivery_type(&delivery_type);
     let existing = repo::get_product(&ctx.pool, id)
         .await
@@ -347,6 +355,7 @@ pub async fn update_product_handler(
         description,
         image_url,
         Some(&delivery_type),
+        Some(&delivery_format),
         existing.file_path.as_deref(),
         existing.file_name.as_deref(),
         existing.file_mime.as_deref(),
@@ -564,6 +573,7 @@ fn validate_product_payload(payload: &ProductPayload) -> Result<(), ApiError> {
     let legacy_requires_input = normalize_bool_value(payload.requires_input, 0)?;
     let delivery_type =
         normalize_delivery_type(payload.delivery_type.as_deref(), legacy_requires_input)?;
+    normalize_delivery_format(payload.delivery_format.as_deref(), &delivery_type)?;
     if let Some(prompt) = &payload.input_prompt
         && prompt.len() > 200
     {
@@ -694,6 +704,20 @@ pub fn requires_input_for_delivery_type(delivery_type: &str) -> i64 {
     }
 }
 
+pub fn normalize_delivery_format(raw: Option<&str>, delivery_type: &str) -> Result<String, ApiError> {
+    if delivery_type != "stock_item" {
+        return Ok("raw".to_string());
+    }
+
+    let value = raw.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("raw");
+    match value {
+        "raw" | "facebook_uid_pass_2fa_mail" => Ok(value.to_string()),
+        _ => Err(ApiError::validation(
+            "delivery_format must be raw or facebook_uid_pass_2fa_mail",
+        )),
+    }
+}
+
 fn normalize_price(price: Option<i64>, delivery_type: &str) -> Result<i64, ApiError> {
     if delivery_type == "manual_input" {
         // giá sẽ lấy theo plan; lưu 0 để tránh yêu cầu nhập
@@ -802,6 +826,7 @@ pub async fn upload_product_image(
         p.description.as_deref(),
         Some(&image_url),
         p.delivery_type.as_deref(),
+        p.delivery_format.as_deref(),
         p.file_path.as_deref(),
         p.file_name.as_deref(),
         p.file_mime.as_deref(),

@@ -252,6 +252,7 @@ mod tests {
                 description: None,
                 image_url: None,
                 delivery_type: None,
+                delivery_format: None,
                 file_path: None,
                 file_name: None,
                 file_mime: None,

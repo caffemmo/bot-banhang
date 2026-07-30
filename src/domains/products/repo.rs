@@ -37,6 +37,7 @@ struct OrderJoinRow {
     p_description: Option<String>,
     p_image_url: Option<String>,
     p_delivery_type: Option<String>,
+    p_delivery_format: Option<String>,
     p_file_path: Option<String>,
     p_file_name: Option<String>,
     p_file_mime: Option<String>,
@@ -59,6 +60,7 @@ const PRODUCT_SELECT: &str = r#"p.id,
         p.description,
         p.image_url,
         p.delivery_type,
+        p.delivery_format,
         p.file_path,
         p.file_name,
         p.file_mime,
@@ -664,6 +666,7 @@ pub async fn insert_product(
     description: Option<&str>,
     image_url: Option<&str>,
     delivery_type: Option<&str>,
+    delivery_format: Option<&str>,
     file_path: Option<&str>,
     file_name: Option<&str>,
     file_mime: Option<&str>,
@@ -673,8 +676,8 @@ pub async fn insert_product(
     button_custom_emoji_id: Option<&str>,
 ) -> Result<Product> {
     let result = sqlx::query(
-        r#"INSERT INTO products (name, price, is_active, requires_input, input_prompt, description, image_url, delivery_type, file_path, file_name, file_mime, category_id, category, button_emoji, button_custom_emoji_id) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        r#"INSERT INTO products (name, price, is_active, requires_input, input_prompt, description, image_url, delivery_type, delivery_format, file_path, file_name, file_mime, category_id, category, button_emoji, button_custom_emoji_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(name)
     .bind(price)
@@ -684,6 +687,7 @@ pub async fn insert_product(
     .bind(description)
     .bind(image_url)
     .bind(delivery_type.unwrap_or("stock_item"))
+    .bind(delivery_format.unwrap_or("raw"))
     .bind(file_path)
     .bind(file_name)
     .bind(file_mime)
@@ -724,6 +728,7 @@ pub async fn update_product(
     description: Option<&str>,
     image_url: Option<&str>,
     delivery_type: Option<&str>,
+    delivery_format: Option<&str>,
     file_path: Option<&str>,
     file_name: Option<&str>,
     file_mime: Option<&str>,
@@ -734,7 +739,7 @@ pub async fn update_product(
 ) -> Result<Option<Product>> {
     let result = sqlx::query(
         r#"UPDATE products 
-        SET name = ?, price = ?, is_active = ?, requires_input = ?, input_prompt = ?, description = ?, image_url = ?, delivery_type = ?, file_path = ?, file_name = ?, file_mime = ?, category_id = ?, category = ?, button_emoji = ?, button_custom_emoji_id = ?
+        SET name = ?, price = ?, is_active = ?, requires_input = ?, input_prompt = ?, description = ?, image_url = ?, delivery_type = ?, delivery_format = ?, file_path = ?, file_name = ?, file_mime = ?, category_id = ?, category = ?, button_emoji = ?, button_custom_emoji_id = ?
         WHERE id = ?"#,
     )
     .bind(name)
@@ -745,6 +750,7 @@ pub async fn update_product(
     .bind(description)
     .bind(image_url)
     .bind(delivery_type.unwrap_or("stock_item"))
+    .bind(delivery_format.unwrap_or("raw"))
     .bind(file_path)
     .bind(file_name)
     .bind(file_mime)
@@ -892,6 +898,7 @@ mod tests {
             None,
             None,
             Some("stock_item"),
+            Some("raw"),
             None,
             None,
             None,
@@ -946,6 +953,7 @@ mod tests {
             None,
             Some("/uploads/product_1.jpg"),
             Some("stock_item"),
+            Some("raw"),
             None,
             None,
             None,
@@ -979,6 +987,7 @@ mod tests {
             None,
             None,
             Some("stock_item"),
+            Some("raw"),
             None,
             None,
             None,
@@ -1022,6 +1031,7 @@ mod tests {
             None,
             None,
             Some("stock_item"),
+            Some("raw"),
             None,
             None,
             None,
@@ -1176,6 +1186,7 @@ pub async fn get_order_with_product(
             p.description as p_description,
             p.image_url as p_image_url,
             p.delivery_type as p_delivery_type,
+            p.delivery_format as p_delivery_format,
             p.file_path as p_file_path,
             p.file_name as p_file_name,
             p.file_mime as p_file_mime,
@@ -1237,6 +1248,7 @@ pub async fn list_orders_admin(
             p.description as p_description,
             p.image_url as p_image_url,
             p.delivery_type as p_delivery_type,
+            p.delivery_format as p_delivery_format,
             p.file_path as p_file_path,
             p.file_name as p_file_name,
             p.file_mime as p_file_mime,
@@ -1340,6 +1352,7 @@ pub async fn list_orders_for_user(
             p.description as p_description,
             p.image_url as p_image_url,
             p.delivery_type as p_delivery_type,
+            p.delivery_format as p_delivery_format,
             p.file_path as p_file_path,
             p.file_name as p_file_name,
             p.file_mime as p_file_mime,
@@ -1396,6 +1409,7 @@ pub async fn find_order_by_memo(pool: &SqlitePool, memo: &str) -> Result<Option<
             p.description as p_description,
             p.image_url as p_image_url,
             p.delivery_type as p_delivery_type,
+            p.delivery_format as p_delivery_format,
             p.file_path as p_file_path,
             p.file_name as p_file_name,
             p.file_mime as p_file_mime,
@@ -1449,6 +1463,7 @@ pub async fn list_pending_before(pool: &SqlitePool, before: &str) -> Result<Vec<
             p.description as p_description,
             p.image_url as p_image_url,
             p.delivery_type as p_delivery_type,
+            p.delivery_format as p_delivery_format,
             p.file_path as p_file_path,
             p.file_name as p_file_name,
             p.file_mime as p_file_mime,
@@ -1588,6 +1603,7 @@ fn map_join_row(row: OrderJoinRow) -> OrderWithProduct {
             description: row.p_description,
             image_url: row.p_image_url,
             delivery_type: row.p_delivery_type,
+            delivery_format: row.p_delivery_format,
             file_path: row.p_file_path,
             file_name: row.p_file_name,
             file_mime: row.p_file_mime,

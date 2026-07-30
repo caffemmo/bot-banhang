@@ -655,6 +655,13 @@
                 <option value="manual_input">Nhập thông tin</option>
               </select>
             </div>
+            <div class="col-sm-3" id="product-delivery-format-group">
+              <label class="form-label">Dinh dang xuat hang</label>
+              <select class="form-select" id="product-delivery-format">
+                <option value="raw">Giu nguyen du lieu kho</option>
+                <option value="facebook_uid_pass_2fa_mail">Facebook: UID|PASS|2FA|MAIL</option>
+              </select>
+            </div>
             <div class="col-sm-3">
               <label class="form-label">Danh mục</label>
               <select class="form-select" id="product-category-id">
@@ -963,7 +970,7 @@
   </div>
 
   <script src="/assets/admin/core.js?v=20260601-revenue-reset"></script>
-  <script src="/assets/admin/products.js?v=20260730-remove-external-api-delivery"></script>
+  <script src="/assets/admin/products.js?v=20260730-delivery-format"></script>
   <script src="/assets/admin/orders.js"></script>
   <script src="/assets/admin/wallets.js"></script>
   <script src="/assets/admin/webhooks.js"></script>

@@ -139,6 +139,10 @@
           const isUploadedFile = deliveryType === 'uploaded_file';
           const isExternalApi = deliveryType === 'external_api';
           const isStock = deliveryType === 'stock_item';
+          const deliveryFormat = productDeliveryFormat(p);
+          const formatLabel = deliveryFormat === 'facebook_uid_pass_2fa_mail'
+            ? '<small class="text-success">Xuat: UID|PASS|2FA|MAIL</small>'
+            : '';
           const typeLabel = deliveryType === 'manual_input'
             ? '<span class="badge bg-info">Nhập liệu</span>'
             : deliveryType === 'uploaded_file'
@@ -181,6 +185,7 @@
                  ${categoryLabel}
                  ${buttonEmojiLabel}
                  ${buttonCustomEmojiLabel}
+                 ${formatLabel}
                  <small class="text-muted d-md-none">ID: ${p.id}</small>
               </div>
             </div>
@@ -230,12 +235,17 @@
       return product?.requires_input === 1 ? 'manual_input' : 'stock_item';
     }
 
+    function productDeliveryFormat(product) {
+      return product?.delivery_format || 'raw';
+    }
+
     function openProductModal(product = null) {
       $('#product-id').val(product?.id || '');
       $('#product-name').val(product?.name || '');
       $('#product-price').val(product?.price ?? 0);
       $('#product-active-input').val(product?.is_active ?? 1);
         $('#product-delivery-type').val(productDeliveryType(product));
+        $('#product-delivery-format').val(productDeliveryFormat(product));
         renderProductCategoryOptions(product?.category_id || '', product?.category || '');
         $('#product-button-emoji').val(product?.button_emoji || '');
         $('#product-button-custom-emoji-id').val(product?.button_custom_emoji_id || '');
@@ -269,6 +279,10 @@
       }
       $('#product-input-prompt-group').toggleClass('d-none', deliveryType !== 'manual_input');
       $('#product-file-group').toggleClass('d-none', deliveryType !== 'uploaded_file');
+      $('#product-delivery-format-group').toggleClass('d-none', deliveryType !== 'stock_item');
+      if (deliveryType !== 'stock_item') {
+        $('#product-delivery-format').val('raw');
+      }
     }
 
     async function saveProduct() {
@@ -282,6 +296,7 @@
         is_active: Number($('#product-active-input').val()),
         requires_input: requiresInput,
          delivery_type: deliveryType,
+         delivery_format: deliveryType === 'stock_item' ? ($('#product-delivery-format').val() || 'raw') : 'raw',
          category_id: Number($('#product-category-id').val()) || null,
          category: Number($('#product-category-id').val()) ? null : ($('#product-category-id').data('legacy-category') || null),
          button_emoji: $('#product-button-emoji').val().trim() || null,

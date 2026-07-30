@@ -12,6 +12,7 @@ pub struct Product {
     pub description: Option<String>,
     pub image_url: Option<String>,
     pub delivery_type: Option<String>,
+    pub delivery_format: Option<String>,
     pub file_path: Option<String>,
     pub file_name: Option<String>,
     pub file_mime: Option<String>,

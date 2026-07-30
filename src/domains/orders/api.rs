@@ -26,6 +26,7 @@ use crate::core::pagination::normalize_pagination;
 use crate::core::responses::{Ack, ApiError, ApiResult, PaginatedResponse, ok};
 
 pub const RESERVE_TTL_MINUTES: i64 = 5;
+pub const DELIVERY_FORMAT_FACEBOOK_UID_PASS_2FA_MAIL: &str = "facebook_uid_pass_2fa_mail";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UploadedFileDelivery {
@@ -492,13 +493,14 @@ pub async fn send_product_file(
     }
 
     if product_delivery_type(&owp.product) == "stock_item" {
+        let delivered_display = format_delivered_data_for_product(&owp.product, delivered_data);
         let rows = stock_delivery_fallback_keyboard_rows(
             &owp.order.id,
             owp.product.id,
             &continue_shopping_btn,
         );
 
-        let text = format_stock_delivery_message_html(ctx, owp, delivered_data);
+        let text = format_stock_delivery_message_html(ctx, owp, &delivered_display);
         if text.chars().count() <= 3900 {
             let reply_markup = stock_delivery_keyboard_json(
                 &owp.order.id,
@@ -524,7 +526,7 @@ pub async fn send_product_file(
                     .await?;
             }
         } else {
-            let file_text = format_stock_delivery_message(ctx, owp, delivered_data);
+            let file_text = format_stock_delivery_message(ctx, owp, &delivered_display);
             ctx.bot
                 .send_document(
                     ChatId(owp.order.chat_id),
@@ -625,6 +627,24 @@ pub fn format_raw_stock_delivery_message(delivered_data: &str) -> String {
         "Nội dung đơn hàng trống, vui lòng liên hệ hỗ trợ.".to_string()
     } else {
         delivered_data.to_string()
+    }
+}
+
+pub fn product_delivery_format(product: &Product) -> &str {
+    product
+        .delivery_format
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("raw")
+}
+
+pub fn format_delivered_data_for_product(product: &Product, delivered_data: &str) -> String {
+    match product_delivery_format(product) {
+        DELIVERY_FORMAT_FACEBOOK_UID_PASS_2FA_MAIL => {
+            format_facebook_uid_pass_2fa_mail_delivery(delivered_data)
+        }
+        _ => delivered_data.to_string(),
     }
 }
 
@@ -736,6 +756,91 @@ pub fn split_stock_delivery_fields(delivered_data: &str) -> Vec<String> {
         .filter(|part| !part.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+pub fn stock_delivery_copy_items(product: &Product, delivered_data: &str) -> Vec<String> {
+    let formatted = format_delivered_data_for_product(product, delivered_data);
+    if product_delivery_format(product) == DELIVERY_FORMAT_FACEBOOK_UID_PASS_2FA_MAIL {
+        return formatted
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToString::to_string)
+            .collect();
+    }
+
+    split_stock_delivery_fields(&formatted)
+}
+
+fn format_facebook_uid_pass_2fa_mail_delivery(delivered_data: &str) -> String {
+    let formatted = delivered_data
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                String::new()
+            } else {
+                parse_facebook_uid_pass_2fa_mail_line(trimmed)
+                    .unwrap_or_else(|| trimmed.to_string())
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if formatted.iter().all(|line| line.is_empty()) {
+        delivered_data.to_string()
+    } else {
+        formatted.join("\n")
+    }
+}
+
+fn parse_facebook_uid_pass_2fa_mail_line(raw: &str) -> Option<String> {
+    let mut uid = None;
+    let mut password_candidates = Vec::new();
+    let mut two_fa = None;
+    let mut mail = None;
+
+    for part in raw
+        .split('|')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        if mail.is_none() && looks_like_email(part) {
+            mail = Some(part.to_string());
+            continue;
+        }
+        if two_fa.is_none() && looks_like_2fa(part) {
+            two_fa = Some(part.to_string());
+            continue;
+        }
+        if looks_like_cookie(part) || looks_like_user_agent(part) || looks_like_token_or_json(part)
+        {
+            continue;
+        }
+        if uid.is_none() && looks_like_facebook_uid(part) {
+            uid = Some(part.to_string());
+            continue;
+        }
+
+        password_candidates.push(part.to_string());
+    }
+
+    let uid = uid?;
+    let password = password_candidates.into_iter().find(|value| {
+        !looks_like_facebook_uid(value)
+            && !looks_like_email(value)
+            && !looks_like_2fa(value)
+            && !looks_like_cookie(value)
+            && !looks_like_user_agent(value)
+            && !looks_like_token_or_json(value)
+    })?;
+
+    Some(format!(
+        "{}|{}|{}|{}",
+        uid,
+        password,
+        two_fa.unwrap_or_default(),
+        mail.unwrap_or_default()
+    ))
 }
 
 fn format_order_paid_time(paid_at: &Option<String>, created_at: &str) -> String {
@@ -991,6 +1096,30 @@ fn looks_like_cookie(value: &str) -> bool {
         || (value.len() > 80 && value.matches(';').count() >= 3)
 }
 
+fn looks_like_facebook_uid(value: &str) -> bool {
+    let value = value.trim();
+    value.len() >= 8 && value.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn looks_like_user_agent(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("mozilla/")
+        || lower.contains("applewebkit/")
+        || lower.contains("chrome/")
+        || lower.contains("safari/")
+}
+
+fn looks_like_token_or_json(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower.contains("access_token")
+        || lower.starts_with("eaag")
+        || (trimmed.len() > 80 && !trimmed.chars().any(char::is_whitespace))
+}
+
 fn looks_like_2fa(value: &str) -> bool {
     let value = value.trim().replace(' ', "");
     let len = value.len();
@@ -1230,6 +1359,30 @@ mod tests {
         assert_eq!(parsed.mail.as_deref(), Some("user@mail.test"));
         assert_eq!(parsed.mail_password.as_deref(), Some("mailpass"));
         assert!(parsed.cookie.as_deref().unwrap().contains("c_user=1"));
+    }
+
+    #[test]
+    fn facebook_delivery_format_outputs_uid_pass_2fa_mail_only() {
+        let raw = "61590890279164|Homnay17/6@2026|c_user=1; xs=abc; datr=xyz|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|iwb8bwahjq9s@smvmail.com|EAAGTOKEN|Mozilla/5.0";
+
+        let formatted = format_facebook_uid_pass_2fa_mail_delivery(raw);
+
+        assert_eq!(
+            formatted,
+            "61590890279164|Homnay17/6@2026|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|iwb8bwahjq9s@smvmail.com"
+        );
+    }
+
+    #[test]
+    fn facebook_delivery_format_handles_reordered_fields() {
+        let raw = "mail@smvmail.com|61590890279164|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|123456Aa@";
+
+        let formatted = format_facebook_uid_pass_2fa_mail_delivery(raw);
+
+        assert_eq!(
+            formatted,
+            "61590890279164|123456Aa@|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|mail@smvmail.com"
+        );
     }
 }
 
