@@ -763,6 +763,37 @@ pub fn stock_delivery_copy_items(product: &Product, delivered_data: &str) -> Vec
     split_stock_delivery_fields(&formatted)
 }
 
+pub fn stock_delivery_two_fa_secrets(product: &Product, delivered_data: &str) -> Vec<String> {
+    let mut secrets = Vec::new();
+    collect_two_fa_secrets(delivered_data, &mut secrets);
+
+    let formatted = format_delivered_data_for_product(product, delivered_data);
+    if formatted.trim() != delivered_data.trim() {
+        collect_two_fa_secrets(&formatted, &mut secrets);
+    }
+
+    secrets
+}
+
+fn collect_two_fa_secrets(delivered_data: &str, secrets: &mut Vec<String>) {
+    for delivery in parse_account_delivery_items(delivered_data) {
+        let Some(secret) = delivery
+            .two_fa
+            .as_deref()
+            .map(str::trim)
+            .filter(|secret| !secret.is_empty())
+        else {
+            continue;
+        };
+        if !secrets
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(secret))
+        {
+            secrets.push(secret.to_string());
+        }
+    }
+}
+
 fn format_facebook_uid_pass_2fa_mail_delivery(delivered_data: &str) -> String {
     let formatted = delivered_data
         .lines()
@@ -857,6 +888,10 @@ fn stock_delivery_keyboard_json(
                 "callback_data": format!("delivery_copy:{order_id}"),
             }],
             [{
+                "text": "🔐 Lấy mã 2FA",
+                "callback_data": format!("delivery_2fa:{order_id}"),
+            }],
+            [{
                 "text": "📘 Hướng dẫn sử dụng",
                 "callback_data": format!("usage:{product_id}"),
             }],
@@ -877,6 +912,10 @@ fn stock_delivery_fallback_keyboard_rows(
         vec![InlineKeyboardButton::callback(
             "📋 Tách sản phẩm",
             format!("delivery_copy:{order_id}"),
+        )],
+        vec![InlineKeyboardButton::callback(
+            "🔐 Lấy mã 2FA",
+            format!("delivery_2fa:{order_id}"),
         )],
         vec![InlineKeyboardButton::callback(
             "📘 Hướng dẫn sử dụng",
@@ -1324,8 +1363,10 @@ mod tests {
 
         assert_eq!(rows[0][0]["text"], "📋 Tách sản phẩm");
         assert_eq!(rows[0][0]["callback_data"], "delivery_copy:order-1");
-        assert_eq!(rows[1][0]["callback_data"], "usage:42");
-        assert_eq!(rows[2][0]["callback_data"], "start:shop");
+        assert_eq!(rows[1][0]["text"], "🔐 Lấy mã 2FA");
+        assert_eq!(rows[1][0]["callback_data"], "delivery_2fa:order-1");
+        assert_eq!(rows[2][0]["callback_data"], "usage:42");
+        assert_eq!(rows[3][0]["callback_data"], "start:shop");
     }
 
     #[test]
@@ -1415,6 +1456,39 @@ mod tests {
                 "mail@smvmail.com"
             ]
         );
+    }
+
+    #[test]
+    fn stock_delivery_two_fa_secrets_extracts_from_raw_stock() {
+        let product = Product {
+            id: 1,
+            name: "Facebook clone".to_string(),
+            price: 10_000,
+            is_active: Some(1),
+            requires_input: Some(0),
+            input_prompt: None,
+            description: None,
+            image_url: None,
+            delivery_type: Some("stock_item".to_string()),
+            delivery_format: Some(DELIVERY_FORMAT_FACEBOOK_UID_PASS_2FA_MAIL.to_string()),
+            file_path: None,
+            file_name: None,
+            file_mime: None,
+            category_id: None,
+            category: None,
+            category_emoji: None,
+            category_custom_emoji_id: None,
+            button_emoji: None,
+            button_custom_emoji_id: None,
+            created_at: None,
+            sort_order: None,
+            show_sold_count: None,
+        };
+        let raw = "61590890279164|pass123|c_user=1; xs=abc|VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65|mail@smvmail.com";
+
+        let secrets = stock_delivery_two_fa_secrets(&product, raw);
+
+        assert_eq!(secrets, vec!["VE7YPIHKWN4H2HMHWSQNT4QERLN4PP65"]);
     }
 }
 

@@ -6,6 +6,8 @@ use reqwest::header::{COOKIE, HeaderMap, LOCATION, REFERER, SET_COOKIE};
 use reqwest::{Client, Proxy, Response, StatusCode, redirect::Policy};
 use url::Url;
 
+use crate::core::totp::current_totp_code;
+
 const FACEBOOK_HOME_URL: &str = "https://m.facebook.com/";
 const FACEBOOK_LOGIN_URL: &str = "https://m.facebook.com/login.php";
 const FACEBOOK_USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36";
@@ -570,136 +572,9 @@ fn current_two_factor_code(value: &str) -> Result<String> {
         .duration_since(UNIX_EPOCH)
         .context("Đồng hồ hệ thống không hợp lệ")?
         .as_secs();
-    totp_code_at(&compact, now)
-}
-
-fn totp_code_at(secret: &str, unix_seconds: u64) -> Result<String> {
-    let key = decode_base32(secret)?;
-    if key.is_empty() {
-        bail!("Mã 2FA không hợp lệ.");
-    }
-    let counter = unix_seconds / 30;
-    let digest = hmac_sha1(&key, &counter.to_be_bytes());
-    let offset = (digest[19] & 0x0f) as usize;
-    let binary = ((digest[offset] as u32 & 0x7f) << 24)
-        | ((digest[offset + 1] as u32) << 16)
-        | ((digest[offset + 2] as u32) << 8)
-        | digest[offset + 3] as u32;
-    Ok(format!("{:06}", binary % 1_000_000))
-}
-
-fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
-    const BLOCK_SIZE: usize = 64;
-    let mut normalized_key = [0_u8; BLOCK_SIZE];
-    if key.len() > BLOCK_SIZE {
-        normalized_key[..20].copy_from_slice(&sha1_digest(key));
-    } else {
-        normalized_key[..key.len()].copy_from_slice(key);
-    }
-
-    let mut inner = Vec::with_capacity(BLOCK_SIZE + message.len());
-    let mut outer = Vec::with_capacity(BLOCK_SIZE + 20);
-    for byte in normalized_key {
-        inner.push(byte ^ 0x36);
-        outer.push(byte ^ 0x5c);
-    }
-    inner.extend_from_slice(message);
-    outer.extend_from_slice(&sha1_digest(&inner));
-    sha1_digest(&outer)
-}
-
-fn sha1_digest(data: &[u8]) -> [u8; 20] {
-    let bit_len = (data.len() as u64) * 8;
-    let mut padded = data.to_vec();
-    padded.push(0x80);
-    while padded.len() % 64 != 56 {
-        padded.push(0);
-    }
-    padded.extend_from_slice(&bit_len.to_be_bytes());
-
-    let mut h0 = 0x67452301_u32;
-    let mut h1 = 0xefcdab89_u32;
-    let mut h2 = 0x98badcfe_u32;
-    let mut h3 = 0x10325476_u32;
-    let mut h4 = 0xc3d2e1f0_u32;
-
-    for chunk in padded.chunks_exact(64) {
-        let mut words = [0_u32; 80];
-        for (index, word) in words.iter_mut().take(16).enumerate() {
-            let offset = index * 4;
-            *word = u32::from_be_bytes([
-                chunk[offset],
-                chunk[offset + 1],
-                chunk[offset + 2],
-                chunk[offset + 3],
-            ]);
-        }
-        for index in 16..80 {
-            words[index] = (words[index - 3]
-                ^ words[index - 8]
-                ^ words[index - 14]
-                ^ words[index - 16])
-                .rotate_left(1);
-        }
-
-        let mut a = h0;
-        let mut b = h1;
-        let mut c = h2;
-        let mut d = h3;
-        let mut e = h4;
-        for (index, word) in words.iter().enumerate() {
-            let (f, k) = match index {
-                0..=19 => ((b & c) | ((!b) & d), 0x5a827999),
-                20..=39 => (b ^ c ^ d, 0x6ed9eba1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1bbcdc),
-                _ => (b ^ c ^ d, 0xca62c1d6),
-            };
-            let temp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(*word);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-        h0 = h0.wrapping_add(a);
-        h1 = h1.wrapping_add(b);
-        h2 = h2.wrapping_add(c);
-        h3 = h3.wrapping_add(d);
-        h4 = h4.wrapping_add(e);
-    }
-
-    let mut digest = [0_u8; 20];
-    for (index, value) in [h0, h1, h2, h3, h4].iter().enumerate() {
-        digest[index * 4..index * 4 + 4].copy_from_slice(&value.to_be_bytes());
-    }
-    digest
-}
-
-fn decode_base32(value: &str) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    let mut buffer = 0_u32;
-    let mut bits = 0_u8;
-    for ch in value.chars().filter(|ch| !ch.is_ascii_whitespace() && *ch != '=') {
-        let upper = ch.to_ascii_uppercase();
-        let digit = match upper {
-            'A'..='Z' => upper as u8 - b'A',
-            '2'..='7' => upper as u8 - b'2' + 26,
-            _ => bail!("Mã 2FA không hợp lệ."),
-        };
-        buffer = (buffer << 5) | digit as u32;
-        bits += 5;
-        if bits >= 8 {
-            bits -= 8;
-            output.push((buffer >> bits) as u8);
-            buffer &= (1_u32 << bits) - 1;
-        }
-    }
-    Ok(output)
+    current_totp_code(&compact, now)
+        .map(|code| code.code)
+        .ok_or_else(|| anyhow!("Mã 2FA không hợp lệ."))
 }
 
 #[cfg(test)]
@@ -748,7 +623,9 @@ mod tests {
     #[test]
     fn totp_matches_rfc_6238_sha1_vector_at_59_seconds() {
         assert_eq!(
-            totp_code_at("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59).unwrap(),
+            current_totp_code("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59)
+                .unwrap()
+                .code,
             "287082"
         );
     }

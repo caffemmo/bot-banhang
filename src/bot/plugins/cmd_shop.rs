@@ -19,6 +19,7 @@ use url::Url;
 use crate::app::AppContext;
 use crate::core::qr::vietqr_link;
 use crate::core::time::format_vietnam_time;
+use crate::core::totp::current_totp_code;
 use crate::domains::crypto_pay::models::{
     CryptoPaymentMethod, CryptoPaymentRequest, CryptoPaymentStatus,
 };
@@ -587,6 +588,10 @@ async fn shop_handle_callback(
             send_split_delivered_product(&ctx, msg.chat().id, q.from.id.0 as i64, order_id)
                 .await?;
         }
+    } else if let Some(order_id) = data.strip_prefix("delivery_2fa:") {
+        if let Some(msg) = &q.message {
+            send_delivery_2fa_code(&ctx, msg.chat().id, q.from.id.0 as i64, order_id).await?;
+        }
     } else if data.starts_with("qty:") {
         let qty: i64 = data["qty:".len()..].parse().unwrap_or(1);
         let state = dialogue.get().await?;
@@ -832,6 +837,103 @@ async fn shop_handle_callback(
             .reply_markup(shop_action_result_keyboard(&ctx, &lang))
             .await?;
     }
+
+    Ok(())
+}
+
+async fn send_delivery_2fa_code(
+    ctx: &Arc<AppContext>,
+    chat_id: ChatId,
+    user_id: i64,
+    order_id: &str,
+) -> Result<()> {
+    let Some(order) = orders_repo::get_order_with_product(&ctx.pool, order_id).await? else {
+        ctx.bot
+            .send_message(chat_id, "Không tìm thấy đơn hàng này.")
+            .await?;
+        return Ok(());
+    };
+
+    if order.order.user_id != user_id || order.order.chat_id != chat_id.0 {
+        ctx.bot
+            .send_message(chat_id, "Bạn không có quyền xem dữ liệu đơn hàng này.")
+            .await?;
+        return Ok(());
+    }
+
+    if order.order.status != OrderStatus::Paid {
+        ctx.bot
+            .send_message(chat_id, "Đơn hàng này chưa thanh toán thành công.")
+            .await?;
+        return Ok(());
+    }
+
+    let Some(delivered_data) = order
+        .order
+        .delivered_data
+        .as_deref()
+        .map(str::trim)
+        .filter(|data| !data.is_empty())
+    else {
+        ctx.bot
+            .send_message(chat_id, "Đơn hàng này chưa có dữ liệu sản phẩm.")
+            .await?;
+        return Ok(());
+    };
+
+    let secrets = orders_api::stock_delivery_two_fa_secrets(&order.product, delivered_data);
+    if secrets.is_empty() {
+        ctx.bot
+            .send_message(chat_id, "Không tìm thấy 2FA secret trong đơn hàng này.")
+            .await?;
+        return Ok(());
+    }
+
+    let now = Utc::now().timestamp().max(0) as u64;
+    let codes = secrets
+        .iter()
+        .filter_map(|secret| current_totp_code(secret, now))
+        .collect::<Vec<_>>();
+
+    if codes.is_empty() {
+        ctx.bot
+            .send_message(chat_id, "Không tạo được mã 2FA từ secret trong đơn hàng này.")
+            .await?;
+        return Ok(());
+    }
+
+    let seconds_remaining = codes
+        .iter()
+        .map(|code| code.seconds_remaining)
+        .min()
+        .unwrap_or(30);
+    let code_lines = if codes.len() == 1 {
+        format!("<code>{}</code>", orders_api::html_escape(&codes[0].code))
+    } else {
+        codes
+            .iter()
+            .enumerate()
+            .map(|(index, code)| {
+                format!(
+                    "{}. <code>{}</code>",
+                    index + 1,
+                    orders_api::html_escape(&code.code)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    ctx.bot
+        .send_message(
+            chat_id,
+            format!(
+                "🔐 Mã 2FA hiện tại:\n{}\n\n⏱ Mã đổi sau khoảng {} giây.",
+                code_lines, seconds_remaining
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .await?;
 
     Ok(())
 }
@@ -4452,6 +4554,7 @@ mod tests {
         assert!(is_shop_callback_data("shopnew:0"));
         assert!(is_shop_callback_data("shop_search"));
         assert!(is_shop_callback_data("delivery_copy:order-1"));
+        assert!(is_shop_callback_data("delivery_2fa:order-1"));
     }
 
     #[test]
@@ -5096,6 +5199,7 @@ fn is_shop_callback_data(text: &str) -> bool {
         || text.starts_with("buy:")
         || text.starts_with("usage:")
         || text.starts_with("delivery_copy:")
+        || text.starts_with("delivery_2fa:")
         || text.starts_with("qty:")
         || text.starts_with("plan:")
         || text.starts_with("cancel:")
