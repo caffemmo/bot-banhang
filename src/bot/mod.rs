@@ -59,6 +59,7 @@ pub enum State {
         cookie: String,
     },
     FacebookCookieInput,
+    TotpInput,
     FacebookUnlockIssue,
     FacebookUnlockCustomerUsername,
     FacebookUnlockDetails {
@@ -119,11 +120,11 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
         move |msg: Message, dialogue: BotDialogue| {
             let ctx = ctx.clone();
             async move {
-                let sensitive_cookie_input = matches!(
+                let sensitive_input = matches!(
                     dialogue.get().await.ok().flatten(),
-                    Some(State::FacebookCookieInput)
+                    Some(State::FacebookCookieInput | State::TotpInput)
                 );
-                let raw_msg = if sensitive_cookie_input {
+                let raw_msg = if sensitive_input {
                     None
                 } else {
                     serde_json::to_value(&msg).ok()
@@ -131,8 +132,8 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                 let from_user_id = msg.from().map(|u| u.id.0 as i64);
                 let chat_id = Some(msg.chat.id.0);
                 let msg_date = Some(msg.date.to_rfc3339());
-                let text = if sensitive_cookie_input {
-                    Some("[SENSITIVE FACEBOOK COOKIE INPUT REDACTED]")
+                let text = if sensitive_input {
+                    Some("[SENSITIVE BOT INPUT REDACTED]")
                 } else {
                     msg.text().map(|t| t.trim()).filter(|t| !t.is_empty())
                 };

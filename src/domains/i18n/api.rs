@@ -27,6 +27,7 @@ const REQUIRED_START_BUTTON_KEYS: &[&str] = &[
     "start_btn_shop",
     "start_btn_topup",
     "start_btn_topup_history",
+    "start_btn_totp",
     "start_btn_wallet",
 ];
 
@@ -53,6 +54,7 @@ fn required_start_button_default(key: &str) -> Option<&'static str> {
         "start_btn_shop" => Some("🛒 Shop"),
         "start_btn_topup" => Some("💰 Top up"),
         "start_btn_topup_history" => Some("📜 Top-up history"),
+        "start_btn_totp" => Some("🔐 Get 2FA code"),
         "start_btn_wallet" => Some("💳 Wallet"),
         "manual_product_plan_prompt" => Some("✅ You selected {product} - {price}\n{description}ℹ️ This product requires activation information.\n\n📅 Choose a plan/month below:"),
         "product_description_line" => Some("📝 Description:\n{description}\n\n"),

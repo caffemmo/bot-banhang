@@ -10,6 +10,7 @@ pub mod cmd_sale_hunt;
 pub mod cmd_shop;
 pub mod cmd_start;
 pub mod cmd_start_affiliate;
+pub mod cmd_totp;
 pub mod cmd_wallet;
 
 use crate::app::AppContext;
@@ -62,6 +63,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_start_affiliate::StartAffiliatePlugin),
         Box::new(cmd_start::StartCommandPlugin),
         Box::new(cmd_facebook_cookie::FacebookCookieCommandPlugin),
+        Box::new(cmd_totp::TotpCommandPlugin),
         Box::new(cmd_admin_menu::AdminMenuCommandPlugin),
         Box::new(cmd_affiliate::AffiliateCommandPlugin),
         Box::new(cmd_help::HelpCommandPlugin),

@@ -13,6 +13,7 @@ use crate::app::AppContext;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::plugins::cmd_facebook_cookie;
 use crate::bot::plugins::cmd_netflix;
+use crate::bot::plugins::cmd_totp;
 use crate::bot::{BotDialogue, chat_ui, i18n};
 
 pub struct StartAffiliatePlugin;
@@ -313,14 +314,22 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
         cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
     );
 
-    let mut promo_row = vec![cmd_netflix::monthly_gift_button_json(ctx, lang)];
+    let mut tool_row = Vec::new();
     if start_facebook_cookie_enabled(ctx) {
-        promo_row.push(cookie_button);
+        tool_row.push(cookie_button);
     }
+    tool_row.push(i18n::inline_button_callback_json(
+        ctx,
+        lang,
+        "start_btn_totp",
+        "🔐 Lấy mã 2FA",
+        cmd_totp::TOTP_CALLBACK,
+    ));
 
     let mut rows = vec![
         shop_row,
-        promo_row,
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
+        tool_row,
         vec![
             i18n::inline_button_callback_json(
                 ctx,
