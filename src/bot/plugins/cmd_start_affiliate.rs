@@ -314,22 +314,17 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
         cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
     );
 
-    let mut tool_row = Vec::new();
-    if start_facebook_cookie_enabled(ctx) {
-        tool_row.push(cookie_button);
-    }
-    tool_row.push(i18n::inline_button_callback_json(
+    let totp_button = i18n::inline_button_callback_json(
         ctx,
         lang,
         "start_btn_totp",
         "🔐 Lấy mã 2FA",
         cmd_totp::TOTP_CALLBACK,
-    ));
+    );
 
     let mut rows = vec![
         shop_row,
-        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
-        tool_row,
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang), totp_button],
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -363,6 +358,9 @@ fn start_menu_with_affiliate_keyboard_json(ctx: &AppContext, lang: &str) -> Valu
             ),
         ],
     ];
+    if start_facebook_cookie_enabled(ctx) {
+        rows.insert(2, vec![cookie_button]);
+    }
 
     let support_row = vec![
         i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),

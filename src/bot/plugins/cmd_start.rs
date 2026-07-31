@@ -323,22 +323,17 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
         cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK,
     );
 
-    let mut tool_row = Vec::new();
-    if start_facebook_cookie_enabled(ctx) {
-        tool_row.push(cookie_button);
-    }
-    tool_row.push(i18n::inline_button_callback_json(
+    let totp_button = i18n::inline_button_callback_json(
         ctx,
         lang,
         "start_btn_totp",
         "🔐 Lấy mã 2FA",
         cmd_totp::TOTP_CALLBACK,
-    ));
+    );
 
     let mut rows = vec![
         shop_row,
-        vec![cmd_netflix::monthly_gift_button_json(ctx, lang)],
-        tool_row,
+        vec![cmd_netflix::monthly_gift_button_json(ctx, lang), totp_button],
         vec![
             i18n::inline_button_callback_json(
                 ctx,
@@ -372,6 +367,9 @@ fn start_menu_keyboard_json(ctx: &AppContext, lang: &str) -> Value {
             ),
         ],
     ];
+    if start_facebook_cookie_enabled(ctx) {
+        rows.insert(2, vec![cookie_button]);
+    }
 
     let support_row = vec![
         i18n::inline_button_callback_json(ctx, lang, "start_btn_help", "Help", "start:help"),
@@ -453,27 +451,24 @@ fn start_menu_button_specs_from_texts(
         ));
     }
 
-    let mut tool_row = Vec::new();
-    if include_facebook_cookie {
-        tool_row.push((
-            texts.get_lang("start_btn_facebook_cookie", lang, "🍪 Get link cookie"),
-            cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string(),
-        ));
-    }
-    tool_row.push((
+    let cookie_row = (
+        texts.get_lang("start_btn_facebook_cookie", lang, "🍪 Get link cookie"),
+        cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string(),
+    );
+    let totp_button = (
         texts.get_lang("start_btn_totp", lang, "🔐 Lấy mã 2FA"),
         cmd_totp::TOTP_CALLBACK.to_string(),
-    ));
+    );
 
-    let rows = vec![
+    let mut rows = vec![
         shop_row,
         vec![
             (
                 texts.get_lang("start_btn_promo", lang, "🎁 Khuyến mãi"),
                 "netflix:monthly_gift_menu".to_string(),
             ),
+            totp_button,
         ],
-        tool_row,
         vec![
             (
                 texts.get_lang("start_btn_topup", lang, "Top up"),
@@ -511,6 +506,9 @@ fn start_menu_button_specs_from_texts(
             ),
         ],
     ];
+    if include_facebook_cookie {
+        rows.insert(2, vec![cookie_row]);
+    }
     rows
 }
 
@@ -572,10 +570,7 @@ fn start_reply_keyboard_button_rows(ctx: &AppContext, lang: &str) -> Vec<Vec<Val
         .unwrap_or_else(|_| {
             vec![
                 vec![json!({"text": "🛒 Shop"})],
-                vec![
-                    json!({"text": "🎁 Khuyến mãi"}),
-                    json!({"text": "🍪 Get link cookie"}),
-                ],
+                vec![json!({"text": "🎁 Khuyến mãi"}), json!({"text": "🔐 Lấy mã 2FA"})],
                 vec![json!({"text": "💰 Top up"}), json!({"text": "💳 Wallet"})],
                 vec![
                     json!({"text": "📦 Purchased"}),
@@ -1339,13 +1334,13 @@ mod tests {
                         "Khuyen mai".to_string(),
                         "netflix:monthly_gift_menu".to_string()
                     ),
+                    ("Lay 2FA".to_string(), cmd_totp::TOTP_CALLBACK.to_string()),
                 ],
                 vec![
                     (
                         "Lay cookie".to_string(),
                         cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK.to_string()
                     ),
-                    ("Lay 2FA".to_string(), cmd_totp::TOTP_CALLBACK.to_string()),
                 ],
                 vec![
                     ("Nap tien".to_string(), "wallet:topup".to_string()),
@@ -1373,11 +1368,11 @@ mod tests {
         assert_eq!(rows[0][0]["callback_data"], "start:shop");
         assert_eq!(rows[0][1]["callback_data"], "netflix:menu");
         assert_eq!(rows[1][0]["callback_data"], "netflix:monthly_gift_menu");
+        assert_eq!(rows[1][1]["callback_data"], cmd_totp::TOTP_CALLBACK);
         assert_eq!(
             rows[2][0]["callback_data"],
             cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK
         );
-        assert_eq!(rows[2][1]["callback_data"], cmd_totp::TOTP_CALLBACK);
         assert_eq!(rows[5][0]["callback_data"], "start:help");
         assert_eq!(rows[5][1]["url"], DEFAULT_REQUIRED_CHANNEL_URL);
         assert_eq!(rows[6][0]["callback_data"], "affiliate:register");
@@ -1399,8 +1394,8 @@ mod tests {
         let keyboard = start_menu_keyboard_json(&ctx, "vi");
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
-        assert_eq!(rows[2].as_array().unwrap().len(), 1);
-        assert_eq!(rows[2][0]["callback_data"], cmd_totp::TOTP_CALLBACK);
+        assert_eq!(rows[1].as_array().unwrap().len(), 2);
+        assert_eq!(rows[1][1]["callback_data"], cmd_totp::TOTP_CALLBACK);
         assert!(!keyboard
             .to_string()
             .contains(cmd_facebook_cookie::FACEBOOK_COOKIE_CALLBACK));
