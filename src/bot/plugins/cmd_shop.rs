@@ -17,7 +17,7 @@ use tracing::warn;
 use url::Url;
 
 use crate::app::AppContext;
-use crate::core::qr::vietqr_link;
+use crate::core::qr::{download_vietqr_image, vietqr_link};
 use crate::core::time::format_vietnam_time;
 use crate::core::totp::current_totp_code;
 use crate::domains::crypto_pay::models::{
@@ -2654,9 +2654,16 @@ async fn process_order(
             &[("time", "05:00".to_string())],
         ),
     );
+    let qr_photo = match download_vietqr_image(qr_url.as_str()).await {
+        Ok(image) => InputFile::memory(image).file_name(format!("qr_{}.png", order.id)),
+        Err(err) => {
+            warn!("failed to download VietQR image for order {}: {err}", order.id);
+            InputFile::url(qr_url)
+        }
+    };
     let qr_message = ctx
         .bot
-        .send_photo(chat_id, InputFile::url(qr_url))
+        .send_photo(chat_id, qr_photo)
         .caption(initial_caption)
         .parse_mode(ParseMode::Html)
         .reply_markup(keyboard.clone())

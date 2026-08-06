@@ -17,7 +17,7 @@ use crate::app::AppContext;
 use crate::bot::i18n;
 use crate::bot::plugins::AppPlugin;
 use crate::bot::{BotDialogue, State};
-use crate::core::qr::vietqr_link;
+use crate::core::qr::{download_vietqr_image, vietqr_link};
 use crate::core::time::format_vietnam_time;
 use crate::domains::crypto_pay::bep20 as bep20_pay;
 use crate::domains::crypto_pay::binance as binance_pay;
@@ -1343,9 +1343,16 @@ Amount: {amount}\n\n\
             &[("time", mmss((expires_at - Utc::now()).num_seconds()))],
         ),
     );
+    let qr_photo = match download_vietqr_image(qr_url.as_str()).await {
+        Ok(image) => InputFile::memory(image).file_name(format!("topup_qr_{topup_id}.png")),
+        Err(err) => {
+            warn!("failed to download VietQR image for topup {topup_id}: {err}");
+            InputFile::url(qr_url)
+        }
+    };
     let qr_message = ctx
         .bot
-        .send_photo(chat_id, InputFile::url(qr_url))
+        .send_photo(chat_id, qr_photo)
         .caption(initial_caption)
         .parse_mode(ParseMode::Html)
         .reply_markup(keyboard.clone())
