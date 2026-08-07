@@ -1,0 +1,13 @@
+[Unit]
+Description=Telegram Support Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/botbanhang
+ExecStart=/opt/botbanhang/supportbot
+Restart=on-failure
+EnvironmentFile=/opt/botbanhang/.env
+
+[Install]
+WantedBy=multi-user.target
