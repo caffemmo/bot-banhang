@@ -58,6 +58,11 @@ fn sanitize_config_payload(
     if let Some(length) = payload.get("order_memo_length").cloned() {
         payload.insert("order_memo_length".to_string(), length.trim().to_string());
     }
+    for key in ["support_manager_ids", "support_agent_ids", "support_overdue_minutes"] {
+        if let Some(value) = payload.get(key).cloned() {
+            payload.insert(key.to_string(), value.trim().to_string());
+        }
+    }
 
     Ok(payload)
 }
@@ -88,6 +93,38 @@ fn validate_config_payload(payload: &HashMap<String, String>) -> Result<(), ApiE
         }
     }
 
+    for key in ["support_manager_ids", "support_agent_ids"] {
+        if let Some(ids) = payload.get(key) {
+            validate_support_telegram_ids(key, ids)?;
+        }
+    }
+    if let Some(minutes) = payload.get("support_overdue_minutes") {
+        let minutes = minutes
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| ApiError::validation("support_overdue_minutes phải là số từ 5 đến 1440"))?;
+        if !(5..=1440).contains(&minutes) {
+            return Err(ApiError::validation(
+                "support_overdue_minutes phải nằm trong khoảng 5 đến 1440",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_support_telegram_ids(key: &str, value: &str) -> Result<(), ApiError> {
+    for id in value
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if id.parse::<i64>().ok().filter(|id| *id > 0).is_none() {
+            return Err(ApiError::validation(format!(
+                "{key} chỉ được chứa Telegram user ID dương, cách nhau bằng dấu phẩy hoặc xuống dòng"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -115,5 +152,24 @@ mod tests {
         let invalid_prefix =
             HashMap::from([("order_memo_prefix".to_string(), "SHOP-".to_string())]);
         assert!(validate_config_payload(&invalid_prefix).is_err());
+    }
+
+    #[test]
+    fn validates_support_team_configs() {
+        let valid = HashMap::from([
+            ("support_manager_ids".to_string(), "123, 456".to_string()),
+            ("support_agent_ids".to_string(), "789\n101".to_string()),
+            ("support_overdue_minutes".to_string(), "30".to_string()),
+        ]);
+        assert!(validate_config_payload(&valid).is_ok());
+
+        let invalid_id = HashMap::from([("support_agent_ids".to_string(), "abc".to_string())]);
+        assert!(validate_config_payload(&invalid_id).is_err());
+
+        let invalid_timeout = HashMap::from([(
+            "support_overdue_minutes".to_string(),
+            "2".to_string(),
+        )]);
+        assert!(validate_config_payload(&invalid_timeout).is_err());
     }
 }

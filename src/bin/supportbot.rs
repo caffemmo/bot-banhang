@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -27,6 +28,14 @@ struct SupportConfig {
 struct SupportContext {
     pool: SqlitePool,
     config: SupportConfig,
+    team: Arc<RwLock<SupportTeam>>,
+}
+
+#[derive(Clone)]
+struct SupportTeam {
+    manager_ids: HashSet<i64>,
+    agent_ids: HashSet<i64>,
+    overdue_minutes: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -57,17 +66,23 @@ async fn main() -> Result<()> {
 
     let config = SupportConfig::from_env()?;
     let pool = init_pool(&config.database_url).await?;
+    let team = load_support_team(&pool, &config).await?;
     let bot = Bot::new(config.token.clone());
     let me = bot.get_me().await?;
     register_commands(&bot).await?;
     tracing::info!(
         "Support bot started as @{} with {} manager(s) and {} agent(s)",
         me.user.username.unwrap_or_default(),
-        config.manager_ids.len(),
-        config.agent_ids.len()
+        team.manager_ids.len(),
+        team.agent_ids.len()
     );
 
-    let ctx = Arc::new(SupportContext { pool, config });
+    let ctx = Arc::new(SupportContext {
+        pool,
+        config,
+        team: Arc::new(RwLock::new(team)),
+    });
+    spawn_team_config_refresh(ctx.clone());
     Dispatcher::builder(bot, Update::filter_message().endpoint(handle_message))
         .dependencies(dptree::deps![ctx])
         .enable_ctrlc_handler()
@@ -117,6 +132,57 @@ impl SupportConfig {
             overdue_minutes: parse_overdue_minutes(),
         })
     }
+}
+
+impl SupportContext {
+    fn team(&self) -> SupportTeam {
+        self.team.read().expect("support team config lock poisoned").clone()
+    }
+}
+
+fn spawn_team_config_refresh(ctx: Arc<SupportContext>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(15));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            match load_support_team(&ctx.pool, &ctx.config).await {
+                Ok(team) => {
+                    *ctx.team.write().expect("support team config lock poisoned") = team;
+                }
+                Err(err) => tracing::warn!("Could not refresh support team config: {err}"),
+            }
+        }
+    });
+}
+
+async fn load_support_team(pool: &SqlitePool, config: &SupportConfig) -> Result<SupportTeam> {
+    let values: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM app_configs WHERE key IN ('support_manager_ids', 'support_agent_ids', 'support_overdue_minutes')",
+    )
+    .fetch_all(pool)
+    .await?;
+    let values = values.into_iter().collect::<std::collections::HashMap<_, _>>();
+    let manager_ids = values
+        .get("support_manager_ids")
+        .map(|value| parse_ids(value))
+        .filter(|ids| !ids.is_empty())
+        .unwrap_or_else(|| (*config.manager_ids).clone());
+    let agent_ids = values
+        .get("support_agent_ids")
+        .map(|value| parse_ids(value))
+        .filter(|ids| !ids.is_empty())
+        .unwrap_or_else(|| (*config.agent_ids).clone());
+    let overdue_minutes = values
+        .get("support_overdue_minutes")
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .filter(|minutes| (5..=1440).contains(minutes))
+        .unwrap_or(config.overdue_minutes);
+    Ok(SupportTeam {
+        manager_ids,
+        agent_ids,
+        overdue_minutes,
+    })
 }
 
 async fn init_pool(database_url: &str) -> Result<SqlitePool> {
@@ -386,11 +452,12 @@ async fn find_or_create_open_case(msg: &Message, ctx: &SupportContext) -> Result
 }
 
 async fn notify_staff_of_new_case(bot: &Bot, case: &SupportCase, ctx: &SupportContext) -> Result<()> {
-    for manager_id in &*ctx.config.manager_ids {
+    let team = ctx.team();
+    for manager_id in &team.manager_ids {
         send_case_header(bot, case, *manager_id, true, &ctx.pool).await?;
     }
-    for agent_id in &*ctx.config.agent_ids {
-        if !ctx.config.manager_ids.contains(agent_id) {
+    for agent_id in &team.agent_ids {
+        if !team.manager_ids.contains(agent_id) {
             send_case_header(bot, case, *agent_id, false, &ctx.pool).await?;
         }
     }
@@ -463,12 +530,13 @@ async fn copy_staff_reply_to_managers(
     ctx: &SupportContext,
 ) {
     let sender_id = sender_id(msg).unwrap_or_default();
+    let team = ctx.team();
     let label = format!(
         "📤 Case #{} | Phản hồi của {}",
         case.case_code,
         display_sender_name(msg)
     );
-    for manager_id in &*ctx.config.manager_ids {
+    for manager_id in &team.manager_ids {
         if *manager_id == sender_id {
             continue;
         }
@@ -534,8 +602,9 @@ async fn close_customer_case(bot: &Bot, msg: &Message, ctx: &SupportContext) -> 
 }
 
 async fn notify_case_closed(bot: &Bot, case: &SupportCase, actor_id: Option<i64>, ctx: &SupportContext) {
+    let team = ctx.team();
     let mut recipients = BTreeSet::new();
-    recipients.extend(ctx.config.manager_ids.iter().copied());
+    recipients.extend(team.manager_ids.iter().copied());
     if let Some(agent_id) = case.assigned_agent_id {
         recipients.insert(agent_id);
     }
@@ -547,8 +616,9 @@ async fn notify_case_closed(bot: &Bot, case: &SupportCase, actor_id: Option<i64>
 }
 
 async fn remove_case_from_other_agents(bot: &Bot, case_id: i64, assigned_agent_id: i64, ctx: &SupportContext) {
-    for agent_id in &*ctx.config.agent_ids {
-        if *agent_id != assigned_agent_id && !ctx.config.manager_ids.contains(agent_id) {
+    let team = ctx.team();
+    for agent_id in &team.agent_ids {
+        if *agent_id != assigned_agent_id && !team.manager_ids.contains(agent_id) {
             remove_case_from_agent(bot, case_id, *agent_id, &ctx.pool).await;
         }
     }
@@ -578,9 +648,10 @@ async fn remove_case_from_agent(bot: &Bot, case_id: i64, agent_id: i64, pool: &S
 }
 
 async fn send_manager_case_view(bot: &Bot, chat_id: ChatId, command: &str, ctx: &SupportContext) -> Result<()> {
+    let team = ctx.team();
     match command {
         "/cases" => {
-            let summary = case_summary(&ctx.pool, ctx.config.overdue_minutes).await?;
+            let summary = case_summary(&ctx.pool, team.overdue_minutes).await?;
             bot.send_message(
                 chat_id,
                 format!(
@@ -590,10 +661,10 @@ async fn send_manager_case_view(bot: &Bot, chat_id: ChatId, command: &str, ctx: 
             )
             .await?;
         }
-        "/new" => send_case_list(bot, chat_id, "Case mới", list_cases(&ctx.pool, "new", ctx.config.overdue_minutes).await?).await?,
-        "/active" => send_case_list(bot, chat_id, "Case đang xử lý", list_cases(&ctx.pool, "active", ctx.config.overdue_minutes).await?).await?,
-        "/overdue" => send_case_list(bot, chat_id, "Case quá hạn", list_cases(&ctx.pool, "overdue", ctx.config.overdue_minutes).await?).await?,
-        "/closed" => send_case_list(bot, chat_id, "Case đã đóng", list_cases(&ctx.pool, "closed", ctx.config.overdue_minutes).await?).await?,
+        "/new" => send_case_list(bot, chat_id, "Case mới", list_cases(&ctx.pool, "new", team.overdue_minutes).await?).await?,
+        "/active" => send_case_list(bot, chat_id, "Case đang xử lý", list_cases(&ctx.pool, "active", team.overdue_minutes).await?).await?,
+        "/overdue" => send_case_list(bot, chat_id, "Case quá hạn", list_cases(&ctx.pool, "overdue", team.overdue_minutes).await?).await?,
+        "/closed" => send_case_list(bot, chat_id, "Case đã đóng", list_cases(&ctx.pool, "closed", team.overdue_minutes).await?).await?,
         _ => {}
     }
     Ok(())
@@ -732,18 +803,20 @@ async fn list_cases(pool: &SqlitePool, view: &str, overdue_minutes: i64) -> Resu
 }
 
 async fn notify_managers(bot: &Bot, text: String, ctx: &SupportContext) {
-    for manager_id in &*ctx.config.manager_ids {
+    let team = ctx.team();
+    for manager_id in &team.manager_ids {
         let _ = bot.send_message(ChatId(*manager_id), &text).await;
     }
 }
 
 fn case_recipients(case: &SupportCase, ctx: &SupportContext) -> BTreeSet<i64> {
+    let team = ctx.team();
     let mut recipients = BTreeSet::new();
-    recipients.extend(ctx.config.manager_ids.iter().copied());
+    recipients.extend(team.manager_ids.iter().copied());
     if let Some(agent_id) = case.assigned_agent_id {
         recipients.insert(agent_id);
     } else {
-        recipients.extend(ctx.config.agent_ids.iter().copied());
+        recipients.extend(team.agent_ids.iter().copied());
     }
     recipients
 }
@@ -757,11 +830,11 @@ fn customer_identity(case: &SupportCase) -> String {
 }
 
 fn is_manager(user_id: i64, ctx: &SupportContext) -> bool {
-    ctx.config.manager_ids.contains(&user_id)
+    ctx.team().manager_ids.contains(&user_id)
 }
 
 fn is_agent(user_id: i64, ctx: &SupportContext) -> bool {
-    ctx.config.agent_ids.contains(&user_id)
+    ctx.team().agent_ids.contains(&user_id)
 }
 
 fn is_staff(msg: &Message, ctx: &SupportContext) -> bool {

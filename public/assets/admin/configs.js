@@ -127,6 +127,15 @@
         ]
       },
       {
+        title: 'Đội ngũ hỗ trợ',
+        icon: '🎧',
+        fields: [
+          { key: 'support_manager_ids', label: 'Telegram ID trưởng nhóm', value: '' },
+          { key: 'support_agent_ids', label: 'Telegram ID nhân viên hỗ trợ', value: '' },
+          { key: 'support_overdue_minutes', label: 'Quá hạn phản hồi (phút)', value: '30' },
+        ]
+      },
+      {
         title: 'Emoji Telegram',
         icon: '⭐',
         fields: [
@@ -293,6 +302,23 @@
           <textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="3"
             placeholder="123456789, 987654321">${escapeHtml(value)}</textarea>
           <div class="form-text">Nhập Telegram user ID của admin, cách nhau bằng dấu phẩy hoặc xuống dòng.</div>
+        `;
+      }
+      if (key === 'support_manager_ids' || key === 'support_agent_ids') {
+        const help = key === 'support_manager_ids'
+          ? 'Trưởng nhóm xem toàn bộ case và có thể chuyển case.'
+          : 'Nhân viên nhận case mới bằng /claim và chỉ xem case mình phụ trách.';
+        return `
+          <textarea class="form-control config-input" data-key="${escapeAttr(key)}" rows="3"
+            placeholder="123456789, 987654321">${escapeHtml(value)}</textarea>
+          <div class="form-text">${help} Nhập Telegram user ID, cách nhau bằng dấu phẩy hoặc xuống dòng.</div>
+        `;
+      }
+      if (key === 'support_overdue_minutes') {
+        return `
+          <input type="number" class="form-control config-input" data-key="${escapeAttr(key)}"
+            value="${escapeAttr(value)}" min="5" max="1440" step="1">
+          <div class="form-text">Bot đánh dấu case quá hạn khi không có hoạt động trong khoảng thời gian này.</div>
         `;
       }
       if (key === 'order_memo_prefix') {

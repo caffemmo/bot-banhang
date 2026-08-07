@@ -4,17 +4,13 @@
 
 ## Configuration
 
-Create a new bot with `@BotFather`, then add these values to `/opt/botbanhang/.env` on the VPS:
+Create a new bot with `@BotFather`, then add its token to `/opt/botbanhang/.env` on the VPS:
 
 ```ini
 SUPPORT_BOT_TOKEN=token_of_the_new_support_bot
-SUPPORT_MANAGER_IDS=123456789
-SUPPORT_AGENT_IDS=234567890,345678901
-SUPPORT_CASE_PREFIX=SUP
-SUPPORT_OVERDUE_MINUTES=30
 ```
 
-All IDs are Telegram **user IDs**, not usernames. Every manager and agent must send `/start` to the support bot once before Telegram permits the bot to notify them. `SUPPORT_ADMIN_IDS` remains accepted for the existing setup and is treated as `SUPPORT_MANAGER_IDS` when the newer variable is not set.
+Set `SUPPORT_CASE_PREFIX` in `.env` only when a non-default prefix is needed. Configure manager IDs, agent IDs, and overdue time in **Admin -> Cấu hình Bot -> Đội ngũ hỗ trợ**. Changes saved there reach the support bot automatically within 15 seconds. Every manager and agent must send `/start` to the support bot once before Telegram permits the bot to notify them.
 
 ## Install on the VPS
 
