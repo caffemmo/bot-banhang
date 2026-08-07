@@ -137,7 +137,7 @@ async fn handle_customer_message(bot: &Bot, msg: &Message, ctx: &SupportContext)
     if matches!(command, Some("/start") | Some("/help")) {
         bot.send_message(
             msg.chat.id,
-            "Xin chào. Hãy gửi nội dung cần tư vấn hoặc hỗ trợ, đội ngũ sẽ phản hồi tại đây.",
+            "👋 Xin chào! Hãy cho chúng mình biết bạn cần hỗ trợ điều gì. Càng cung cấp nhiều thông tin (mã đơn hàng, ảnh lỗi, nội dung gặp phải...), đội ngũ hỗ trợ sẽ tiếp nhận và phản hồi trong thời gian sớm nhất ngay tại cuộc trò chuyện này.",
         )
         .await?;
         return Ok(());
