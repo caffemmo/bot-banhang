@@ -8,11 +8,13 @@ Create a new bot with `@BotFather`, then add these values to `/opt/botbanhang/.e
 
 ```ini
 SUPPORT_BOT_TOKEN=token_of_the_new_support_bot
-SUPPORT_ADMIN_IDS=123456789,987654321
+SUPPORT_MANAGER_IDS=123456789
+SUPPORT_AGENT_IDS=234567890,345678901
 SUPPORT_CASE_PREFIX=SUP
+SUPPORT_OVERDUE_MINUTES=30
 ```
 
-`SUPPORT_ADMIN_IDS` contains Telegram **user IDs**, not usernames. Every admin must send `/start` to the support bot once before Telegram permits the bot to notify them.
+All IDs are Telegram **user IDs**, not usernames. Every manager and agent must send `/start` to the support bot once before Telegram permits the bot to notify them. `SUPPORT_ADMIN_IDS` remains accepted for the existing setup and is treated as `SUPPORT_MANAGER_IDS` when the newer variable is not set.
 
 ## Install on the VPS
 
@@ -39,9 +41,11 @@ sudo journalctl -u supportbot -f
 
 ## Using it
 
-- A customer sends any non-command message. The bot creates one open case and notifies every configured admin.
-- An admin replies directly to the case header or any copied customer message. The reply is copied to the customer without exposing the admin account.
+- A customer sends any non-command message. The bot creates one new case and notifies managers and available agents.
+- An agent replies `/claim` to the case header to accept it. The bot removes that case from other agents' chats, then routes future customer messages and images only to the assigned agent and managers.
+- A manager can reply to every case. An assigned agent can reply only to their own case.
+- An assigned agent or a manager replies `/transfer TELEGRAM_ID` to a case to transfer it. The new agent receives the most recent conversation history.
 - The customer sends `/close` to close their case.
-- An admin replies to a case header with `/close` to close it, or sends `/cases` to see the current number of open cases.
+- A manager uses `/cases` for a summary and `/new`, `/active`, `/overdue`, or `/closed` for a list. A case becomes overdue after `SUPPORT_OVERDUE_MINUTES` without activity.
 
 When a closed customer sends a new message, a new case is created automatically.
