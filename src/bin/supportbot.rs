@@ -288,7 +288,32 @@ async fn copy_customer_message_to_admins(
     case: &SupportCase,
     ctx: &SupportContext,
 ) {
+    let display_name = case
+        .user_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Chưa có tên");
+    let username = case
+        .username
+        .as_deref()
+        .map(|name| format!("@{name}"))
+        .unwrap_or_else(|| "không có username".to_string());
+    let label = format!(
+        "📩 Case #{} | Khách: {} ({})\nNội dung hoặc ảnh của khách ở ngay bên dưới.",
+        case.case_code, display_name, username
+    );
+
     for admin_id in &*ctx.config.admin_ids {
+        match bot.send_message(ChatId(*admin_id), &label).await {
+            Ok(marker) => {
+                if let Err(err) = record_admin_message(&ctx.pool, case.id, *admin_id, marker.id.0).await {
+                    tracing::warn!(admin_id, case_code = %case.case_code, "Could not map case marker: {err}");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(admin_id, case_code = %case.case_code, "Could not send case marker to admin: {err}");
+            }
+        }
         match bot.copy_message(ChatId(*admin_id), msg.chat.id, msg.id).await {
             Ok(copied) => {
                 if let Err(err) = record_admin_message(&ctx.pool, case.id, *admin_id, copied.0).await {
