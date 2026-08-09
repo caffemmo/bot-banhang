@@ -105,12 +105,6 @@ impl SupportConfig {
             .map(|value| parse_ids(&value))
             .filter(|ids| !ids.is_empty())
             .unwrap_or_else(|| manager_ids.clone());
-        if manager_ids.is_empty() && agent_ids.is_empty() {
-            return Err(anyhow!(
-                "Configure SUPPORT_MANAGER_IDS/SUPPORT_AGENT_IDS or the legacy SUPPORT_ADMIN_IDS"
-            ));
-        }
-
         let case_prefix = env::var("SUPPORT_CASE_PREFIX")
             .unwrap_or_else(|_| "SUP".to_string())
             .trim()
@@ -178,6 +172,11 @@ async fn load_support_team(pool: &SqlitePool, config: &SupportConfig) -> Result<
         .and_then(|value| value.trim().parse::<i64>().ok())
         .filter(|minutes| (5..=1440).contains(minutes))
         .unwrap_or(config.overdue_minutes);
+    if manager_ids.is_empty() && agent_ids.is_empty() {
+        return Err(anyhow!(
+            "No support team configured: save support_manager_ids or support_agent_ids in Admin"
+        ));
+    }
     Ok(SupportTeam {
         manager_ids,
         agent_ids,
