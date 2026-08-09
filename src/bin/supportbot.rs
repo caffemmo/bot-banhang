@@ -8,9 +8,13 @@ use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{FromRow, SqlitePool, migrate::MigrateDatabase};
 use teloxide::dispatching::UpdateFilterExt;
 use teloxide::dptree;
+use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::*;
 use teloxide::requests::Requester;
-use teloxide::types::{BotCommand, ChatId, Message, MessageId};
+use teloxide::types::{
+    BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+    MessageId,
+};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -83,7 +87,12 @@ async fn main() -> Result<()> {
         team: Arc::new(RwLock::new(team)),
     });
     spawn_team_config_refresh(ctx.clone());
-    Dispatcher::builder(bot, Update::filter_message().endpoint(handle_message))
+    Dispatcher::builder(
+        bot,
+        dptree::entry()
+            .branch(Update::filter_message().endpoint(handle_message))
+            .branch(Update::filter_callback_query().endpoint(handle_callback)),
+    )
         .dependencies(dptree::deps![ctx])
         .enable_ctrlc_handler()
         .build()
@@ -201,10 +210,6 @@ async fn register_commands(bot: &Bot) -> Result<()> {
     bot.set_my_commands(vec![
         bot_command("start", "Bắt đầu hỗ trợ"),
         bot_command("help", "Hướng dẫn sử dụng"),
-        bot_command("close", "Đóng case hiện tại"),
-        bot_command("claim", "Nhận case khi trả lời vào case"),
-        bot_command("transfer", "Chuyển case cho nhân viên"),
-        bot_command("cases", "Tổng quan case cho trưởng nhóm"),
     ])
     .await?;
     Ok(())
@@ -225,6 +230,98 @@ async fn handle_message(bot: Bot, msg: Message, ctx: Arc<SupportContext>) -> Res
     }
 }
 
+async fn handle_callback(bot: Bot, query: CallbackQuery, ctx: Arc<SupportContext>) -> Result<()> {
+    let Some(data) = query.data.as_deref() else {
+        return Ok(());
+    };
+    bot.answer_callback_query(query.id.clone()).await?;
+    let user_id = query.from.id.0 as i64;
+    let chat_id = query
+        .message
+        .as_ref()
+        .map(|message| message.chat().id)
+        .unwrap_or(ChatId(user_id));
+
+    match data {
+        "customer:close" => {
+            close_customer_case_for_user(&bot, chat_id, user_id, &ctx).await?;
+        }
+        "staff:help" => {
+            bot.send_message(chat_id, staff_help_text(is_manager(user_id, &ctx)))
+                .reply_markup(staff_home_keyboard(is_manager(user_id, &ctx)))
+                .await?;
+        }
+        "manager:summary" | "manager:new" | "manager:active" | "manager:overdue" | "manager:closed" => {
+            if !is_manager(user_id, &ctx) {
+                bot.send_message(chat_id, "Nút này chỉ dành cho trưởng nhóm.").await?;
+            } else {
+                let command = match data {
+                    "manager:summary" => "/cases",
+                    "manager:new" => "/new",
+                    "manager:active" => "/active",
+                    "manager:overdue" => "/overdue",
+                    _ => "/closed",
+                };
+                send_manager_case_view(&bot, chat_id, command, &ctx).await?;
+            }
+        }
+        _ if data.starts_with("case:") => {
+            handle_case_callback(&bot, &query, chat_id, user_id, data, &ctx).await?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn handle_case_callback(
+    bot: &Bot,
+    query: &CallbackQuery,
+    chat_id: ChatId,
+    user_id: i64,
+    data: &str,
+    ctx: &SupportContext,
+) -> Result<()> {
+    let mut parts = data.split(':');
+    let _ = parts.next();
+    let action = parts.next().unwrap_or_default();
+    let case_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+    let Some(case_id) = case_id else {
+        return Ok(());
+    };
+    let Some(case) = load_case_by_id(&ctx.pool, case_id).await? else {
+        bot.send_message(chat_id, "Case không còn tồn tại.").await?;
+        return Ok(());
+    };
+
+    match action {
+        "claim" => {
+            claim_case_for_user(bot, chat_id, user_id, &query.from.first_name, &case, ctx).await?;
+        }
+        "close" => {
+            if !can_handle_case(user_id, &case, ctx) {
+                bot.send_message(chat_id, "Case này đang do nhân viên khác phụ trách.").await?;
+            } else {
+                close_case_for_user(bot, chat_id, user_id, &case, ctx).await?;
+            }
+        }
+        "transfer" => {
+            if !can_handle_case(user_id, &case, ctx) {
+                bot.send_message(chat_id, "Bạn không có quyền chuyển case này.").await?;
+            } else {
+                send_transfer_picker(bot, chat_id, &case, user_id, ctx).await?;
+            }
+        }
+        "transfer_to" => {
+            let target_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+            if let Some(target_id) = target_id {
+                transfer_case_to(bot, chat_id, user_id, target_id, &case, ctx).await?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 async fn handle_customer_message(bot: &Bot, msg: &Message, ctx: &SupportContext) -> Result<()> {
     let command = command_name(msg);
     if matches!(command, Some("/start") | Some("/help")) {
@@ -232,6 +329,7 @@ async fn handle_customer_message(bot: &Bot, msg: &Message, ctx: &SupportContext)
             msg.chat.id,
             "👋 Xin chào! Hãy cho chúng mình biết bạn cần hỗ trợ điều gì. Càng cung cấp nhiều thông tin (mã đơn hàng, ảnh lỗi, nội dung gặp phải...), đội ngũ hỗ trợ sẽ tiếp nhận và phản hồi trong thời gian sớm nhất ngay tại cuộc trò chuyện này.",
         )
+        .reply_markup(customer_home_keyboard())
         .await?;
         return Ok(());
     }
@@ -251,6 +349,7 @@ async fn handle_customer_message(bot: &Bot, msg: &Message, ctx: &SupportContext)
             msg.chat.id,
             format!("Đã tạo case #{}. Đội ngũ sẽ phản hồi cho bạn tại đây.", case.case_code),
         )
+        .reply_markup(customer_home_keyboard())
         .await?;
         notify_staff_of_new_case(bot, &case, ctx).await?;
     }
@@ -264,7 +363,9 @@ async fn handle_staff_message(bot: &Bot, msg: &Message, ctx: &SupportContext) ->
     let user_id = sender_id(msg).unwrap_or_default();
 
     if matches!(command, Some("/start") | Some("/help")) {
-        bot.send_message(msg.chat.id, staff_help_text(is_manager(user_id, ctx))).await?;
+        bot.send_message(msg.chat.id, staff_help_text(is_manager(user_id, ctx)))
+            .reply_markup(staff_home_keyboard(is_manager(user_id, ctx)))
+            .await?;
         return Ok(());
     }
     if is_manager(user_id, ctx) && matches!(command, Some("/cases") | Some("/new") | Some("/active") | Some("/overdue") | Some("/closed")) {
@@ -290,6 +391,10 @@ async fn handle_staff_message(bot: &Bot, msg: &Message, ctx: &SupportContext) ->
     }
     if command == Some("/transfer") {
         transfer_case(bot, msg, &case, ctx).await?;
+        return Ok(());
+    }
+    if command == Some("/close") {
+        close_case_for_user(bot, msg.chat.id, user_id, &case, ctx).await?;
         return Ok(());
     }
     if !can_handle_case(user_id, &case, ctx) {
@@ -473,7 +578,7 @@ async fn send_case_header(
     let action = if is_manager_recipient {
         "Bạn có thể theo dõi và hỗ trợ case này."
     } else {
-        "Trả lời /claim vào tin nhắn này để nhận case."
+        "Bấm nút Nhận case bên dưới để bắt đầu hỗ trợ."
     };
     let text = format!(
         "Case #{} mới\nKhách: {}\nTelegram ID: {}\n\n{}",
@@ -482,7 +587,12 @@ async fn send_case_header(
         case.user_id,
         action
     );
-    match bot.send_message(ChatId(recipient_id), text).await {
+    let request = bot.send_message(ChatId(recipient_id), text).reply_markup(if is_manager_recipient {
+        manager_case_keyboard(case.id)
+    } else {
+        new_case_keyboard(case.id)
+    });
+    match request.await {
         Ok(header) => record_staff_message(pool, case.id, recipient_id, header.id.0).await,
         Err(err) => {
             tracing::warn!(recipient_id, case_code = %case.case_code, "Could not notify support staff: {err}");
@@ -503,7 +613,11 @@ async fn copy_customer_message_to_recipients(
         customer_identity(case)
     );
     for recipient_id in case_recipients(case, ctx) {
-        match bot.send_message(ChatId(recipient_id), &label).await {
+        match bot
+            .send_message(ChatId(recipient_id), &label)
+            .reply_markup(case_message_keyboard(case, recipient_id, ctx))
+            .await
+        {
             Ok(marker) => {
                 if let Err(err) = record_staff_message(&ctx.pool, case.id, recipient_id, marker.id.0).await {
                     tracing::warn!(recipient_id, case_code = %case.case_code, "Could not map case marker: {err}");
@@ -539,7 +653,11 @@ async fn copy_staff_reply_to_managers(
         if *manager_id == sender_id {
             continue;
         }
-        if let Ok(marker) = bot.send_message(ChatId(*manager_id), &label).await {
+        if let Ok(marker) = bot
+            .send_message(ChatId(*manager_id), &label)
+            .reply_markup(manager_case_keyboard(case.id))
+            .await
+        {
             let _ = record_staff_message(&ctx.pool, case.id, *manager_id, marker.id.0).await;
         }
         match bot.copy_message(ChatId(*manager_id), msg.chat.id, msg.id).await {
@@ -557,7 +675,11 @@ async fn deliver_transferred_case(bot: &Bot, case: &SupportCase, target_id: i64,
         case.case_code,
         customer_identity(case)
     );
-    match bot.send_message(ChatId(target_id), header).await {
+    match bot
+        .send_message(ChatId(target_id), header)
+        .reply_markup(active_case_keyboard(case.id))
+        .await
+    {
         Ok(message) => {
             let _ = record_staff_message(&ctx.pool, case.id, target_id, message.id.0).await;
         }
@@ -598,6 +720,218 @@ async fn close_customer_case(bot: &Bot, msg: &Message, ctx: &SupportContext) -> 
     bot.send_message(msg.chat.id, format!("Đã đóng case #{}.", case.case_code)).await?;
     notify_case_closed(bot, &case, None, ctx).await;
     Ok(())
+}
+
+async fn close_customer_case_for_user(
+    bot: &Bot,
+    chat_id: ChatId,
+    user_id: i64,
+    ctx: &SupportContext,
+) -> Result<()> {
+    let Some(case) = find_open_case(&ctx.pool, chat_id.0).await? else {
+        bot.send_message(chat_id, "Ban khong co case ho tro nao dang mo.").await?;
+        return Ok(());
+    };
+    if case.user_id != user_id {
+        bot.send_message(chat_id, "Ban khong co quyen dong case nay.").await?;
+        return Ok(());
+    }
+    close_case(&ctx.pool, case.id).await?;
+    bot.send_message(
+        chat_id,
+        format!("Case #{} da dong. Ban co the nhan tin moi neu can ho tro them.", case.case_code),
+    )
+    .reply_markup(customer_home_keyboard())
+    .await?;
+    notify_case_closed(bot, &case, None, ctx).await;
+    Ok(())
+}
+
+async fn close_case_for_user(
+    bot: &Bot,
+    chat_id: ChatId,
+    user_id: i64,
+    case: &SupportCase,
+    ctx: &SupportContext,
+) -> Result<()> {
+    if !can_handle_case(user_id, case, ctx) {
+        bot.send_message(chat_id, "Case nay dang do nhan vien khac phu trach.").await?;
+        return Ok(());
+    }
+    if case.status != "open" {
+        bot.send_message(chat_id, format!("Case #{} da dong.", case.case_code)).await?;
+        return Ok(());
+    }
+    close_case(&ctx.pool, case.id).await?;
+    bot.send_message(
+        ChatId(case.user_chat_id),
+        format!("Case #{} da duoc dong. Ban co the nhan tin moi neu can ho tro them.", case.case_code),
+    )
+    .await?;
+    notify_case_closed(bot, case, Some(user_id), ctx).await;
+    bot.send_message(chat_id, format!("Da dong case #{}.", case.case_code))
+        .reply_markup(staff_home_keyboard(is_manager(user_id, ctx)))
+        .await?;
+    Ok(())
+}
+
+async fn claim_case_for_user(
+    bot: &Bot,
+    chat_id: ChatId,
+    agent_id: i64,
+    agent_name: &str,
+    case: &SupportCase,
+    ctx: &SupportContext,
+) -> Result<()> {
+    if !is_agent(agent_id, ctx) {
+        bot.send_message(chat_id, "Chi nhan vien ho tro moi co the nhan case.").await?;
+        return Ok(());
+    }
+    let result = sqlx::query(
+        "UPDATE support_cases SET assigned_agent_id = ?, assigned_agent_name = ?, assigned_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open' AND assigned_agent_id IS NULL",
+    )
+    .bind(agent_id)
+    .bind(agent_name)
+    .bind(case.id)
+    .execute(&ctx.pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        bot.send_message(chat_id, "Case nay da duoc nhan hoac da dong.").await?;
+        return Ok(());
+    }
+    remove_case_from_other_agents(bot, case.id, agent_id, ctx).await;
+    let updated = load_case_by_id(&ctx.pool, case.id).await?.context("Claimed case was not found")?;
+    bot.send_message(chat_id, format!("Ban da nhan case #{}.", updated.case_code))
+        .reply_markup(active_case_keyboard(updated.id))
+        .await?;
+    notify_managers(bot, format!("Case #{} dang do {} xu ly.", updated.case_code, agent_name), ctx).await;
+    Ok(())
+}
+
+async fn send_transfer_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    case: &SupportCase,
+    sender_id: i64,
+    ctx: &SupportContext,
+) -> Result<()> {
+    if !can_handle_case(sender_id, case, ctx) {
+        bot.send_message(chat_id, "Ban khong co quyen chuyen case nay.").await?;
+        return Ok(());
+    }
+    let mut rows = Vec::new();
+    for target_id in ctx.team().agent_ids {
+        if target_id == sender_id || case.assigned_agent_id == Some(target_id) {
+            continue;
+        }
+        rows.push(vec![InlineKeyboardButton::callback(
+            format!("Nhan vien {target_id}"),
+            format!("case:transfer_to:{}:{target_id}", case.id),
+        )]);
+    }
+    if rows.is_empty() {
+        bot.send_message(chat_id, "Chua co nhan vien khac de chuyen case.").await?;
+    } else {
+        bot.send_message(chat_id, format!("Chon nhan vien nhan case #{}:", case.case_code))
+            .reply_markup(InlineKeyboardMarkup::new(rows))
+            .await?;
+    }
+    Ok(())
+}
+
+async fn transfer_case_to(
+    bot: &Bot,
+    chat_id: ChatId,
+    sender_id: i64,
+    target_id: i64,
+    case: &SupportCase,
+    ctx: &SupportContext,
+) -> Result<()> {
+    if !can_handle_case(sender_id, case, ctx) {
+        bot.send_message(chat_id, "Ban khong co quyen chuyen case nay.").await?;
+        return Ok(());
+    }
+    if !is_agent(target_id, ctx) {
+        bot.send_message(chat_id, "Nhan vien duoc chon khong con trong doi ho tro.").await?;
+        return Ok(());
+    }
+    if case.assigned_agent_id == Some(target_id) {
+        bot.send_message(chat_id, "Nhan vien nay dang phu trach case.").await?;
+        return Ok(());
+    }
+    let target_name = format!("Nhan vien {target_id}");
+    sqlx::query("UPDATE support_cases SET assigned_agent_id = ?, assigned_agent_name = ?, assigned_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'")
+        .bind(target_id)
+        .bind(&target_name)
+        .bind(case.id)
+        .execute(&ctx.pool)
+        .await?;
+    if let Some(previous_agent_id) = case.assigned_agent_id {
+        if previous_agent_id != target_id && !is_manager(previous_agent_id, ctx) {
+            remove_case_from_agent(bot, case.id, previous_agent_id, &ctx.pool).await;
+        }
+    }
+    let updated = load_case_by_id(&ctx.pool, case.id).await?.context("Transferred case was not found")?;
+    deliver_transferred_case(bot, &updated, target_id, ctx).await;
+    bot.send_message(chat_id, format!("Da chuyen case #{} cho {}.", updated.case_code, target_name))
+        .reply_markup(active_case_keyboard(updated.id))
+        .await?;
+    notify_managers(bot, format!("Case #{} duoc chuyen cho {}.", updated.case_code, target_name), ctx).await;
+    Ok(())
+}
+
+fn customer_home_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "Dong case hien tai",
+        "customer:close",
+    )]])
+}
+
+fn staff_home_keyboard(manager: bool) -> InlineKeyboardMarkup {
+    if manager {
+        InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback("Tong quan", "manager:summary")],
+            vec![
+                InlineKeyboardButton::callback("Case moi", "manager:new"),
+                InlineKeyboardButton::callback("Dang xu ly", "manager:active"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("Qua han", "manager:overdue"),
+                InlineKeyboardButton::callback("Da dong", "manager:closed"),
+            ],
+        ])
+    } else {
+        InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+            "Huong dan nhan case",
+            "staff:help",
+        )]])
+    }
+}
+
+fn active_case_keyboard(case_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback("Dong case", format!("case:close:{case_id}")),
+        InlineKeyboardButton::callback("Chuyen case", format!("case:transfer:{case_id}")),
+    ]])
+}
+
+fn manager_case_keyboard(case_id: i64) -> InlineKeyboardMarkup {
+    active_case_keyboard(case_id)
+}
+
+fn new_case_keyboard(case_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "Nhan case",
+        format!("case:claim:{case_id}"),
+    )]])
+}
+
+fn case_message_keyboard(case: &SupportCase, recipient_id: i64, ctx: &SupportContext) -> InlineKeyboardMarkup {
+    if is_manager(recipient_id, ctx) || case.assigned_agent_id == Some(recipient_id) {
+        active_case_keyboard(case.id)
+    } else {
+        new_case_keyboard(case.id)
+    }
 }
 
 async fn notify_case_closed(bot: &Bot, case: &SupportCase, actor_id: Option<i64>, ctx: &SupportContext) {
@@ -654,10 +988,11 @@ async fn send_manager_case_view(bot: &Bot, chat_id: ChatId, command: &str, ctx: 
             bot.send_message(
                 chat_id,
                 format!(
-                    "Tổng quan hỗ trợ\n\nMới: {}\nĐang xử lý: {}\nQuá hạn: {}\nĐã đóng: {}\n\n/new, /active, /overdue, /closed để xem danh sách.",
+                    "Tổng quan hỗ trợ\n\nMới: {}\nĐang xử lý: {}\nQuá hạn: {}\nĐã đóng: {}\n\nChọn nhóm case bằng các nút bên dưới.",
                     summary.0, summary.1, summary.2, summary.3
                 ),
             )
+            .reply_markup(staff_home_keyboard(true))
             .await?;
         }
         "/new" => send_case_list(bot, chat_id, "Case mới", list_cases(&ctx.pool, "new", team.overdue_minutes).await?).await?,
@@ -671,7 +1006,9 @@ async fn send_manager_case_view(bot: &Bot, chat_id: ChatId, command: &str, ctx: 
 
 async fn send_case_list(bot: &Bot, chat_id: ChatId, title: &str, cases: Vec<SupportCase>) -> Result<()> {
     if cases.is_empty() {
-        bot.send_message(chat_id, format!("{title}: không có case nào.")).await?;
+        bot.send_message(chat_id, format!("{title}: không có case nào."))
+            .reply_markup(staff_home_keyboard(true))
+            .await?;
         return Ok(());
     }
     let lines = cases
@@ -681,7 +1018,9 @@ async fn send_case_list(bot: &Bot, chat_id: ChatId, title: &str, cases: Vec<Supp
             format!("#{} | {} | {}", case.case_code, customer_identity(case), owner)
         })
         .collect::<Vec<_>>();
-    bot.send_message(chat_id, format!("{title}\n\n{}", lines.join("\n"))).await?;
+    bot.send_message(chat_id, format!("{title}\n\n{}", lines.join("\n")))
+        .reply_markup(staff_home_keyboard(true))
+        .await?;
     Ok(())
 }
 
@@ -863,9 +1202,9 @@ fn display_sender_name(msg: &Message) -> String {
 
 fn staff_help_text(manager: bool) -> &'static str {
     if manager {
-        "Nhân viên nhận case bằng cách trả lời /claim vào case mới. Bạn có thể trả lời mọi case, /transfer TELEGRAM_ID để chuyển case, và dùng /cases, /new, /active, /overdue, /closed để theo dõi."
+        "Dùng các nút bên dưới để xem danh sách case. Trên từng case, bạn có thể đóng hoặc chuyển case cho nhân viên khác."
     } else {
-        "Trả lời /claim vào case mới để nhận. Sau khi nhận, chỉ bạn và trưởng nhóm nhận tin mới của khách. Dùng /transfer TELEGRAM_ID khi trả lời vào case để chuyển, hoặc /close để đóng."
+        "Khi có case mới, bấm Nhận case. Sau khi nhận, chỉ bạn và trưởng nhóm nhận tin mới của khách; dùng các nút trên case để đóng hoặc chuyển."
     }
 }
 
