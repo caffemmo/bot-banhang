@@ -825,7 +825,7 @@ async fn send_transfer_picker(
             continue;
         }
         rows.push(vec![InlineKeyboardButton::callback(
-            format!("Nhan vien {target_id}"),
+            format!("👤 Nhân viên {target_id}"),
             format!("case:transfer_to:{}:{target_id}", case.id),
         )]);
     }
@@ -882,7 +882,7 @@ async fn transfer_case_to(
 
 fn customer_home_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        "Dong case hien tai",
+        "🔒 Đóng case hiện tại",
         "customer:close",
     )]])
 }
@@ -890,19 +890,19 @@ fn customer_home_keyboard() -> InlineKeyboardMarkup {
 fn staff_home_keyboard(manager: bool) -> InlineKeyboardMarkup {
     if manager {
         InlineKeyboardMarkup::new(vec![
-            vec![InlineKeyboardButton::callback("Tong quan", "manager:summary")],
+            vec![InlineKeyboardButton::callback("📊 Tổng quan", "manager:summary")],
             vec![
-                InlineKeyboardButton::callback("Case moi", "manager:new"),
-                InlineKeyboardButton::callback("Dang xu ly", "manager:active"),
+                InlineKeyboardButton::callback("🆕 Case mới", "manager:new"),
+                InlineKeyboardButton::callback("🔄 Đang xử lý", "manager:active"),
             ],
             vec![
-                InlineKeyboardButton::callback("Qua han", "manager:overdue"),
-                InlineKeyboardButton::callback("Da dong", "manager:closed"),
+                InlineKeyboardButton::callback("⏰ Quá hạn", "manager:overdue"),
+                InlineKeyboardButton::callback("✅ Đã đóng", "manager:closed"),
             ],
         ])
     } else {
         InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-            "Huong dan nhan case",
+            "📌 Hướng dẫn nhận case",
             "staff:help",
         )]])
     }
@@ -910,8 +910,8 @@ fn staff_home_keyboard(manager: bool) -> InlineKeyboardMarkup {
 
 fn active_case_keyboard(case_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback("Dong case", format!("case:close:{case_id}")),
-        InlineKeyboardButton::callback("Chuyen case", format!("case:transfer:{case_id}")),
+        InlineKeyboardButton::callback("🔒 Đóng case", format!("case:close:{case_id}")),
+        InlineKeyboardButton::callback("🔁 Chuyển case", format!("case:transfer:{case_id}")),
     ]])
 }
 
@@ -921,7 +921,7 @@ fn manager_case_keyboard(case_id: i64) -> InlineKeyboardMarkup {
 
 fn new_case_keyboard(case_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        "Nhan case",
+        "🙋 Nhận case",
         format!("case:claim:{case_id}"),
     )]])
 }
