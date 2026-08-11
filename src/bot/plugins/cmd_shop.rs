@@ -5163,7 +5163,6 @@ impl AppPlugin for ShopCommandPlugin {
             State::ViametaCollectingCookie { .. } => {}
             State::ViametaCollectingImage { .. } => {}
             State::FacebookCookieInput => {}
-            State::TotpInput => {}
             State::FacebookUnlockIssue => {}
             State::FacebookUnlockCustomerUsername => {}
             State::FacebookUnlockDetails { .. } => {}

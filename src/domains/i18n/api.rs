@@ -27,9 +27,10 @@ const REQUIRED_START_BUTTON_KEYS: &[&str] = &[
     "start_btn_shop",
     "start_btn_topup",
     "start_btn_topup_history",
-    "start_btn_totp",
     "start_btn_wallet",
 ];
+
+const RETIRED_BOT_TEXT_KEYS: &[&str] = &["start_btn_promo", "start_btn_totp"];
 
 const REQUIRED_SHOP_TEXT_KEYS: &[&str] = &[
     "manual_product_plan_prompt",
@@ -54,7 +55,6 @@ fn required_start_button_default(key: &str) -> Option<&'static str> {
         "start_btn_shop" => Some("🛒 Shop"),
         "start_btn_topup" => Some("💰 Top up"),
         "start_btn_topup_history" => Some("📜 Top-up history"),
-        "start_btn_totp" => Some("🔐 Get 2FA code"),
         "start_btn_wallet" => Some("💳 Wallet"),
         "manual_product_plan_prompt" => Some("✅ You selected {product} - {price}\n{description}ℹ️ This product requires activation information.\n\n📅 Choose a plan/month below:"),
         "product_description_line" => Some("📝 Description:\n{description}\n\n"),
@@ -118,7 +118,13 @@ pub async fn list_languages(
         .map(|language| {
             let key_count = texts
                 .export_language(&language.code)
-                .map(|export| export.bot.len())
+                .map(|export| {
+                    export
+                        .bot
+                        .keys()
+                        .filter(|key| !RETIRED_BOT_TEXT_KEYS.contains(&key.as_str()))
+                        .count()
+                })
                 .unwrap_or_default();
             LanguageListItem {
                 code: language.code,
@@ -139,6 +145,8 @@ pub async fn import_language(
 ) -> ApiResult<ImportLanguageResponse> {
     let import = BotTexts::parse_language_import(&payload.format, &payload.content)
         .map_err(ApiError::validation)?;
+    let mut import = import;
+    remove_retired_bot_text_keys(&mut import.texts);
     let imported_keys = repo::save_language_import(&ctx.config.i18n_dir, &import)
         .map_err(|err| ApiError::internal(format!("failed to import language: {err}")))?;
     reload_texts(&ctx)?;
@@ -158,6 +166,8 @@ pub async fn export_language(
     let export = texts
         .export_language(&code)
         .ok_or_else(|| ApiError::not_found(format!("language not found: {code}")))?;
+    let mut export = export;
+    remove_retired_bot_text_keys(&mut export.bot);
     Ok(ok(export))
 }
 
@@ -169,15 +179,17 @@ pub async fn language_detail(
     let language = texts
         .language_by_code(&code)
         .ok_or_else(|| ApiError::not_found(format!("language not found: {code}")))?;
-    let bot = texts
+    let mut bot = texts
         .export_language(&language.code)
         .map(|export| export.bot)
         .unwrap_or_default();
+    remove_retired_bot_text_keys(&mut bot);
     let mut keys = BTreeSet::new();
     keys.extend(texts.translation_base_keys());
     keys.extend(bot.keys().cloned());
     keys.extend(REQUIRED_START_BUTTON_KEYS.iter().map(|key| (*key).to_string()));
     keys.extend(REQUIRED_SHOP_TEXT_KEYS.iter().map(|key| (*key).to_string()));
+    keys.retain(|key| !RETIRED_BOT_TEXT_KEYS.contains(&key.as_str()));
     let keys: Vec<String> = keys.into_iter().collect();
     let fallback_bot = keys
         .iter()
@@ -215,13 +227,20 @@ pub async fn update_language(
     let language = texts
         .language_by_code(&code)
         .ok_or_else(|| ApiError::not_found(format!("language not found: {code}")))?;
+    let UpdateLanguagePayload {
+        mut bot,
+        emojis,
+        custom_emojis,
+    } = payload;
+    remove_retired_bot_text_keys(&mut bot);
     let updated_keys =
-        repo::save_language_texts(&ctx.config.i18n_dir, &language.code, &payload.bot)
+        repo::save_language_texts(&ctx.config.i18n_dir, &language.code, &bot)
             .map_err(|err| ApiError::internal(format!("failed to update language: {err}")))?;
-    if let Some(emojis) = payload.emojis {
+    if let Some(mut emojis) = emojis {
+        emojis.retain(|key, _| !RETIRED_BOT_TEXT_KEYS.contains(&key.as_str()));
         save_i18n_emoji_map(&ctx, emojis).await?;
     }
-    if let Some(custom_emojis) = payload.custom_emojis {
+    if let Some(custom_emojis) = custom_emojis {
         save_custom_emoji_map(&ctx, custom_emojis).await?;
     }
     reload_texts(&ctx)?;
@@ -231,6 +250,10 @@ pub async fn update_language(
         imported_keys: updated_keys,
         warnings: Vec::new(),
     }))
+}
+
+fn remove_retired_bot_text_keys(texts: &mut HashMap<String, String>) {
+    texts.retain(|key, _| !RETIRED_BOT_TEXT_KEYS.contains(&key.as_str()));
 }
 
 fn reload_texts(ctx: &AppContext) -> Result<(), ApiError> {
@@ -250,6 +273,7 @@ fn load_i18n_emoji_map(ctx: &AppContext) -> HashMap<String, I18nEmojiPrefix> {
     serde_json::from_str::<HashMap<String, Value>>(&raw)
         .unwrap_or_default()
         .into_iter()
+        .filter(|(key, _)| !RETIRED_BOT_TEXT_KEYS.contains(&key.as_str()))
         .filter_map(|(key, value)| {
             let key = key.trim().to_string();
             let prefix = I18nEmojiPrefix::from_json_value(&value)?;

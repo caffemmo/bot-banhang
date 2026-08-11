@@ -59,7 +59,6 @@ pub enum State {
         cookie: String,
     },
     FacebookCookieInput,
-    TotpInput,
     FacebookUnlockIssue,
     FacebookUnlockCustomerUsername,
     FacebookUnlockDetails {
@@ -122,7 +121,7 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
             async move {
                 let sensitive_input = matches!(
                     dialogue.get().await.ok().flatten(),
-                    Some(State::FacebookCookieInput | State::TotpInput)
+                    Some(State::FacebookCookieInput)
                 );
                 let raw_msg = if sensitive_input {
                     None
