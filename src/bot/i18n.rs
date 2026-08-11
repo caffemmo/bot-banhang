@@ -577,28 +577,7 @@ pub fn safe_message_payload_for_retry(mut payload: Value) -> Value {
         );
     }
 
-    if let Some(reply_markup) = obj.get_mut("reply_markup") {
-        strip_button_custom_emoji_fields(reply_markup);
-    }
-
     payload
-}
-
-fn strip_button_custom_emoji_fields(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            map.remove("icon_custom_emoji_id");
-            for child in map.values_mut() {
-                strip_button_custom_emoji_fields(child);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                strip_button_custom_emoji_fields(item);
-            }
-        }
-        _ => {}
-    }
 }
 
 pub async fn send_raw_telegram_method(
@@ -949,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn safe_message_retry_payload_removes_fragile_telegram_fields() {
+    fn safe_message_retry_payload_keeps_button_custom_emoji_icons() {
         let payload = json!({
             "chat_id": 1,
             "text": "",
@@ -975,7 +954,7 @@ mod tests {
         assert!(
             safe["reply_markup"]["inline_keyboard"][0][0]
                 .get("icon_custom_emoji_id")
-                .is_none()
+                .is_some()
         );
     }
 
