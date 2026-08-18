@@ -8,6 +8,7 @@ pub mod cmd_netflix;
 pub mod cmd_orders;
 pub mod cmd_sale_hunt;
 pub mod cmd_shop;
+pub mod cmd_stock_import;
 pub mod cmd_start;
 pub mod cmd_start_affiliate;
 pub mod cmd_wallet;
@@ -68,6 +69,7 @@ pub fn init_plugins() -> Vec<Box<dyn AppPlugin>> {
         Box::new(cmd_netflix::NetflixCommandPlugin),
         Box::new(cmd_broadcast::BroadcastCommandPlugin),
         Box::new(cmd_shop::ShopCommandPlugin),
+        Box::new(cmd_stock_import::StockImportCommandPlugin),
         Box::new(cmd_group_sales::GroupSalesCommandPlugin),
         Box::new(cmd_orders::OrdersCommandPlugin),
         Box::new(cmd_wallet::WalletCommandPlugin),

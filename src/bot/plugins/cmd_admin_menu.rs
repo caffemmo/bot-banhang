@@ -158,11 +158,11 @@ fn admin_back_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn admin_home_text() -> &'static str {
-    "🔐 <b>MENU ADMIN</b>\n\nMình tìm thấy <b>4 lệnh admin</b> trong source, cộng thêm menu mới <code>/admin</code>.\n\nChọn nhóm chức năng bên dưới để xem cách dùng."
+    "🔐 <b>MENU ADMIN</b>\n\nMình tìm thấy <b>5 lệnh admin</b> trong source, cộng thêm menu mới <code>/admin</code>.\n\nChọn nhóm chức năng bên dưới để xem cách dùng."
 }
 
 fn admin_all_commands_text() -> &'static str {
-    "📋 <b>TẤT CẢ LỆNH ADMIN</b>\n\n<b>Thông báo</b>\n<code>/broadcast</code> - mở danh sách mẫu thông báo và gửi broadcast.\n\n<b>CTV</b>\n<code>/ctvadd &lt;telegram_id&gt; [hoa_hong_%]</code> - thêm CTV thủ công.\n<code>/ctvoff &lt;telegram_id&gt;</code> - tắt CTV.\n<code>/ctvlist</code> - xem danh sách CTV.\n\n<b>Nhóm bán hàng</b>\n<code>/postproduct &lt;product_id&gt;</code> - đăng card sản phẩm vào group/chat hiện tại.\n\n<b>Hoàn tiền</b>\nKhông có lệnh gõ riêng. Admin bấm nút hoàn tiền trong thông báo đơn hàng."
+    "📋 <b>TẤT CẢ LỆNH ADMIN</b>\n\n<b>Thông báo</b>\n<code>/broadcast</code> - mở danh sách mẫu thông báo và gửi broadcast.\n\n<b>Nhập kho website</b>\n<code>/nhapkho &lt;ma_kho&gt;</code> rồi gửi mỗi tài khoản trên một dòng. Chỉ dùng trong chat riêng với bot.\n\n<b>CTV</b>\n<code>/ctvadd &lt;telegram_id&gt; [hoa_hong_%]</code> - thêm CTV thủ công.\n<code>/ctvoff &lt;telegram_id&gt;</code> - tắt CTV.\n<code>/ctvlist</code> - xem danh sách CTV.\n\n<b>Nhóm bán hàng</b>\n<code>/postproduct &lt;product_id&gt;</code> - đăng card sản phẩm vào group/chat hiện tại.\n\n<b>Hoàn tiền</b>\nKhông có lệnh gõ riêng. Admin bấm nút hoàn tiền trong thông báo đơn hàng."
 }
 
 fn admin_broadcast_text() -> &'static str {
