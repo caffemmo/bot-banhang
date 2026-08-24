@@ -1,0 +1,1757 @@
+:root {
+  --wine: #83181a;
+  --wine-dark: #3d0b0c;
+  --cream: #ffe4bc;
+  --gold: #fdbe17;
+  --sea: #092a32;
+  --sea-deep: #041b22;
+  --ink: #1d1511;
+  --white: #fffaf0;
+  --muted: #d8c9b0;
+  --line-light: rgb(255 228 188 / 0.22);
+  --line-dark: rgb(33 19 13 / 0.16);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--cream);
+  font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+button,
+a[href] {
+  touch-action: manipulation;
+}
+
+button {
+  border: 0;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 4px;
+}
+
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  padding: 10px 14px;
+  color: var(--wine-dark);
+  background: var(--gold);
+  border-radius: 8px;
+  transform: translateY(-150%);
+  transition: transform 180ms var(--ease-out);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.site-header {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  left: 50%;
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  align-items: center;
+  width: min(1240px, calc(100% - 48px));
+  min-height: 78px;
+  transform: translateX(-50%);
+  border-bottom: 1px solid var(--line-light);
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  width: max-content;
+  min-height: 52px;
+  padding: 0;
+  color: var(--cream);
+  background: transparent;
+  border-radius: 0;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brand-mark img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.brand-mark span {
+  white-space: nowrap;
+}
+
+.site-header nav {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  color: rgb(255 250 240 / 0.88);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.site-header nav a,
+.header-cta {
+  transition: color 180ms var(--ease-out), opacity 180ms var(--ease-out);
+}
+
+.site-header nav a:hover {
+  color: var(--gold);
+}
+
+.header-cta {
+  padding: 10px 14px;
+  color: var(--wine-dark);
+  background: var(--gold);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.header-cta:hover,
+.button-primary:hover {
+  background: #ffd05a;
+}
+
+.section-shell {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 760px;
+  overflow: hidden;
+  color: var(--white);
+  background: var(--sea-deep);
+}
+
+#ocean-canvas {
+  position: absolute;
+  z-index: -3;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.72;
+}
+
+.hero-glow {
+  position: absolute;
+  z-index: -2;
+  width: 360px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  opacity: 0.78;
+  filter: blur(36px);
+  pointer-events: none;
+}
+
+.hero-glow-one {
+  top: 11%;
+  left: 44%;
+  background: rgb(131 24 26 / 0.54);
+}
+
+.hero-glow-two {
+  right: -80px;
+  bottom: 4%;
+  background: rgb(253 190 23 / 0.15);
+}
+
+.hero-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.93fr) minmax(420px, 1.07fr);
+  align-items: center;
+  width: min(1180px, calc(100% - 48px));
+  min-height: 760px;
+  margin: 0 auto;
+  padding-top: 74px;
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 2;
+  padding: 48px 0 80px;
+}
+
+.eyebrow,
+.flavor-count {
+  margin: 0 0 16px;
+  color: var(--gold);
+  font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.hero h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+.hero h1 {
+  max-width: 610px;
+  margin-bottom: 20px;
+  font-size: clamp(44px, 5.2vw, 78px);
+  font-weight: 800;
+  line-height: 0.99;
+  letter-spacing: 0;
+}
+
+.hero-summary {
+  max-width: 470px;
+  margin-bottom: 30px;
+  color: rgb(255 250 240 / 0.8);
+  font-size: 17px;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 12px 17px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  transition: transform 180ms var(--ease-out), background 180ms var(--ease-out), color 180ms var(--ease-out),
+    border-color 180ms var(--ease-out);
+}
+
+.button:active,
+.flavor-tab:active,
+.header-cta:active {
+  transform: scale(0.98);
+}
+
+.button-primary {
+  color: var(--wine-dark);
+  background: var(--gold);
+}
+
+.button-secondary {
+  color: var(--white);
+  border: 1px solid rgb(255 250 240 / 0.52);
+}
+
+.button-secondary:hover {
+  color: var(--wine-dark);
+  background: var(--white);
+  border-color: var(--white);
+}
+
+.hero-product {
+  position: relative;
+  justify-self: end;
+  width: min(520px, 100%);
+  aspect-ratio: 0.9;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.product-surface {
+  position: absolute;
+  z-index: -1;
+  top: 4%;
+  right: 2%;
+  width: 78%;
+  aspect-ratio: 1;
+  background: var(--wine);
+  border-radius: 50%;
+  box-shadow: 0 34px 60px rgb(0 0 0 / 0.32);
+}
+
+.hero-product-image {
+  position: absolute;
+  z-index: 1;
+  top: 3%;
+  right: 3%;
+  width: 92%;
+  height: auto;
+  filter: drop-shadow(0 35px 30px rgb(0 0 0 / 0.34));
+  transform: rotate(1deg);
+}
+
+.anchovy-tag {
+  position: absolute;
+  z-index: 2;
+  bottom: 8%;
+  left: -8%;
+  width: 144px;
+  filter: drop-shadow(0 14px 18px rgb(0 0 0 / 0.28));
+  transform: rotate(-13deg);
+}
+
+.product-note {
+  position: absolute;
+  z-index: 3;
+  right: 1%;
+  bottom: 4%;
+  margin: 0;
+  color: rgb(255 250 240 / 0.75);
+  font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.intro-band {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  min-height: 72px;
+  padding: 14px 24px;
+  color: var(--cream);
+  background: var(--wine);
+}
+
+.intro-band p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.intro-band span {
+  width: 5px;
+  height: 5px;
+  background: var(--gold);
+  border-radius: 50%;
+}
+
+.collection {
+  padding: 132px 0 120px;
+}
+
+.section-heading {
+  max-width: 740px;
+  margin-bottom: 52px;
+}
+
+h2 {
+  margin-bottom: 18px;
+  font-size: clamp(34px, 4vw, 58px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.collection .eyebrow,
+.identity .eyebrow {
+  color: var(--wine);
+}
+
+.collection-stage {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 28px;
+  align-items: stretch;
+}
+
+.flavor-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.flavor-tab {
+  min-height: 52px;
+  padding: 14px 16px;
+  color: var(--wine);
+  background: transparent;
+  border: 1px solid rgb(131 24 26 / 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  text-align: left;
+  transition: transform 180ms var(--ease-out), background 180ms var(--ease-out), color 180ms var(--ease-out),
+    border-color 180ms var(--ease-out);
+}
+
+.flavor-tab:hover,
+.flavor-tab.is-active {
+  color: var(--cream);
+  background: var(--wine);
+  border-color: var(--wine);
+}
+
+.flavor-display {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(340px, 1.15fr);
+  min-height: 430px;
+  overflow: hidden;
+  color: var(--cream);
+  background: var(--wine-dark);
+  border-radius: var(--radius);
+}
+
+.flavor-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(30px, 5vw, 72px);
+}
+
+.flavor-copy h3 {
+  margin-bottom: 14px;
+  color: var(--white);
+  font-size: clamp(34px, 4vw, 54px);
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.flavor-copy > p:not(.flavor-count) {
+  max-width: 320px;
+  margin-bottom: 34px;
+  color: rgb(255 228 188 / 0.84);
+}
+
+.flavor-copy dl {
+  display: flex;
+  gap: 28px;
+  margin: 0;
+}
+
+.flavor-copy dl div {
+  min-width: 88px;
+}
+
+.flavor-copy dt {
+  margin-bottom: 5px;
+  color: rgb(255 228 188 / 0.68);
+  font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.flavor-copy dd {
+  margin: 0;
+  color: var(--gold);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.label-art {
+  position: relative;
+  display: grid;
+  align-items: end;
+  overflow: hidden;
+  background: #9d2020;
+}
+
+.label-art::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: rgb(253 190 23 / 0.12);
+  transform: skewX(-12deg) translateX(45%);
+}
+
+.label-art img {
+  position: relative;
+  width: 126%;
+  max-width: none;
+  margin: 0 -13% -2%;
+  filter: drop-shadow(0 24px 28px rgb(47 5 5 / 0.25));
+  transition: transform 380ms var(--ease-out), opacity 220ms var(--ease-out);
+}
+
+.label-art img.is-switching {
+  opacity: 0.55;
+  transform: scale(1.035);
+}
+
+.process {
+  padding: 128px 0;
+  color: var(--cream);
+  background: var(--sea);
+}
+
+.process-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(430px, 1.1fr);
+  gap: clamp(44px, 8vw, 130px);
+  align-items: start;
+}
+
+.process-statement {
+  position: sticky;
+  top: 34px;
+}
+
+.process-statement h2 {
+  color: var(--white);
+}
+
+.process-statement > p:not(.eyebrow) {
+  max-width: 390px;
+  margin-bottom: 0;
+  color: rgb(255 228 188 / 0.76);
+}
+
+.process-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-light);
+}
+
+.process-list li {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 22px;
+  padding: 29px 0;
+  border-bottom: 1px solid var(--line-light);
+}
+
+.process-list span {
+  color: var(--gold);
+  font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+
+.process-list h3 {
+  margin-bottom: 7px;
+  color: var(--white);
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.process-list p {
+  max-width: 460px;
+  margin-bottom: 0;
+  color: rgb(255 228 188 / 0.72);
+}
+
+.brand-story {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(340px, 0.92fr);
+  gap: clamp(40px, 8vw, 130px);
+  align-items: center;
+  padding: 130px 0;
+}
+
+.story-art {
+  position: relative;
+  min-height: 440px;
+}
+
+.story-disc {
+  position: absolute;
+  top: 4%;
+  left: 0;
+  width: min(430px, 80%);
+  aspect-ratio: 1;
+  background: var(--gold);
+  border-radius: 50%;
+}
+
+.story-art img {
+  position: absolute;
+  top: 4%;
+  left: -2%;
+  width: 105%;
+  height: 94%;
+  object-fit: contain;
+  object-position: left center;
+  filter: drop-shadow(0 20px 25px rgb(61 11 12 / 0.16));
+}
+
+.story-copy .eyebrow {
+  color: var(--wine);
+}
+
+.story-copy h2 {
+  color: var(--wine-dark);
+}
+
+.story-copy p:not(.eyebrow) {
+  max-width: 510px;
+  margin-bottom: 16px;
+  color: rgb(29 21 17 / 0.76);
+}
+
+.identity {
+  padding: 104px 0;
+  color: var(--cream);
+  background: var(--wine);
+}
+
+.identity-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.78fr) minmax(360px, 1.22fr);
+  gap: clamp(46px, 9vw, 160px);
+  align-items: center;
+}
+
+.identity-logo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 380px;
+  overflow: hidden;
+  background: var(--wine-dark);
+  border-radius: var(--radius);
+}
+
+.identity-logo::after {
+  position: absolute;
+  width: 300px;
+  aspect-ratio: 1;
+  border: 1px solid rgb(255 228 188 / 0.2);
+  border-radius: 50%;
+  content: "";
+}
+
+.identity-logo img {
+  position: relative;
+  z-index: 1;
+  width: min(238px, 62%);
+}
+
+.identity h2 {
+  color: var(--white);
+}
+
+.identity-copy > p:not(.eyebrow) {
+  max-width: 550px;
+  margin-bottom: 30px;
+  color: rgb(255 228 188 / 0.83);
+}
+
+.swatches {
+  display: flex;
+  gap: 10px;
+}
+
+.swatch {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 118px;
+  padding: 14px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.swatch span {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.swatch b {
+  font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.swatch-red {
+  color: var(--cream);
+  background: #5d1012;
+  border: 1px solid rgb(255 228 188 / 0.24);
+}
+
+.swatch-cream {
+  color: var(--wine-dark);
+  background: var(--cream);
+}
+
+.swatch-gold {
+  color: var(--wine-dark);
+  background: var(--gold);
+}
+
+.final-cta {
+  padding: 142px 0;
+  background: var(--sea-deep);
+}
+
+.final-cta-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.final-cta h2 {
+  max-width: 800px;
+  color: var(--white);
+}
+
+.site-footer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: center;
+  min-height: 96px;
+  padding: 20px max(24px, calc((100% - 1180px) / 2));
+  color: rgb(255 228 188 / 0.6);
+  background: #03161b;
+}
+
+.site-footer img {
+  width: 58px;
+}
+
+.site-footer p {
+  margin: 0;
+  font-size: 11px;
+}
+
+.site-footer p:last-child {
+  text-align: right;
+}
+
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 22px, 0);
+  transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+@media (max-width: 900px) {
+  .hero,
+  .hero-inner {
+    min-height: 760px;
+  }
+
+  .hero-inner {
+    grid-template-columns: 1fr;
+    align-content: start;
+    padding-top: 122px;
+  }
+
+  .hero-copy {
+    padding: 0;
+  }
+
+  .hero-product {
+    position: absolute;
+    right: -6%;
+    bottom: 6%;
+    width: min(520px, 70vw);
+    opacity: 0.86;
+  }
+
+  .process-grid,
+  .brand-story,
+  .identity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .process-statement {
+    position: static;
+  }
+
+  .collection-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .flavor-switcher {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .flavor-tab {
+    text-align: center;
+  }
+
+  .brand-story {
+    gap: 8px;
+  }
+
+  .story-art {
+    min-height: 420px;
+  }
+
+  .identity-logo {
+    min-height: 330px;
+  }
+}
+
+@media (max-width: 640px) {
+  .site-header {
+    grid-template-columns: auto 1fr;
+    width: calc(100% - 32px);
+    min-height: 66px;
+  }
+
+  .brand-mark {
+    gap: 7px;
+    min-height: 44px;
+    padding: 0;
+    font-size: 12px;
+  }
+
+  .brand-mark img {
+    width: 36px;
+    height: 36px;
+  }
+
+  .site-header nav {
+    display: none;
+  }
+
+  .header-cta {
+    justify-self: end;
+    padding: 9px 11px;
+    font-size: 11px;
+  }
+
+  .section-shell,
+  .hero-inner {
+    width: calc(100% - 32px);
+  }
+
+  .hero,
+  .hero-inner {
+    min-height: 780px;
+  }
+
+  .hero-inner {
+    padding-top: 104px;
+  }
+
+  .hero h1 {
+    font-size: clamp(42px, 13vw, 60px);
+  }
+
+  .hero-summary {
+    max-width: 325px;
+    font-size: 16px;
+  }
+
+  .hero-actions {
+    display: grid;
+    width: min(100%, 340px);
+  }
+
+  .button {
+    width: 100%;
+  }
+
+  .hero-product {
+    right: -5%;
+    bottom: -1%;
+    width: min(410px, 80vw);
+    opacity: 0.76;
+  }
+
+  .anchovy-tag {
+    bottom: 2%;
+    left: -4%;
+    width: 112px;
+  }
+
+  .product-note {
+    display: none;
+  }
+
+  .intro-band {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    min-height: 92px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+
+  .intro-band span {
+    display: none;
+  }
+
+  .intro-band p {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .collection,
+  .process,
+  .brand-story,
+  .identity,
+  .final-cta {
+    padding-top: 80px;
+    padding-bottom: 80px;
+  }
+
+  .section-heading {
+    margin-bottom: 32px;
+  }
+
+  h2 {
+    font-size: clamp(32px, 9vw, 44px);
+  }
+
+  .flavor-display {
+    grid-template-columns: 1fr;
+    min-height: 625px;
+  }
+
+  .flavor-copy {
+    justify-content: flex-start;
+    padding: 34px 26px 8px;
+  }
+
+  .label-art {
+    min-height: 320px;
+  }
+
+  .label-art img {
+    width: 148%;
+    margin: 0 -24% -4%;
+  }
+
+  .process-grid {
+    gap: 42px;
+  }
+
+  .process-list li {
+    grid-template-columns: 44px 1fr;
+    gap: 12px;
+  }
+
+  .story-art {
+    min-height: 306px;
+  }
+
+  .story-art img {
+    top: -3%;
+    width: 113%;
+  }
+
+  .swatches {
+    flex-direction: column;
+  }
+
+  .swatch {
+    min-height: 76px;
+  }
+
+  .site-footer {
+    grid-template-columns: auto 1fr;
+    gap: 12px 16px;
+    padding: 24px 16px;
+  }
+
+  .site-footer p:last-child {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Brand guideline sections */
+section[id] {
+  scroll-margin-top: 32px;
+}
+
+.section-heading > p:not(.eyebrow) {
+  max-width: 650px;
+  margin-bottom: 0;
+  color: rgb(29 21 17 / 0.72);
+}
+
+.guideline-overview {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.92fr) minmax(360px, 1.08fr);
+  gap: clamp(48px, 8vw, 132px);
+  align-items: center;
+  padding: 132px 0;
+}
+
+.guideline-overview-copy .eyebrow,
+.foundations .eyebrow,
+.applications .eyebrow,
+.packaging .eyebrow {
+  color: var(--wine);
+}
+
+.guideline-overview-copy h2 {
+  max-width: 560px;
+  color: var(--wine-dark);
+}
+
+.guideline-overview-copy > p:not(.eyebrow) {
+  max-width: 520px;
+  margin-bottom: 32px;
+  color: rgb(29 21 17 / 0.76);
+}
+
+.guideline-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  max-width: 440px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(131 24 26 / 0.28);
+}
+
+.guideline-jump a {
+  color: var(--wine);
+  font-size: 13px;
+  font-weight: 700;
+  transition: color 180ms var(--ease-out), transform 180ms var(--ease-out);
+}
+
+.guideline-jump a::after {
+  display: inline-block;
+  margin-left: 6px;
+  content: "↘";
+  color: var(--gold);
+}
+
+.guideline-jump a:hover {
+  color: #b3292d;
+  transform: translateY(-2px);
+}
+
+.inspiration-art {
+  position: relative;
+  margin: 0;
+  padding: clamp(14px, 2vw, 24px);
+  background: #fffaf0;
+  box-shadow: 16px 16px 0 var(--wine);
+}
+
+.inspiration-art::before {
+  position: absolute;
+  top: -13px;
+  right: 10%;
+  width: 82px;
+  height: 13px;
+  content: "";
+  background: var(--gold);
+  transform: rotate(2deg);
+}
+
+.inspiration-art img {
+  width: 100%;
+  aspect-ratio: 1.414;
+  object-fit: cover;
+}
+
+figcaption {
+  margin-top: 12px;
+  color: rgb(29 21 17 / 0.64);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.logo-system {
+  padding: 128px 0 136px;
+  color: var(--cream);
+  background: var(--sea);
+}
+
+.logo-system .section-heading {
+  max-width: 780px;
+  margin-bottom: 58px;
+}
+
+.logo-system .section-heading h2 {
+  color: var(--white);
+}
+
+.logo-system .section-heading > p:not(.eyebrow) {
+  color: rgb(255 228 188 / 0.76);
+}
+
+.logo-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(300px, 1.05fr);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: stretch;
+  margin-bottom: 28px;
+}
+
+.logo-master-card {
+  display: grid;
+  align-content: center;
+  min-height: 430px;
+  margin: 0;
+  padding: clamp(28px, 5vw, 58px);
+  background: var(--cream);
+}
+
+.logo-master-card img {
+  width: min(360px, 100%);
+  margin: 0 auto;
+}
+
+.logo-master-card figcaption {
+  color: var(--wine);
+  text-align: center;
+}
+
+.logo-rules {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.logo-rules h3,
+.pattern-band h3,
+.market-overview h3,
+.market-card h3 {
+  margin-bottom: 16px;
+  font-size: clamp(25px, 3vw, 38px);
+  font-weight: 800;
+  line-height: 1.14;
+}
+
+.logo-rules h3 {
+  max-width: 420px;
+  color: var(--white);
+}
+
+.logo-rules dl {
+  display: grid;
+  gap: 0;
+  margin: 4px 0 0;
+  border-top: 1px solid var(--line-light);
+}
+
+.logo-rules dl div {
+  display: grid;
+  grid-template-columns: 106px 1fr;
+  gap: 16px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line-light);
+}
+
+.logo-rules dt {
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logo-rules dd {
+  margin: 0;
+  color: rgb(255 228 188 / 0.8);
+  font-size: 14px;
+}
+
+.logo-gallery {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr 0.85fr;
+  grid-auto-rows: minmax(190px, auto);
+  gap: 14px;
+}
+
+.art-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 15px;
+  background: #fffaf0;
+  border: 1px solid rgb(131 24 26 / 0.16);
+}
+
+.art-card img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.art-card figcaption {
+  color: var(--wine);
+}
+
+.logo-gallery .art-card:first-child {
+  grid-row: span 2;
+}
+
+.logo-gallery .art-card:nth-child(4) {
+  grid-column: span 2;
+}
+
+.foundations {
+  padding: 132px 0;
+}
+
+.foundations .section-heading {
+  max-width: 800px;
+  margin-bottom: 54px;
+}
+
+.foundations h2,
+.applications h2 {
+  color: var(--wine-dark);
+}
+
+.foundation-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.08fr) minmax(270px, 0.92fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.foundation-feature {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: clamp(22px, 3vw, 38px);
+  background: var(--white);
+  border: 1px solid rgb(131 24 26 / 0.14);
+}
+
+.foundation-feature img {
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.foundation-feature figcaption {
+  color: var(--wine);
+}
+
+.foundation-stack {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 16px;
+}
+
+.pattern-band {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(280px, 1.15fr);
+  gap: clamp(28px, 5vw, 84px);
+  align-items: center;
+  margin-top: 16px;
+  padding: clamp(28px, 5vw, 64px);
+  color: var(--cream);
+  background: var(--wine);
+}
+
+.pattern-band img {
+  width: 100%;
+  max-height: 230px;
+  object-fit: contain;
+}
+
+.pattern-band h3 {
+  max-width: 480px;
+  color: var(--white);
+}
+
+.pattern-band > div > p:not(.eyebrow) {
+  max-width: 510px;
+  margin-bottom: 0;
+  color: rgb(255 228 188 / 0.84);
+}
+
+.research {
+  padding: 132px 0;
+  color: var(--cream);
+  background: var(--sea-deep);
+}
+
+.research .section-heading {
+  max-width: 810px;
+  margin-bottom: 52px;
+}
+
+.research .section-heading h2 {
+  color: var(--white);
+}
+
+.research .section-heading > p:not(.eyebrow) {
+  color: rgb(255 228 188 / 0.72);
+}
+
+.research-story-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-light);
+}
+
+.research-story {
+  min-height: 330px;
+  padding: clamp(28px, 4vw, 52px);
+  background: var(--sea-deep);
+}
+
+.research-story > span {
+  display: block;
+  margin-bottom: 42px;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.research-story h3 {
+  max-width: 400px;
+  margin-bottom: 15px;
+  color: var(--white);
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.research-story p {
+  max-width: 520px;
+  margin-bottom: 14px;
+  color: rgb(255 228 188 / 0.78);
+}
+
+.research-story .research-note {
+  margin-bottom: 0;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.market-overview {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.82fr);
+  gap: clamp(34px, 6vw, 98px);
+  align-items: center;
+  margin: 42px 0 18px;
+  padding: clamp(28px, 5vw, 60px);
+  color: var(--wine-dark);
+  background: var(--cream);
+}
+
+.market-overview .eyebrow {
+  color: var(--wine);
+}
+
+.market-overview h3 {
+  max-width: 590px;
+  margin-bottom: 0;
+}
+
+.market-overview > p {
+  max-width: 500px;
+  margin: 0;
+  color: rgb(61 11 12 / 0.78);
+}
+
+.market-compare {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.market-card {
+  min-height: 360px;
+  padding: 30px;
+  border: 1px solid var(--line-light);
+}
+
+.market-card-accent {
+  color: var(--wine-dark);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+.market-label {
+  margin-bottom: 28px;
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.market-card h3 {
+  min-height: 88px;
+  color: var(--white);
+  font-size: 24px;
+}
+
+.market-card-accent .market-label {
+  color: var(--wine);
+}
+
+.market-card-accent h3 {
+  color: var(--wine-dark);
+}
+
+.market-card ul {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.market-card li {
+  position: relative;
+  padding-left: 17px;
+  color: rgb(255 228 188 / 0.74);
+  font-size: 14px;
+}
+
+.market-card li::before {
+  position: absolute;
+  top: 0.67em;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  content: "";
+  background: var(--gold);
+  border-radius: 50%;
+}
+
+.market-card-accent li {
+  color: rgb(61 11 12 / 0.82);
+}
+
+.market-card-accent li::before {
+  background: var(--wine);
+}
+
+.applications {
+  padding: 132px 0;
+}
+
+.applications .section-heading {
+  max-width: 800px;
+  margin-bottom: 52px;
+}
+
+.application-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.application-grid-office {
+  grid-template-columns: repeat(12, 1fr);
+  margin-bottom: 14px;
+}
+
+.application-grid-media {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.application-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  background: #fffaf0;
+  border: 1px solid rgb(131 24 26 / 0.16);
+  transition: transform 240ms var(--ease-out), box-shadow 240ms var(--ease-out);
+}
+
+.application-card:hover {
+  box-shadow: 0 12px 0 rgb(131 24 26 / 0.16);
+  transform: translateY(-5px);
+}
+
+.application-card img {
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.application-card figcaption {
+  color: var(--wine);
+}
+
+.application-grid-office .application-card:nth-child(1),
+.application-grid-office .application-card:nth-child(2) {
+  grid-column: span 6;
+}
+
+.application-grid-office .application-card:nth-child(3),
+.application-grid-office .application-card:nth-child(4),
+.application-grid-office .application-card:nth-child(5) {
+  grid-column: span 4;
+}
+
+.application-grid-media .application-card {
+  min-height: 310px;
+}
+
+.application-grid-media .application-card img {
+  flex: 1;
+}
+
+.packaging {
+  padding: 130px 0;
+  color: var(--cream);
+  background: var(--wine);
+}
+
+.packaging .section-heading {
+  max-width: 780px;
+  margin-bottom: 54px;
+}
+
+.packaging .section-heading h2 {
+  color: var(--white);
+}
+
+.packaging .eyebrow {
+  color: var(--gold);
+}
+
+.packaging-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr 0.95fr 0.95fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.packaging-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 315px;
+  margin: 0;
+  padding: 16px;
+  background: var(--cream);
+}
+
+.packaging-card img {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.packaging-card figcaption {
+  color: var(--wine-dark);
+  font-weight: 700;
+}
+
+.packaging-card figcaption span {
+  margin-right: 7px;
+  color: var(--wine);
+}
+
+@media (max-width: 900px) {
+  .guideline-overview,
+  .foundation-layout,
+  .pattern-band,
+  .market-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .guideline-overview {
+    gap: 48px;
+  }
+
+  .inspiration-art {
+    width: min(650px, calc(100% - 18px));
+    justify-self: end;
+  }
+
+  .logo-primary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .logo-master-card {
+    min-height: 360px;
+  }
+
+  .research-story-grid,
+  .market-compare {
+    grid-template-columns: 1fr;
+  }
+
+  .market-card {
+    min-height: 0;
+  }
+
+  .market-card h3 {
+    min-height: 0;
+  }
+
+  .application-grid-media {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .packaging-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .guideline-overview,
+  .logo-system,
+  .foundations,
+  .research,
+  .applications,
+  .packaging {
+    padding-top: 80px;
+    padding-bottom: 80px;
+  }
+
+  .inspiration-art {
+    width: calc(100% - 12px);
+    padding: 12px;
+    box-shadow: 12px 12px 0 var(--wine);
+  }
+
+  .guideline-jump {
+    gap: 11px 18px;
+  }
+
+  .logo-primary-grid {
+    gap: 22px;
+  }
+
+  .logo-master-card {
+    min-height: 300px;
+    padding: 28px;
+  }
+
+  .logo-rules dl div {
+    grid-template-columns: 84px 1fr;
+    gap: 10px;
+  }
+
+  .logo-gallery {
+    grid-template-columns: 1fr 1fr;
+    grid-auto-rows: auto;
+  }
+
+  .logo-gallery .art-card:first-child,
+  .logo-gallery .art-card:nth-child(4) {
+    grid-column: span 2;
+    grid-row: auto;
+  }
+
+  .art-card {
+    padding: 10px;
+  }
+
+  .foundation-stack {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+  }
+
+  .pattern-band {
+    gap: 24px;
+    padding: 28px;
+  }
+
+  .research-story {
+    min-height: 0;
+    padding: 30px 25px;
+  }
+
+  .research-story > span {
+    margin-bottom: 28px;
+  }
+
+  .market-overview {
+    gap: 20px;
+    margin-top: 28px;
+    padding: 28px 24px;
+  }
+
+  .market-card {
+    padding: 27px 24px;
+  }
+
+  .application-grid-office,
+  .application-grid-media {
+    grid-template-columns: 1fr;
+  }
+
+  .application-grid-office .application-card:nth-child(n) {
+    grid-column: auto;
+  }
+
+  .application-grid-media .application-card {
+    min-height: 270px;
+  }
+
+  .packaging-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .packaging-card {
+    min-height: 275px;
+  }
+
+  .hero-product {
+    right: -1%;
+    bottom: -2%;
+    width: min(330px, 63vw);
+    opacity: 0.92;
+  }
+
+  .hero .button-secondary {
+    background: rgb(4 27 34 / 0.9);
+  }
+}
