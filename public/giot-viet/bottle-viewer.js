@@ -143,7 +143,6 @@ async function initBottleViewer() {
     pitch += (targetPitch - pitch) * 0.14;
     bottle.rotation.y = yaw;
     bottle.rotation.x = pitch;
-    bottle.userData.label.visible = Math.cos(yaw) > -0.04;
     shadow.rotation.z = yaw * -0.08;
     renderer.render(scene, camera);
 
@@ -219,7 +218,6 @@ function createBottle(labelSource, renderer) {
   neckCollar.position.y = 4.0;
 
   const label = createLabel(labelSource, renderer);
-  bottle.userData.label = label;
   bottle.add(sauce, sauceTop, body, neck, neckCollar, label, createCap(capMaterial, capHighlight, bandMaterial));
   return bottle;
 }
@@ -237,16 +235,18 @@ function createLabel(labelSource, renderer) {
   const texture = new THREE.CanvasTexture(labelCanvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
-  const material = new THREE.SpriteMaterial({
+  const material = new THREE.MeshStandardMaterial({
     map: texture,
     transparent: true,
-    depthTest: false,
-    depthWrite: false,
+    alphaTest: 0.05,
+    roughness: 0.46,
+    metalness: 0,
   });
-  const label = new THREE.Sprite(material);
-  label.scale.set(2.26, 4.18, 1);
-  label.position.set(0, -1.12, 1.82);
-  label.renderOrder = 8;
+
+  // This curved decal sits on the bottle surface, so it rotates with the bottle.
+  const geometry = new THREE.CylinderGeometry(1.04, 1.72, 4.18, 48, 1, true, -0.8, 1.6);
+  const label = new THREE.Mesh(geometry, material);
+  label.position.y = -1.12;
   return label;
 }
 
