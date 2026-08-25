@@ -319,6 +319,41 @@ p {
   transform: rotate(1deg);
 }
 
+.bottle-viewer {
+  position: absolute;
+  z-index: 2;
+  inset: -9% -8% -6% -8%;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 420ms var(--ease-out);
+}
+
+.bottle-viewer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  outline: none;
+}
+
+.bottle-viewer canvas:active {
+  cursor: grabbing;
+}
+
+.bottle-viewer:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 6px;
+}
+
+.hero-product.has-3d-viewer .bottle-viewer {
+  opacity: 1;
+}
+
+.hero-product.has-3d-viewer .hero-product-image {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .anchovy-tag {
   position: absolute;
   z-index: 2;
