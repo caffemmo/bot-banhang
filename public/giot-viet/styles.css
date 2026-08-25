@@ -1103,6 +1103,60 @@ section[id] {
   object-fit: cover;
 }
 
+.brand-guideline-full {
+  padding: 132px 0;
+  background: #f7edcf;
+}
+
+.brand-guideline-full-heading {
+  max-width: 680px;
+  margin-bottom: 54px;
+}
+
+.brand-guideline-full-heading .eyebrow {
+  color: var(--wine);
+}
+
+.brand-guideline-full-heading h2 {
+  max-width: 620px;
+  color: var(--wine-dark);
+}
+
+.brand-guideline-full-heading > p:not(.eyebrow) {
+  max-width: 600px;
+  margin-bottom: 0;
+  color: rgb(29 21 17 / 0.76);
+}
+
+.brand-guideline-full-document {
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: clamp(10px, 1.7vw, 18px);
+  background: var(--white);
+  box-shadow: 18px 18px 0 var(--wine);
+}
+
+.brand-guideline-full-document a {
+  display: block;
+}
+
+.brand-guideline-full-document img {
+  width: 100%;
+  height: auto;
+  transition: transform 240ms var(--ease-out);
+}
+
+.brand-guideline-full-document a:hover img {
+  transform: scale(1.008);
+}
+
+.brand-guideline-full-document figcaption {
+  padding: 15px 4px 1px;
+  color: var(--wine-dark);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 figcaption {
   margin-top: 12px;
   color: rgb(29 21 17 / 0.64);
@@ -1609,6 +1663,10 @@ figcaption {
     gap: 48px;
   }
 
+  .brand-guideline-full {
+    padding: 96px 0;
+  }
+
   .inspiration-art {
     width: min(650px, calc(100% - 18px));
     justify-self: end;
@@ -1646,6 +1704,7 @@ figcaption {
 
 @media (max-width: 640px) {
   .guideline-overview,
+  .brand-guideline-full,
   .logo-system,
   .foundations,
   .research,
@@ -1658,6 +1717,12 @@ figcaption {
   .inspiration-art {
     width: calc(100% - 12px);
     padding: 12px;
+    box-shadow: 12px 12px 0 var(--wine);
+  }
+
+  .brand-guideline-full-document {
+    width: calc(100% - 12px);
+    padding: 10px;
     box-shadow: 12px 12px 0 var(--wine);
   }
 
