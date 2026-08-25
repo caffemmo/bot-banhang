@@ -229,3 +229,130 @@ flavorTabs.forEach((tab) => {
     window.setTimeout(() => labelImage.classList.remove("is-switching"), 220);
   });
 });
+
+const deliveryOrderForm = document.querySelector("#delivery-order-form");
+const productOptions = Array.from(document.querySelectorAll(".product-option"));
+const orderSummaryItems = document.querySelector("#order-summary-items");
+const orderStatus = document.querySelector("#order-status");
+const orderSubmit = deliveryOrderForm?.querySelector(".order-submit");
+const selectedQuantities = new Map(productOptions.map((option) => [option.dataset.sku, 0]));
+
+function selectedProducts() {
+  return productOptions
+    .map((option) => {
+      const sku = option.dataset.sku;
+      const quantity = selectedQuantities.get(sku) || 0;
+      return {
+        sku,
+        name: option.dataset.name,
+        quantity,
+      };
+    })
+    .filter((item) => item.quantity > 0);
+}
+
+function renderOrderSummary() {
+  const products = selectedProducts();
+  orderSummaryItems.replaceChildren();
+
+  if (products.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "order-summary-empty";
+    empty.textContent = "Chưa có sản phẩm nào được chọn.";
+    orderSummaryItems.append(empty);
+    return;
+  }
+
+  products.forEach((product) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    const quantity = document.createElement("b");
+    name.textContent = product.name;
+    quantity.textContent = `x${product.quantity}`;
+    item.append(name, quantity);
+    orderSummaryItems.append(item);
+  });
+}
+
+function setOrderStatus(message, type = "") {
+  orderStatus.textContent = message;
+  orderStatus.classList.toggle("is-error", type === "error");
+  orderStatus.classList.toggle("is-success", type === "success");
+}
+
+function updateQuantity(option, action) {
+  const sku = option.dataset.sku;
+  const current = selectedQuantities.get(sku) || 0;
+  const next = action === "increase" ? Math.min(current + 1, 20) : Math.max(current - 1, 0);
+  selectedQuantities.set(sku, next);
+  option.querySelector("[data-quantity-for]").value = String(next);
+  option.classList.toggle("has-quantity", next > 0);
+  renderOrderSummary();
+  setOrderStatus("");
+}
+
+productOptions.forEach((option) => {
+  option.querySelectorAll("[data-quantity-action]").forEach((button) => {
+    button.addEventListener("click", () => updateQuantity(option, button.dataset.quantityAction));
+  });
+});
+
+deliveryOrderForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const products = selectedProducts();
+
+  if (products.length === 0) {
+    setOrderStatus("Vui lòng chọn ít nhất một sản phẩm trước khi gửi đơn.", "error");
+    productOptions[0]?.querySelector(".quantity-button")?.focus();
+    return;
+  }
+
+  if (!deliveryOrderForm.reportValidity()) {
+    return;
+  }
+
+  const formData = new FormData(deliveryOrderForm);
+  const payload = {
+    customer_name: formData.get("customer_name"),
+    phone: formData.get("phone"),
+    province: formData.get("province"),
+    ward: formData.get("ward"),
+    address: formData.get("address"),
+    delivery_note: formData.get("delivery_note"),
+    website: formData.get("website"),
+    items: products.map(({ sku, quantity }) => ({ sku, quantity })),
+  };
+
+  orderSubmit.disabled = true;
+  orderSubmit.textContent = "Đang gửi đơn...";
+  setOrderStatus("Đơn hàng đang được gửi đến Giọt Việt.");
+
+  try {
+    const response = await fetch("/api/giot-viet/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json().catch(() => null);
+
+    if (!response.ok || !result?.ok) {
+      throw new Error(result?.error?.message || "Không thể gửi đơn hàng.");
+    }
+
+    deliveryOrderForm.reset();
+    selectedQuantities.forEach((_, sku) => selectedQuantities.set(sku, 0));
+    productOptions.forEach((option) => {
+      option.classList.remove("has-quantity");
+      option.querySelector("[data-quantity-for]").value = "0";
+    });
+    renderOrderSummary();
+    setOrderStatus(`Đặt hàng thành công. Mã đơn của bạn là ${result.data.order_id}. Giọt Việt sẽ liên hệ để xác nhận.`, "success");
+  } catch (error) {
+    setOrderStatus("Chưa thể gửi đơn. Vui lòng kiểm tra kết nối và thử lại.", "error");
+  } finally {
+    orderSubmit.disabled = false;
+    orderSubmit.textContent = "Xác nhận đặt hàng";
+  }
+});
+
+renderOrderSummary();

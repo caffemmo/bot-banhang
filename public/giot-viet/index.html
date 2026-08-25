@@ -29,8 +29,9 @@
         <a href="#brand-guideline">Brand Guideline</a>
         <a href="#nghien-cuu">Nghiên cứu</a>
         <a href="#ung-dung">Ứng dụng</a>
+        <a href="#dat-hang">Mua nước mắm</a>
       </nav>
-      <a class="header-cta" href="#bao-bi">Xem bộ bao bì</a>
+      <a class="header-cta" href="#dat-hang">Đặt hàng</a>
     </header>
 
     <main id="main-content">
@@ -423,6 +424,128 @@
               <img src="assets/product-labels.png" alt="Nhãn các sản phẩm nước mắm Giọt Việt" loading="lazy" />
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="storefront" id="dat-hang" aria-labelledby="storefront-title">
+        <div class="section-shell">
+          <header class="storefront-heading reveal">
+            <p class="eyebrow">Mua nước mắm Giọt Việt</p>
+            <h2 id="storefront-title">Chọn vị mắm cho căn bếp của bạn.</h2>
+            <p>Chọn số chai, để lại địa chỉ. Giọt Việt sẽ gọi xác nhận giá, phí giao hàng và thời gian nhận hàng trước khi giao.</p>
+          </header>
+
+          <div class="storefront-selection reveal" aria-label="Chọn sản phẩm nước mắm">
+            <figure class="storefront-poster">
+              <img src="assets/product-collection.png" alt="Bộ ba nước mắm Giọt Việt gồm Mắm Gừng, Cá Cơm và Tỏi Ớt" loading="lazy" />
+              <figcaption>Ba sắc vị từ cá cơm Phú Quốc</figcaption>
+            </figure>
+
+            <div class="product-options" id="product-options">
+              <article class="product-option" data-sku="ca-com" data-name="Nước mắm Cá Cơm">
+                <div class="product-label product-label-anchovy" aria-hidden="true"></div>
+                <div class="product-option-copy">
+                  <p class="product-option-meta">40°N · 242 ml</p>
+                  <h3>Cá Cơm</h3>
+                  <p>Đậm vị mắm cốt, hậu ngọt tự nhiên cho bữa cơm Việt.</p>
+                </div>
+                <div class="quantity-picker" aria-label="Số lượng Nước mắm Cá Cơm">
+                  <button class="quantity-button" type="button" data-quantity-action="decrease" aria-label="Giảm số lượng Cá Cơm">−</button>
+                  <output class="quantity-value" data-quantity-for="ca-com" aria-live="polite">0</output>
+                  <button class="quantity-button" type="button" data-quantity-action="increase" aria-label="Tăng số lượng Cá Cơm">+</button>
+                </div>
+              </article>
+
+              <article class="product-option" data-sku="mam-gung" data-name="Nước mắm Gừng">
+                <div class="product-label product-label-ginger" aria-hidden="true"></div>
+                <div class="product-option-copy">
+                  <p class="product-option-meta">40°N · 242 ml</p>
+                  <h3>Mắm Gừng</h3>
+                  <p>Vị gừng ấm, thơm dịu, hợp món hấp, kho và các món chấm.</p>
+                </div>
+                <div class="quantity-picker" aria-label="Số lượng Nước mắm Gừng">
+                  <button class="quantity-button" type="button" data-quantity-action="decrease" aria-label="Giảm số lượng Mắm Gừng">−</button>
+                  <output class="quantity-value" data-quantity-for="mam-gung" aria-live="polite">0</output>
+                  <button class="quantity-button" type="button" data-quantity-action="increase" aria-label="Tăng số lượng Mắm Gừng">+</button>
+                </div>
+              </article>
+
+              <article class="product-option" data-sku="toi-ot" data-name="Nước mắm Tỏi Ớt">
+                <div class="product-label product-label-chili" aria-hidden="true"></div>
+                <div class="product-option-copy">
+                  <p class="product-option-meta">40°N · 242 ml</p>
+                  <h3>Tỏi Ớt</h3>
+                  <p>Thơm tỏi ớt, tròn vị, sẵn sàng cho những bữa ăn nhanh.</p>
+                </div>
+                <div class="quantity-picker" aria-label="Số lượng Nước mắm Tỏi Ớt">
+                  <button class="quantity-button" type="button" data-quantity-action="decrease" aria-label="Giảm số lượng Tỏi Ớt">−</button>
+                  <output class="quantity-value" data-quantity-for="toi-ot" aria-live="polite">0</output>
+                  <button class="quantity-button" type="button" data-quantity-action="increase" aria-label="Tăng số lượng Tỏi Ớt">+</button>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <form class="delivery-order-form reveal" id="delivery-order-form">
+            <div class="order-form-layout">
+              <fieldset class="delivery-fields">
+                <legend>Thông tin nhận hàng</legend>
+                <div class="form-grid form-grid-two">
+                  <label>
+                    <span>Họ và tên</span>
+                    <input name="customer_name" type="text" autocomplete="name" maxlength="100" required />
+                  </label>
+                  <label>
+                    <span>Số điện thoại</span>
+                    <input name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="20" required />
+                  </label>
+                </div>
+                <div class="form-grid form-grid-two">
+                  <label>
+                    <span>Tỉnh hoặc thành phố</span>
+                    <input name="province" type="text" autocomplete="address-level1" maxlength="100" required />
+                  </label>
+                  <label>
+                    <span>Phường, xã</span>
+                    <input name="ward" type="text" autocomplete="address-level2" maxlength="100" required />
+                  </label>
+                </div>
+                <label>
+                  <span>Địa chỉ nhận hàng</span>
+                  <input name="address" type="text" autocomplete="street-address" maxlength="250" required />
+                </label>
+                <label>
+                  <span>Ghi chú giao hàng <small>Không bắt buộc</small></span>
+                  <textarea name="delivery_note" rows="3" maxlength="500" placeholder="Ví dụ: Gọi trước khi giao hàng"></textarea>
+                </label>
+                <label class="form-honeypot" aria-hidden="true">
+                  <span>Website</span>
+                  <input name="website" type="text" tabindex="-1" autocomplete="off" />
+                </label>
+              </fieldset>
+
+              <aside class="order-summary" aria-labelledby="order-summary-title">
+                <div>
+                  <p class="eyebrow">Đơn hàng của bạn</p>
+                  <h3 id="order-summary-title">Đang chọn sản phẩm</h3>
+                </div>
+                <ul class="order-summary-items" id="order-summary-items" aria-live="polite">
+                  <li class="order-summary-empty">Chưa có sản phẩm nào được chọn.</li>
+                </ul>
+                <p class="order-summary-note">Giá và phí giao tận nơi được xác nhận qua điện thoại trước khi giao.</p>
+                <ul class="delivery-notes" aria-label="Quy trình giao hàng">
+                  <li>Nhân viên liên hệ xác nhận đơn.</li>
+                  <li>Giao tận nơi theo địa chỉ bạn cung cấp.</li>
+                  <li>Thanh toán theo hướng dẫn sau khi đã xác nhận.</li>
+                </ul>
+              </aside>
+            </div>
+
+            <div class="order-form-footer">
+              <p class="order-status" id="order-status" role="status" aria-live="polite"></p>
+              <button class="button button-primary order-submit" type="submit">Xác nhận đặt hàng</button>
+            </div>
+          </form>
         </div>
       </section>
 

@@ -12,6 +12,7 @@ pub mod client;
 pub mod configs;
 pub mod crypto_pay;
 pub mod i18n;
+pub mod giot_viet;
 pub mod orders;
 pub mod products;
 pub mod stats;
@@ -26,6 +27,7 @@ pub fn router(ctx: Arc<AppContext>) -> Router<Arc<AppContext>> {
         .merge(configs::api::router())
         .merge(crypto_pay::api::router())
         .merge(i18n::api::router())
+        .merge(giot_viet::admin_router())
         .merge(products::api::router())
         .merge(products::usage_instructions::router())
         .merge(orders::api::router())
@@ -42,6 +44,7 @@ pub fn router(ctx: Arc<AppContext>) -> Router<Arc<AppContext>> {
         .merge(auth::api::router())
         .merge(client::api::router())
         .merge(childbot::api::router())
+        .merge(giot_viet::router())
         .merge(orders::webhook::router())
         .merge(admin_routes)
 }
