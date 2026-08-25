@@ -2,7 +2,6 @@ import * as THREE from "./assets/vendor/three.module.js";
 
 const viewer = document.querySelector("#bottle-viewer");
 const product = document.querySelector(".hero-product");
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 if (viewer && product) {
   initBottleViewer().catch(() => {
@@ -11,11 +10,14 @@ if (viewer && product) {
 }
 
 async function initBottleViewer() {
-  const labelSource = await loadImage("assets/product-labels.png");
+  const [labelSource, bottleReference] = await Promise.all([
+    loadImage("assets/product-labels.png"),
+    loadImage("assets/product-bottles-reference.png"),
+  ]);
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(33, 1, 0.1, 100);
-  const bottle = createBottle(labelSource, renderer);
+  const bottle = createBottle(labelSource, bottleReference, renderer);
   const shadow = createShadow();
   let animationFrame = 0;
   let isVisible = true;
@@ -26,8 +28,6 @@ async function initBottleViewer() {
   let pitch = 0.03;
   let targetYaw = 0;
   let targetPitch = pitch;
-  let lastInteraction = performance.now();
-  let lastFrame = performance.now();
 
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0x000000, 0);
@@ -90,7 +90,6 @@ async function initBottleViewer() {
     isDragging = true;
     pointerId = event.pointerId;
     lastPointer = { x: event.clientX, y: event.clientY };
-    lastInteraction = performance.now();
     viewer.setPointerCapture(pointerId);
     queueRender();
   }
@@ -98,10 +97,9 @@ async function initBottleViewer() {
   function onPointerMove(event) {
     if (!isDragging || event.pointerId !== pointerId) return;
 
-    targetYaw += (event.clientX - lastPointer.x) * 0.012;
+    targetYaw = THREE.MathUtils.clamp(targetYaw + (event.clientX - lastPointer.x) * 0.008, -0.62, 0.62);
     targetPitch = THREE.MathUtils.clamp(targetPitch + (event.clientY - lastPointer.y) * 0.004, -0.18, 0.2);
     lastPointer = { x: event.clientX, y: event.clientY };
-    lastInteraction = performance.now();
     queueRender();
   }
 
@@ -110,20 +108,18 @@ async function initBottleViewer() {
     isDragging = false;
     if (viewer.hasPointerCapture(pointerId)) viewer.releasePointerCapture(pointerId);
     pointerId = null;
-    lastInteraction = performance.now();
     queueRender();
   }
 
   function onKeyDown(event) {
     const keyStep = 0.23;
-    if (event.key === "ArrowLeft") targetYaw -= keyStep;
-    else if (event.key === "ArrowRight") targetYaw += keyStep;
+    if (event.key === "ArrowLeft") targetYaw = THREE.MathUtils.clamp(targetYaw - keyStep, -0.62, 0.62);
+    else if (event.key === "ArrowRight") targetYaw = THREE.MathUtils.clamp(targetYaw + keyStep, -0.62, 0.62);
     else if (event.key === "ArrowUp") targetPitch = THREE.MathUtils.clamp(targetPitch - 0.08, -0.18, 0.2);
     else if (event.key === "ArrowDown") targetPitch = THREE.MathUtils.clamp(targetPitch + 0.08, -0.18, 0.2);
     else return;
 
     event.preventDefault();
-    lastInteraction = performance.now();
     queueRender();
   }
 
@@ -135,10 +131,6 @@ async function initBottleViewer() {
     animationFrame = 0;
     if (!isVisible) return;
 
-    const elapsed = Math.min((time - lastFrame) / 1000, 0.05);
-    lastFrame = time;
-    if (!reduceMotion.matches && !isDragging && time - lastInteraction > 900) targetYaw += elapsed * 0.055;
-
     yaw += (targetYaw - yaw) * 0.14;
     pitch += (targetPitch - pitch) * 0.14;
     bottle.rotation.y = yaw;
@@ -146,7 +138,7 @@ async function initBottleViewer() {
     shadow.rotation.z = yaw * -0.08;
     renderer.render(scene, camera);
 
-    if (!reduceMotion.matches || isDragging || Math.abs(targetYaw - yaw) > 0.001 || Math.abs(targetPitch - pitch) > 0.001) {
+    if (isDragging || Math.abs(targetYaw - yaw) > 0.001 || Math.abs(targetPitch - pitch) > 0.001) {
       queueRender();
     }
   }
@@ -160,9 +152,10 @@ async function initBottleViewer() {
   }
 }
 
-function createBottle(labelSource, renderer) {
+function createBottle(labelSource, bottleReference, renderer) {
   const bottle = new THREE.Group();
   bottle.position.y = -0.18;
+  bottle.scale.set(0.68, 1, 0.68);
 
   const glass = new THREE.MeshPhysicalMaterial({
     color: 0xddeff0,
@@ -218,8 +211,44 @@ function createBottle(labelSource, renderer) {
   neckCollar.position.y = 4.0;
 
   const label = createLabel(labelSource, renderer);
-  bottle.add(sauce, sauceTop, body, neck, neckCollar, label, createCap(capMaterial, capHighlight, bandMaterial));
+  const referenceFront = createReferenceFront(bottleReference, renderer);
+  bottle.add(sauce, sauceTop, body, neck, neckCollar, label, referenceFront, createCap(capMaterial, capHighlight, bandMaterial));
   return bottle;
+}
+
+function createReferenceFront(bottleReference, renderer) {
+  const frontCanvas = document.createElement("canvas");
+  frontCanvas.width = 512;
+  frontCanvas.height = 1536;
+  const context = frontCanvas.getContext("2d");
+  const sourceX = bottleReference.naturalWidth * 0.355;
+  const sourceWidth = bottleReference.naturalWidth * 0.3;
+  context.drawImage(
+    bottleReference,
+    sourceX,
+    0,
+    sourceWidth,
+    bottleReference.naturalHeight,
+    0,
+    0,
+    frontCanvas.width,
+    frontCanvas.height
+  );
+
+  const texture = new THREE.CanvasTexture(frontCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.03,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const front = new THREE.Mesh(new THREE.PlaneGeometry(4, 8.8), material);
+  front.position.set(0, 0.46, 1.8);
+  front.renderOrder = 20;
+  return front;
 }
 
 function createLabel(labelSource, renderer) {
