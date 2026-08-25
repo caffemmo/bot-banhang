@@ -181,11 +181,6 @@ if (!motionQuery.matches) {
   });
 
   function floatProduct() {
-    if (heroProduct.classList.contains("has-3d-viewer")) {
-      heroProduct.style.transform = "";
-      return;
-    }
-
     currentX += (pointerX - currentX) * 0.045;
     currentY += (pointerY - currentY) * 0.045;
     heroProduct.style.transform = `translate3d(${currentX * 18}px, ${currentY * 14}px, 0) rotateY(${currentX * -2.5}deg)`;
