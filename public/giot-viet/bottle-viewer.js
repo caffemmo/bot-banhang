@@ -243,11 +243,57 @@ function createLabel(labelSource, renderer) {
     metalness: 0,
   });
 
-  // This curved decal sits on the bottle surface, so it rotates with the bottle.
-  const geometry = new THREE.CylinderGeometry(1.04, 1.72, 4.18, 48, 1, true, -0.8, 1.6);
+  // This curved decal follows the changing radius of the bottle body.
+  const geometry = createLabelGeometry();
   const label = new THREE.Mesh(geometry, material);
-  label.position.y = -1.12;
   return label;
+}
+
+function createLabelGeometry() {
+  const rows = [
+    { y: -3.21, radius: 1.78 },
+    { y: -2.4, radius: 1.78 },
+    { y: -1.85, radius: 1.78 },
+    { y: -1.02, radius: 1.71 },
+    { y: -0.38, radius: 1.56 },
+    { y: 0.34, radius: 1.17 },
+    { y: 0.84, radius: 0.95 },
+    { y: 0.97, radius: 0.93 },
+  ];
+  const columns = 40;
+  const thetaStart = -0.76;
+  const thetaLength = 1.52;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+
+  for (let row = 0; row < rows.length; row += 1) {
+    const v = row / (rows.length - 1);
+    for (let column = 0; column <= columns; column += 1) {
+      const u = column / columns;
+      const theta = thetaStart + thetaLength * u;
+      const { radius, y } = rows[row];
+      positions.push(radius * Math.sin(theta), y, radius * Math.cos(theta));
+      uvs.push(u, v);
+    }
+  }
+
+  for (let row = 0; row < rows.length - 1; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const bottomLeft = row * (columns + 1) + column;
+      const topLeft = bottomLeft + columns + 1;
+      const bottomRight = bottomLeft + 1;
+      const topRight = topLeft + 1;
+      indices.push(bottomLeft, bottomRight, topLeft, bottomRight, topRight, topLeft);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function maskLabelCanvas(context, width, height) {
