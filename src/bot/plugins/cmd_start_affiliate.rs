@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::Utc;
 use serde_json::{Value, json};
 use sqlx::{FromRow, SqlitePool};
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
+use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
 use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message};
 use url::Url;
@@ -78,11 +78,6 @@ impl AppPlugin for StartAffiliatePlugin {
 
         match data {
             JOIN_CHECK_CALLBACK => {
-                let _ = ctx
-                    .bot
-                    .answer_callback_query(q.id.clone())
-                    .text("Đang kiểm tra...")
-                    .await;
                 let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
                 let joined = user_has_joined_required_channel(&ctx, q.from.id).await;
 
@@ -96,12 +91,6 @@ impl AppPlugin for StartAffiliatePlugin {
                 Ok(true)
             }
             AFFILIATE_REGISTER_CALLBACK => {
-                let _ = ctx
-                    .bot
-                    .answer_callback_query(q.id.clone())
-                    .text("Đang tạo link CTV...")
-                    .await;
-
                 let Some(msg) = &q.message else {
                     return Ok(true);
                 };

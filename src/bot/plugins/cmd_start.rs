@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::types::{
@@ -951,7 +950,6 @@ impl AppPlugin for StartCommandPlugin {
         };
 
         if data == "start:menu" {
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
@@ -977,11 +975,12 @@ impl AppPlugin for StartCommandPlugin {
                     "action_invalid",
                     "Invalid action. Please try again.",
                 );
-                let _ = ctx.bot.answer_callback_query(q.id.clone()).text(ack).await;
+                if let Some(msg) = &q.message {
+                    ctx.bot.send_message(msg.chat().id, ack).await?;
+                }
                 return Ok(true);
             }
             let lang = ctx.normalize_language_code(Some(lang));
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 upsert_subscriber_from_user(&ctx, &q.from, msg.chat().id.0, Some(lang.clone()))
                     .await;
@@ -999,7 +998,6 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == "start:help" {
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
@@ -1019,7 +1017,6 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == "start:language" {
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
@@ -1033,7 +1030,6 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == JOIN_CHECK_CALLBACK {
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
@@ -1061,7 +1057,6 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == "start:orders" {
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 cmd_orders::send_orders(ctx.clone(), ctx.bot.clone(), msg.chat().id, Some(&q.from))
                     .await?;
@@ -1070,7 +1065,6 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == "start:wallet" {
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 cmd_wallet::show_wallet(&ctx, msg.chat().id, q.from.id.0 as i64).await?;
             }

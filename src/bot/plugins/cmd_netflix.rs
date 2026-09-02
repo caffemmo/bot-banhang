@@ -114,7 +114,6 @@ impl AppPlugin for NetflixCommandPlugin {
             return Ok(false);
         }
 
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let Some(msg) = &q.message else {
             return Ok(true);
         };

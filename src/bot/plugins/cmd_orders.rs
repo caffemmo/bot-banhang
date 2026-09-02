@@ -1,7 +1,5 @@
 use std::sync::Arc;
-use teloxide::payloads::{
-    AnswerCallbackQuerySetters, EditMessageTextSetters, SendDocumentSetters, SendMessageSetters,
-};
+use teloxide::payloads::{EditMessageTextSetters, SendDocumentSetters, SendMessageSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, CallbackQuery, InputFile, Message, ParseMode, User};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
@@ -296,30 +294,19 @@ async fn handle_admin_refund_callback(
         .into_iter()
         .any(|allowed| allowed == admin_id)
     {
-        let _ = ctx
-            .bot
-            .answer_callback_query(q.id.clone())
-            .text("Bạn không có quyền hoàn tiền.")
-            .show_alert(true)
-            .await;
+        if let Some(msg) = &q.message {
+            ctx.bot
+                .send_message(msg.chat().id, "Bạn không có quyền hoàn tiền.")
+                .await?;
+        }
         return Ok(());
     }
 
     let Some(ref msg) = q.message else {
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         return Ok(());
     };
     let chat_id = msg.chat().id;
     let message_id = msg.id();
-    if data.starts_with("admin_refund:cancel:") {
-        let _ = ctx
-            .bot
-            .answer_callback_query(q.id.clone())
-            .text("Đã huỷ lệnh hoàn tiền.")
-            .await;
-    } else {
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
-    }
     let lang = i18n::user_lang(ctx, admin_id, q.from.language_code.as_deref()).await;
 
     if let Some(order_id) = data.strip_prefix("admin_order:view:") {
@@ -654,7 +641,6 @@ async fn show_orders_history(
 
 async fn handle_orders_callback(ctx: &Arc<AppContext>, q: CallbackQuery) -> anyhow::Result<()> {
     let data = q.data.clone().unwrap_or_default();
-    let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
     let Some(ref msg) = q.message else {
         return Ok(());
     };

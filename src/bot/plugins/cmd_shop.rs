@@ -361,7 +361,6 @@ async fn shop_handle_callback(
     let Some(data) = q.data.clone() else {
         return Ok(());
     };
-    let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
     let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
 
     if data == "start:shop" {

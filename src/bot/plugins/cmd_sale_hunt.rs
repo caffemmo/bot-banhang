@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 use rand::{Rng, distributions::Alphanumeric};
 use serde::Serialize;
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
+use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 use teloxide::types::{
     BotCommand, CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message,
@@ -112,7 +112,6 @@ impl AppPlugin for SaleHuntCommandPlugin {
         if !data.starts_with("salehunt:") {
             return Ok(false);
         }
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
         let Some(msg) = &q.message else {
             return Ok(true);

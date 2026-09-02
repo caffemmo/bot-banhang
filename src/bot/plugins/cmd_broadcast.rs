@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
+use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
 use teloxide::types::{
     BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
@@ -103,19 +103,12 @@ impl AppPlugin for BroadcastCommandPlugin {
         }
 
         if !ctx.is_telegram_icon_admin(q.from.id.0 as i64) {
-            let _ = ctx
-                .bot
-                .answer_callback_query(q.id.clone())
-                .text("Unauthorized")
-                .await;
+            if let Some(msg) = &q.message {
+                ctx.bot.send_message(msg.chat().id, "Unauthorized").await?;
+            }
             return Ok(true);
         }
 
-        let _ = ctx
-            .bot
-            .answer_callback_query(q.id.clone())
-            .text("Đang đưa vào hàng gửi...")
-            .await;
         let template_id = text
             .strip_prefix("bctpl:")
             .and_then(|value| value.parse::<i64>().ok())

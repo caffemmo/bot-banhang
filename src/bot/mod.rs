@@ -299,7 +299,31 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
             }
         });
 
+    let callback_ack_filter = dptree::filter_async({
+        let ctx = ctx.clone();
+        move |query: CallbackQuery| {
+            let bot = ctx.bot.clone();
+            let maintenance_message = if ctx.bot_maintenance_enabled()
+                && !ctx.is_telegram_admin(query.from.id.0 as i64)
+            {
+                Some(ctx.bot_maintenance_message())
+            } else {
+                None
+            };
+            async move {
+                let request = bot.answer_callback_query(query.id);
+                if let Some(message) = maintenance_message {
+                    let _ = request.text(message).show_alert(true).await;
+                } else {
+                    let _ = request.await;
+                }
+                true
+            }
+        }
+    });
+
     let callback_handler = Update::filter_callback_query()
+        .chain(callback_ack_filter)
         .enter_dialogue::<CallbackQuery, SqliteDialogueStorage, State>()
         .chain(plugin_callback_filter)
         .endpoint({
@@ -375,13 +399,6 @@ async fn block_callback_for_maintenance(ctx: &AppContext, q: &CallbackQuery) -> 
     }
 
     let message = ctx.bot_maintenance_message();
-    let _ = ctx
-        .bot
-        .answer_callback_query(q.id.clone())
-        .text(message.clone())
-        .show_alert(true)
-        .await;
-
     if let Some(msg) = &q.message {
         if let Err(err) = ctx.bot.send_message(msg.chat().id, message).await {
             tracing::warn!(

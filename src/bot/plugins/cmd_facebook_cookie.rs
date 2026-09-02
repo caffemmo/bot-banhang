@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use teloxide::payloads::{
-    AnswerCallbackQuerySetters, EditMessageTextSetters, SendDocumentSetters, SendMessageSetters,
-};
+use teloxide::payloads::{EditMessageTextSetters, SendDocumentSetters, SendMessageSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{
     BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message,
@@ -197,7 +195,6 @@ impl AppPlugin for FacebookCookieCommandPlugin {
         if q.data.as_deref() != Some(FACEBOOK_COOKIE_CALLBACK) {
             return Ok(false);
         }
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let Some(message) = q.message else {
             return Ok(true);
         };

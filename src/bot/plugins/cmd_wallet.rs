@@ -460,8 +460,6 @@ async fn handle_wallet_callback(
     dialogue: BotDialogue,
 ) -> Result<()> {
     let data = q.data.clone().unwrap_or_default();
-    let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
-
     let Some(ref msg) = q.message else {
         return Ok(());
     };

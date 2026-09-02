@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessageSetters};
+use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::Requester;
 use teloxide::types::{
     BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode,
@@ -77,16 +77,14 @@ impl AppPlugin for AdminMenuCommandPlugin {
         }
 
         if !is_admin_user(&ctx, q.from.id.0 as i64) {
-            let _ = ctx
-                .bot
-                .answer_callback_query(q.id.clone())
-                .text("Bạn không có quyền admin.")
-                .show_alert(true)
-                .await;
+            if let Some(msg) = &q.message {
+                ctx.bot
+                    .send_message(msg.chat().id, "Bạn không có quyền admin.")
+                    .await?;
+            }
             return Ok(true);
         }
 
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let Some(msg) = &q.message else {
             return Ok(true);
         };
