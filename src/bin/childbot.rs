@@ -257,6 +257,7 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
         return Ok(());
     }
     if let Some(product_id) = data.strip_prefix("buy:").and_then(|raw| raw.parse::<i64>().ok()) {
+        let _ = bot.answer_callback_query(q.id.clone()).await;
         create_purchase_request(&bot, &q, &ctx, product_id, None).await?;
         return Ok(());
     }
@@ -265,6 +266,7 @@ async fn handle_callback(bot: Bot, q: CallbackQuery, ctx: Arc<ChildBotContext>) 
         let product_id = parts.next().and_then(|raw| raw.parse::<i64>().ok());
         let plan_id = parts.next().and_then(|raw| raw.parse::<i64>().ok());
         if let (Some(product_id), Some(plan_id)) = (product_id, plan_id) {
+            let _ = bot.answer_callback_query(q.id.clone()).await;
             create_purchase_request(&bot, &q, &ctx, product_id, Some(plan_id)).await?;
         }
         return Ok(());
@@ -691,10 +693,6 @@ async fn create_purchase_request(
     .await
     {
         Ok(response) => {
-            let _ = bot
-                .answer_callback_query(q.id.clone())
-                .text("Mua hàng thành công")
-                .await;
             if let Some(msg) = &q.message {
                 let order_id = response.order_id.unwrap_or_else(|| "-".to_string());
                 let balance_after = response
@@ -717,10 +715,6 @@ async fn create_purchase_request(
             }
         }
         Err(err) => {
-            let _ = bot
-                .answer_callback_query(q.id.clone())
-                .text("Không mua được sản phẩm")
-                .await;
             if let Some(msg) = &q.message {
                 bot.send_message(msg.chat().id, format!("❌ {err}")).await?;
             }

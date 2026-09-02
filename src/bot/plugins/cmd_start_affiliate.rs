@@ -78,19 +78,13 @@ impl AppPlugin for StartAffiliatePlugin {
 
         match data {
             JOIN_CHECK_CALLBACK => {
+                let _ = ctx
+                    .bot
+                    .answer_callback_query(q.id.clone())
+                    .text("Đang kiểm tra...")
+                    .await;
                 let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
                 let joined = user_has_joined_required_channel(&ctx, q.from.id).await;
-                let ack = if joined {
-                    i18n::t(&ctx, &lang, "required_channel_joined", "Đã xác nhận tham gia channel.")
-                } else {
-                    i18n::t(
-                        &ctx,
-                        &lang,
-                        "required_channel_not_joined",
-                        "Bot chưa thấy bạn trong channel, vui lòng tham gia rồi thử lại.",
-                    )
-                };
-                let _ = ctx.bot.answer_callback_query(q.id.clone()).text(ack).await;
 
                 if let Some(msg) = &q.message {
                     if joined {
@@ -102,11 +96,10 @@ impl AppPlugin for StartAffiliatePlugin {
                 Ok(true)
             }
             AFFILIATE_REGISTER_CALLBACK => {
-                let lang = i18n::user_lang(&ctx, q.from.id.0 as i64, q.from.language_code.as_deref()).await;
                 let _ = ctx
                     .bot
                     .answer_callback_query(q.id.clone())
-                    .text(i18n::t(&ctx, &lang, "affiliate_register_ack", "Đang tạo link CTV..."))
+                    .text("Đang tạo link CTV...")
                     .await;
 
                 let Some(msg) = &q.message else {

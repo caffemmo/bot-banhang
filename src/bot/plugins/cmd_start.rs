@@ -951,13 +951,13 @@ impl AppPlugin for StartCommandPlugin {
         };
 
         if data == "start:menu" {
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
                 q.from.language_code.as_deref(),
             )
             .await;
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 if user_has_joined_required_channel(&ctx, q.from.id).await {
                     send_start_menu(&ctx, msg.chat().id, &lang).await?;
@@ -981,13 +981,13 @@ impl AppPlugin for StartCommandPlugin {
                 return Ok(true);
             }
             let lang = ctx.normalize_language_code(Some(lang));
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 upsert_subscriber_from_user(&ctx, &q.from, msg.chat().id.0, Some(lang.clone()))
                     .await;
             }
             let _ =
                 users_repo::update_preferred_language(&ctx.pool, q.from.id.0 as i64, &lang).await;
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 if user_has_joined_required_channel(&ctx, q.from.id).await {
                     send_start_menu(&ctx, msg.chat().id, &lang).await?;
@@ -999,13 +999,13 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == "start:help" {
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
                 q.from.language_code.as_deref(),
             )
             .await;
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 let msg_text = t_lang(
                     &ctx,
@@ -1019,13 +1019,13 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == "start:language" {
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
                 q.from.language_code.as_deref(),
             )
             .await;
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 send_language_prompt(&ctx, msg.chat().id, &lang).await?;
             }
@@ -1033,13 +1033,13 @@ impl AppPlugin for StartCommandPlugin {
         }
 
         if data == JOIN_CHECK_CALLBACK {
+            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             let lang = preferred_or_telegram_lang(
                 &ctx,
                 q.from.id.0 as i64,
                 q.from.language_code.as_deref(),
             )
             .await;
-            let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
             if let Some(msg) = &q.message {
                 if user_has_joined_required_channel(&ctx, q.from.id).await {
                     send_start_menu(&ctx, msg.chat().id, &lang).await?;

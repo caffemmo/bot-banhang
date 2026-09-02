@@ -311,10 +311,18 @@ async fn handle_admin_refund_callback(
     };
     let chat_id = msg.chat().id;
     let message_id = msg.id();
+    if data.starts_with("admin_refund:cancel:") {
+        let _ = ctx
+            .bot
+            .answer_callback_query(q.id.clone())
+            .text("Đã huỷ lệnh hoàn tiền.")
+            .await;
+    } else {
+        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
+    }
     let lang = i18n::user_lang(ctx, admin_id, q.from.language_code.as_deref()).await;
 
     if let Some(order_id) = data.strip_prefix("admin_order:view:") {
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let Some(order) = repo::get_order_with_product(&ctx.pool, order_id).await? else {
             ctx.bot
                 .send_message(chat_id, "Không tìm thấy đơn hàng.")
@@ -329,7 +337,6 @@ async fn handle_admin_refund_callback(
     }
 
     if let Some(order_id) = data.strip_prefix("admin_refund:req:") {
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let Some(order) = repo::get_order_with_product(&ctx.pool, order_id).await? else {
             ctx.bot
                 .send_message(chat_id, "Không tìm thấy đơn để hoàn tiền.")
@@ -368,11 +375,6 @@ async fn handle_admin_refund_callback(
     }
 
     if let Some(order_id) = data.strip_prefix("admin_refund:cancel:") {
-        let _ = ctx
-            .bot
-            .answer_callback_query(q.id.clone())
-            .text("Đã huỷ lệnh hoàn tiền.")
-            .await;
         ctx.bot
             .edit_message_text(
                 chat_id,
@@ -384,7 +386,6 @@ async fn handle_admin_refund_callback(
     }
 
     if let Some(order_id) = data.strip_prefix("admin_refund:confirm:") {
-        let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
         let Some(order) = repo::get_order_with_product(&ctx.pool, order_id).await? else {
             ctx.bot
                 .edit_message_text(chat_id, message_id, "Không tìm thấy đơn để hoàn tiền.")
@@ -417,7 +418,6 @@ async fn handle_admin_refund_callback(
         return Ok(());
     }
 
-    let _ = ctx.bot.answer_callback_query(q.id.clone()).await;
     Ok(())
 }
 

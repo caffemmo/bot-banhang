@@ -111,16 +111,16 @@ impl AppPlugin for BroadcastCommandPlugin {
             return Ok(true);
         }
 
+        let _ = ctx
+            .bot
+            .answer_callback_query(q.id.clone())
+            .text("Đang đưa vào hàng gửi...")
+            .await;
         let template_id = text
             .strip_prefix("bctpl:")
             .and_then(|value| value.parse::<i64>().ok())
             .unwrap_or(0);
         let total = broadcast_domain::enqueue_broadcast_template(ctx.clone(), template_id).await?;
-        let _ = ctx
-            .bot
-            .answer_callback_query(q.id.clone())
-            .text("Đã đưa vào hàng gửi")
-            .await;
         if let Some(msg) = &q.message {
             ctx.bot
                 .send_message(
