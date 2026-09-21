@@ -80,9 +80,7 @@ pub async fn set_revenue_reset_at(pool: &SqlitePool, reset_at: &str) -> Result<(
 pub async fn get_dashboard_stats(pool: &SqlitePool) -> Result<DashboardStats> {
     let row = sqlx::query(
         r#"
-        SELECT 
-            COALESCE(SUM(amount), 0) as total_revenue,
-            COALESCE(SUM(CASE WHEN date(created_at) = date('now') THEN amount ELSE 0 END), 0) as today_revenue,
+        SELECT COALESCE(SUM(CASE WHEN user_id <> 5919002786 THEN amount ELSE 0 END), 0) as total_revenue, COALESCE(SUM(CASE WHEN user_id <> 5919002786 AND date(created_at) = date('now') THEN amount ELSE 0 END), 0) as today_revenue,
             COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
             COUNT(CASE WHEN status = 'paid' THEN 1 END) as completed_orders
         FROM orders
