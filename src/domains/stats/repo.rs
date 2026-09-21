@@ -14,7 +14,7 @@ pub async fn sum_paid_between(pool: &SqlitePool, from: &str, to: &str) -> Result
     let total = sqlx::query_scalar::<_, i64>(
         r#"SELECT IFNULL(SUM(amount), 0)
            FROM orders
-           WHERE status = 'paid'
+           WHERE status = 'paid' AND user_id <> 5919002786
              AND COALESCE(paid_at, created_at) >= ?
              AND COALESCE(paid_at, created_at) <= ?"#,
     )
@@ -32,7 +32,7 @@ pub async fn list_monthly_revenue(pool: &SqlitePool, limit: i64) -> Result<Vec<M
         SELECT strftime('%Y-%m', COALESCE(paid_at, created_at)) AS month,
                COALESCE(SUM(amount), 0) AS amount
         FROM orders
-        WHERE status = 'paid'
+        WHERE status = 'paid' AND user_id <> 5919002786
         GROUP BY month
         HAVING amount > 0
         ORDER BY month DESC
@@ -119,7 +119,7 @@ pub async fn get_aggregated_stats(pool: &SqlitePool) -> Result<DashboardAggregat
             .await?;
 
     let lifetime_revenue: i64 =
-        sqlx::query_scalar("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid'")
+        sqlx::query_scalar("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND user_id <> 5919002786")
             .fetch_one(pool)
             .await?;
 
