@@ -2076,10 +2076,7 @@ pub(crate) async fn send_products(
         products_with_stock.push((p, stock));
     }
 
-    let categories = category_buttons_from_products(&products_with_stock);
-    let uncategorized_products = uncategorized_products_from_products(&products_with_stock);
-    let raw_keyboard =
-        build_shop_home_keyboard_json(&ctx, lang, &categories, &uncategorized_products);
+    let raw_keyboard = json!({ "inline_keyboard": [] });
     let wallet_balance = wallet_repo::get_or_create_wallet(&ctx.pool, chat_id.0)
         .await
         .map(|wallet| wallet.balance)
@@ -2109,7 +2106,7 @@ async fn send_products_for_category(
         products_with_stock.push((p, stock));
     }
 
-    let keyboard = build_category_product_keyboard_json(&ctx, lang, &products_with_stock);
+    let keyboard = json!({ "inline_keyboard": [] });
     let text = if products_with_stock.is_empty() {
         tl(&ctx, lang, "no_products", "There are no products yet.")
     } else {
@@ -2230,6 +2227,10 @@ fn shop_product_list_payload(
     text: &str,
     reply_markup: Value,
 ) -> serde_json::Result<Value> {
+    let omit_reply_markup = reply_markup
+        .get("inline_keyboard")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.is_empty());
     let mut payload =
         i18n::message_payload_with_json_keyboard(ctx, chat_id, "", text, reply_markup)?;
     let mut entities = payload
@@ -2243,6 +2244,9 @@ fn shop_product_list_payload(
     entities.extend(shop_product_list_price_entities(rendered_text));
 
     if let Some(obj) = payload.as_object_mut() {
+        if omit_reply_markup {
+            obj.remove("reply_markup");
+        }
         obj.remove("parse_mode");
         if entities.is_empty() {
             obj.remove("entities");
@@ -3015,11 +3019,17 @@ fn format_product_list_text(
             if product_category(product, ctx, lang) != category {
                 continue;
             }
+            let (rendered_name, _) = render_button_custom_emoji_placeholders(&product.name);
+            let name = truncate_button_text(
+                &strip_leading_product_button_symbols(&rendered_name),
+                PRODUCT_BUTTON_NAME_MAX_CHARS,
+            );
+            lines.push(format!("• {} — {}", name, format_vnd(product.price)));
             lines.push(format!(
-                "• {} — {} ({})",
-                product.name.trim(),
-                format_vnd(product.price),
-                product_stock_display(product, *stock, ctx, lang),
+                "  {}",
+                product_stock_display(product, *stock, ctx, lang)
+                    .replace("còn 0", "Hết hàng")
+                    .replace("✅ có sẵn", "Còn hàng")
             ));
         }
     }
@@ -3035,6 +3045,7 @@ fn shop_product_list_bold_entities(text: &str) -> Vec<MessageEntity> {
         let is_bold_line = idx <= 1
             || (!line.is_empty()
                 && !line.starts_with('•')
+                && !line.starts_with("  ")
                 && !line.starts_with("🎁")
                 && !line.starts_with("👇"));
         if is_bold_line && len > 0 {
@@ -3834,9 +3845,11 @@ mod tests {
         assert!(text.contains("📋 MENU SẢN PHẨM"));
         assert!(text.contains("━━━━━━━━━━━━━━━━━━━━"));
         assert!(text.contains("GEMINI PRO"));
-        assert!(text.contains("• Gemini Pro + 5TB Pixel mail — 35.000đ (còn 2)"));
+        assert!(text.contains("• Gemini Pro + 5TB Pixel mail — 35.000đ"));
+        assert!(text.contains("  còn 2"));
         assert!(text.contains("MEITU"));
-        assert!(text.contains("• Meitu SVIP — 70.000đ (✅ có sẵn)"));
+        assert!(text.contains("• Meitu SVIP — 70.000đ"));
+        assert!(text.contains("  Còn hàng"));
         assert!(!text.contains("💵 Số dư"));
     }
 
@@ -3935,6 +3948,20 @@ mod tests {
                 && entity["offset"] == text[..price_offset].encode_utf16().count()
                 && entity["length"] == "2.000đ".encode_utf16().count()
         }));
+    }
+
+    #[test]
+    fn shop_product_list_payload_omits_empty_inline_keyboard() {
+        let ctx = test_ctx();
+        let payload = shop_product_list_payload(
+            &ctx,
+            ChatId(1),
+            "📋 MENU SẢN PHẨM\n• Plus — 2.000đ\n  Còn 5 sản phẩm",
+            json!({"inline_keyboard": []}),
+        )
+        .unwrap();
+
+        assert!(!payload.as_object().unwrap().contains_key("reply_markup"));
     }
 
     #[tokio::test]
