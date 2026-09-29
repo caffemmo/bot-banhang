@@ -5,7 +5,7 @@
 - /shop: duyệt sản phẩm, hỗ trợ sản phẩm cần thông tin kích hoạt (requires_input) + gói (plans) với giá khác nhau.
 - /orders: xem 10 đơn gần nhất của user.
 - Thanh toán tự động:
-    - **VietQR (Bank transfer)**: Gửi QR, tự đối soát qua webhook (SePay).
+    - **VietQR (Bank transfer)**: Gửi QR, tự đối soát qua webhook (SePay hoặc Thuê API Bank).
 - Quản lý đơn hàng: tự hết hạn sau 5-15 phút nếu chưa thanh toán (worker nền).
 - Admin `/admin`: CRUD sản phẩm, item stock, plans, ẩn nút add-item với requires_input; xem đơn, mark paid, resend data, export CSV, thống kê doanh thu 7/30 ngày, broadcast tới user (text + ảnh).
 - Lưu subscriber khi /start để broadcast; gửi thông báo hết hạn đơn.
@@ -22,7 +22,7 @@ DATABASE_URL=sqlite://shop.db
 ADMIN_JWT_SECRET=change-this-to-at-least-32-random-chars
 ADMIN_SETUP_CODE=change-this-setup-code
 ADMIN_COOKIE_SECURE=false
-WEBHOOK_SECRET=change-me (dành cho SePay / VietQR)
+WEBHOOK_SECRET=change-me (dành cho SePay hoặc chữ ký webhook Thuê API Bank)
 ```
 
 ## Khởi tạo & chạy local   
@@ -39,7 +39,9 @@ Bot chạy long-polling; server Axum mở cổng PORT (mặc định 8080).
 
 URL webhook SePay: `https://<domain-cua-ban>/webhook/payment`.
 Trong UI SePay chỉ nhập giá trị `WEBHOOK_SECRET`, không nhập thêm chữ `Apikey`.
-Backend nhận cả `Authorization: <WEBHOOK_SECRET>`, `Authorization: Apikey <WEBHOOK_SECRET>` và header cũ `X-Webhook-Secret`.
+URL webhook Thuê API Bank dùng cùng endpoint: `https://<domain-cua-ban>/webhook/payment`.
+Trong cấu hình webhook Thuê API Bank, đặt `signature` bằng đúng giá trị `WEBHOOK_SECRET`.
+Backend nhận `signature`, `Authorization: <WEBHOOK_SECRET>`, `Authorization: Apikey <WEBHOOK_SECRET>` và header cũ `X-Webhook-Secret`.
 
 ```bash
 curl -X POST http://localhost:8080/webhook/payment \

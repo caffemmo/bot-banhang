@@ -77,6 +77,51 @@ pub struct SePayWebhook {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ThueApiBankWebhook {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub merchant: Option<String>,
+    #[serde(default)]
+    pub transactions: Vec<ThueApiBankTransaction>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ThueApiBankTransaction {
+    #[serde(rename = "type")]
+    pub transaction_type: String,
+    #[serde(rename = "transactionID")]
+    pub transaction_id: String,
+    #[serde(deserialize_with = "deserialize_webhook_amount")]
+    pub amount: i64,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "transactionDate", default)]
+    pub transaction_date: Option<String>,
+}
+
+fn deserialize_webhook_amount<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .ok_or_else(|| serde::de::Error::custom("amount must be an integer")),
+        serde_json::Value::String(value) => value
+            .trim()
+            .parse::<i64>()
+            .map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom(
+            "amount must be a number or numeric string",
+        )),
+    }
+}
+
 #[derive(Debug)]
 struct NormalizedPayment {
     memo: String,
@@ -91,6 +136,7 @@ struct NormalizedPayment {
 pub enum IncomingWebhook {
     Legacy(PaymentWebhook),
     SePay(SePayWebhook),
+    ThueApiBank(ThueApiBankWebhook),
 }
 
 pub async fn handle_webhook(
@@ -101,6 +147,7 @@ pub async fn handle_webhook(
     let provider = match &payload {
         IncomingWebhook::Legacy(_) => "legacy",
         IncomingWebhook::SePay(_) => "sepay",
+        IncomingWebhook::ThueApiBank(_) => "thueapibank",
     };
     let source_ip = extract_source_ip(&headers);
     let raw_json = serde_json::to_string(&payload).ok();
@@ -125,16 +172,53 @@ pub async fn handle_webhook(
         return Err((StatusCode::UNAUTHORIZED, "unauthorized".to_string()));
     }
 
-    let payload = normalize_payload(payload, &ctx);
+    let payloads = normalize_payloads(payload, &ctx);
+    if payloads.is_empty() {
+        return Ok((
+            StatusCode::OK,
+            Json(MessageResponse {
+                ok: true,
+                message: "no transactions".to_string(),
+            }),
+        ));
+    }
 
-    // SePay can send outgoing transfers too; we treat non-in as no-op.
+    for payload in &payloads {
+        process_normalized_payment(
+            &ctx,
+            payload,
+            provider,
+            source_ip.as_deref(),
+            raw_json.as_deref(),
+        )
+        .await?;
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(MessageResponse {
+            ok: true,
+            message: format!("processed {} transaction(s)", payloads.len()),
+        }),
+    ))
+}
+
+async fn process_normalized_payment(
+    ctx: &Arc<AppContext>,
+    payload: &NormalizedPayment,
+    provider: &str,
+    source_ip: Option<&str>,
+    raw_json: Option<&str>,
+) -> Result<(StatusCode, Json<MessageResponse>), (StatusCode, String)> {
+
+    // Bank providers can send outgoing transfers too; treat non-in as no-op.
     let status_lc = payload.status.to_lowercase();
     if status_lc != "paid" {
         let _ = repo::insert_webhook_event(
             &ctx.pool,
             provider,
             true,
-            source_ip.as_deref(),
+            source_ip,
             Some(&payload.memo),
             Some(&payload.tx_id),
             Some(payload.amount),
@@ -142,7 +226,7 @@ pub async fn handle_webhook(
             None,
             Some("ignored"),
             Some("status not paid"),
-            raw_json.as_deref(),
+            raw_json,
         )
         .await;
 
@@ -162,11 +246,11 @@ pub async fn handle_webhook(
     // NAP prefix → yêu cầu nạp tiền ví
     if payload.memo.starts_with("NAP") {
         return handle_topup_webhook(
-            &ctx,
-            &payload,
+            ctx,
+            payload,
             provider,
-            source_ip.as_deref(),
-            raw_json.as_deref(),
+            source_ip,
+            raw_json,
         )
         .await;
     }
@@ -179,7 +263,7 @@ pub async fn handle_webhook(
             &ctx.pool,
             provider,
             true,
-            source_ip.as_deref(),
+            source_ip,
             Some(&payload.memo),
             Some(&payload.tx_id),
             Some(payload.amount),
@@ -187,7 +271,7 @@ pub async fn handle_webhook(
             None,
             Some("rejected"),
             Some("memo not found"),
-            raw_json.as_deref(),
+            raw_json,
         )
         .await;
         return Err((StatusCode::BAD_REQUEST, "memo not found".to_string()));
@@ -198,7 +282,7 @@ pub async fn handle_webhook(
             &ctx.pool,
             provider,
             true,
-            source_ip.as_deref(),
+            source_ip,
             Some(&payload.memo),
             Some(&payload.tx_id),
             Some(payload.amount),
@@ -206,7 +290,7 @@ pub async fn handle_webhook(
             Some(&order_with_product.order.id),
             Some("rejected"),
             Some("amount less than order total"),
-            raw_json.as_deref(),
+            raw_json,
         )
         .await;
         return Err((
@@ -220,7 +304,7 @@ pub async fn handle_webhook(
             &ctx.pool,
             provider,
             true,
-            source_ip.as_deref(),
+            source_ip,
             Some(&payload.memo),
             Some(&payload.tx_id),
             Some(payload.amount),
@@ -228,7 +312,7 @@ pub async fn handle_webhook(
             Some(&order_with_product.order.id),
             Some("ok"),
             Some("already paid"),
-            raw_json.as_deref(),
+            raw_json,
         )
         .await;
         return Ok((
@@ -242,12 +326,12 @@ pub async fn handle_webhook(
 
     if !matches!(order_with_product.order.status, OrderStatus::Pending) {
         return credit_order_payment_to_wallet_response(
-            &ctx,
+            ctx,
             &order_with_product,
-            &payload,
+            payload,
             provider,
-            source_ip.as_deref(),
-            raw_json.as_deref(),
+            source_ip,
+            raw_json,
             order_with_product.order.status,
             "order is not pending",
         )
@@ -256,12 +340,12 @@ pub async fn handle_webhook(
 
     if is_order_expired(&order_with_product.order.created_at) {
         return credit_order_payment_to_wallet_response(
-            &ctx,
+            ctx,
             &order_with_product,
-            &payload,
+            payload,
             provider,
-            source_ip.as_deref(),
-            raw_json.as_deref(),
+            source_ip,
+            raw_json,
             OrderStatus::Expired,
             "order expired",
         )
@@ -270,7 +354,7 @@ pub async fn handle_webhook(
 
     let paid_at = parse_paid_at(payload.paid_at.as_deref()).unwrap_or_else(|_| chrono::Utc::now());
     fulfill_paid_order(
-        ctx.clone(),
+        Arc::clone(ctx),
         &order_with_product.order.id,
         &payload.tx_id,
         paid_at,
@@ -285,7 +369,7 @@ pub async fn handle_webhook(
         &ctx.pool,
         provider,
         true,
-        source_ip.as_deref(),
+        source_ip,
         Some(&payload.memo),
         Some(&payload.tx_id),
         Some(payload.amount),
@@ -293,7 +377,7 @@ pub async fn handle_webhook(
         Some(&order_with_product.order.id),
         Some("ok"),
         None,
-        raw_json.as_deref(),
+        raw_json,
     )
     .await;
 
@@ -306,15 +390,15 @@ pub async fn handle_webhook(
     ))
 }
 
-fn normalize_payload(payload: IncomingWebhook, ctx: &AppContext) -> NormalizedPayment {
+fn normalize_payloads(payload: IncomingWebhook, ctx: &AppContext) -> Vec<NormalizedPayment> {
     match payload {
-        IncomingWebhook::Legacy(p) => NormalizedPayment {
+        IncomingWebhook::Legacy(p) => vec![NormalizedPayment {
             memo: normalize_payment_memo(&p.memo),
             amount: p.amount,
             status: p.status,
             tx_id: p.tx_id,
             paid_at: p.paid_at,
-        },
+        }],
         IncomingWebhook::SePay(p) => {
             // SePay can send its own transaction code separately from transfer content.
             // Always prefer the memo inside content/description; fall back to code only if needed.
@@ -353,14 +437,39 @@ fn normalize_payload(payload: IncomingWebhook, ctx: &AppContext) -> NormalizedPa
                 .clone()
                 .unwrap_or_else(|| format!("sepay:{}", p.id));
 
-            NormalizedPayment {
+            vec![NormalizedPayment {
                 memo,
                 amount: p.transfer_amount,
                 status,
                 tx_id,
                 paid_at: p.transaction_date,
-            }
+            }]
         }
+        IncomingWebhook::ThueApiBank(payload) => payload
+            .transactions
+            .into_iter()
+            .map(|transaction| {
+                let memo = extract_memo_from_text(
+                    &transaction.description,
+                    &ctx.order_memo_prefix(),
+                    ctx.order_memo_length(),
+                )
+                .unwrap_or_else(|| normalize_payment_memo(&transaction.description));
+                let status = if transaction.transaction_type.eq_ignore_ascii_case("IN") {
+                    "paid".to_string()
+                } else {
+                    "ignored".to_string()
+                };
+
+                NormalizedPayment {
+                    memo,
+                    amount: transaction.amount,
+                    status,
+                    tx_id: format!("thueapibank:{}", transaction.transaction_id),
+                    paid_at: transaction.transaction_date,
+                }
+            })
+            .collect(),
     }
 }
 
@@ -461,6 +570,15 @@ fn authorize_webhook(ctx: &AppContext, headers: &HeaderMap) -> bool {
     // - Legacy: X-Webhook-Secret: <secret>
     // - SePay:  Authorization: Apikey <secret>
     // - SePay UI key field: Authorization: <secret>
+    // - ThueApiBank: signature: <secret>
+
+    if headers
+        .get("signature")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.trim() == ctx.config.webhook_secret)
+    {
+        return true;
+    }
 
     // SePay-style
     if let Some(auth) = headers
@@ -950,9 +1068,46 @@ mod tests {
             description: None,
         });
 
-        let normalized = normalize_payload(payload, &ctx);
+        let normalized = normalize_payloads(payload, &ctx).remove(0);
 
         assert_eq!(normalized.memo, "NAPABC12345");
+    }
+
+    #[test]
+    fn thue_api_bank_normalizes_incoming_and_outgoing_transactions() {
+        let ctx = test_ctx();
+        let payload: IncomingWebhook = serde_json::from_value(serde_json::json!({
+            "status": "success",
+            "message": "Thành công",
+            "merchant": "G7D1D4",
+            "transactions": [
+                {
+                    "type": "OUT",
+                    "transactionID": "1768",
+                    "amount": "50000",
+                    "description": "CHUYEN TIEN",
+                    "transactionDate": "14/01/2026"
+                },
+                {
+                    "type": "IN",
+                    "transactionID": "1792",
+                    "amount": "30000",
+                    "description": "NAPABC12345",
+                    "transactionDate": "14/01/2026"
+                }
+            ]
+        }))
+        .unwrap();
+
+        let normalized = normalize_payloads(payload, &ctx);
+
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0].status, "ignored");
+        assert_eq!(normalized[0].amount, 50_000);
+        assert_eq!(normalized[1].status, "paid");
+        assert_eq!(normalized[1].memo, "NAPABC12345");
+        assert_eq!(normalized[1].amount, 30_000);
+        assert_eq!(normalized[1].tx_id, "thueapibank:1792");
     }
 
     #[test]
@@ -1009,6 +1164,44 @@ mod tests {
         );
 
         assert!(authorize_webhook(&ctx, &headers));
+    }
+
+    #[test]
+    fn authorize_webhook_accepts_thue_api_bank_signature() {
+        let ctx = test_ctx();
+        let mut headers = HeaderMap::new();
+        headers.insert("signature", "webhook-secret".parse().unwrap());
+
+        assert!(authorize_webhook(&ctx, &headers));
+    }
+
+    #[tokio::test]
+    async fn webhook_endpoint_accepts_thue_api_bank_payload() {
+        let response = router()
+            .with_state(test_ctx())
+            .oneshot(
+                Request::post("/webhook/payment")
+                    .header("content-type", "application/json")
+                    .header("signature", "webhook-secret")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "status": "success",
+                            "message": "Thành công",
+                            "transactions": [{
+                                "type": "OUT",
+                                "transactionID": "1768",
+                                "amount": "50000",
+                                "description": "CHUYEN TIEN"
+                            }]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     async fn test_pool() -> SqlitePool {
