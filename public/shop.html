@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0714">
+  <meta name="description" content="Kho tài nguyên MMO giao tự động, thanh toán QR và quản lý đơn hàng.">
+  <title>MMO Market | Kho tài nguyên số</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/shop/shop.css?v=2">
+</head>
+<body>
+  <div class="ambient-layer" aria-hidden="true">
+    <div class="ambient-light ambient-light-one"></div>
+    <div class="ambient-light ambient-light-two"></div>
+    <div class="ambient-grid"></div>
+    <div class="ambient-scan"></div>
+  </div>
+
+  <div class="app-frame">
+    <header class="topbar">
+      <a class="brand-lockup" href="#catalog" aria-label="MMO Market - kho sản phẩm">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span class="brand-copy"><strong>MMO</strong><span>MARKET</span></span>
+      </a>
+      <div class="topbar-center"><span class="signal-dot"></span><span>HỆ THỐNG ĐANG HOẠT ĐỘNG</span><span class="topbar-divider"></span><span data-header-product-count>-- sản phẩm</span></div>
+      <div class="topbar-actions">
+        <button class="topbar-button" type="button" data-how-button>
+          <i data-lucide="circle-help" aria-hidden="true"></i><span>Hỗ trợ</span>
+        </button>
+        <button class="account-button" type="button" data-auth-trigger>
+          <span class="account-avatar"><i data-lucide="user-round" aria-hidden="true"></i></span>
+          <span class="account-copy"><small>TÀI KHOẢN</small><strong data-auth-label>Đăng nhập</strong></span>
+          <i class="account-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace-shell">
+      <aside class="command-rail" aria-label="Điều hướng cửa hàng">
+        <div class="rail-label">STORE / 01</div>
+        <div class="rail-title">Kho<br><span>MMO</span></div>
+        <nav class="rail-nav">
+          <a class="rail-link is-active" href="#catalog">
+            <i data-lucide="layers-3" aria-hidden="true"></i><span>Kho hàng</span><kbd>01</kbd>
+          </a>
+          <a class="rail-link" href="#orders" data-orders-link>
+            <i data-lucide="receipt-text" aria-hidden="true"></i><span>Đơn đã mua</span><kbd>02</kbd>
+          </a>
+          <button class="rail-link" type="button" data-how-button>
+            <i data-lucide="scan-line" aria-hidden="true"></i><span>Thanh toán</span><kbd>03</kbd>
+          </button>
+        </nav>
+
+        <div class="rail-status">
+          <div class="rail-status-top"><img class="live-gif" src="/assets/shop/live.gif" alt=""><span class="live-label">LIVE</span></div>
+          <strong>Kho đang đồng bộ</strong>
+          <p><span class="signal-dot"></span><span data-live-product-count>--</span> sản phẩm sẵn sàng</p>
+          <div class="status-line"><span></span></div>
+        </div>
+
+        <div class="rail-footer"><span>v2.6.0</span><span>24/7</span></div>
+      </aside>
+
+      <section class="store-main">
+        <div class="store-heading" data-reveal>
+          <div class="heading-copy">
+            <div class="eyebrow"><span class="eyebrow-index">01</span><span class="eyebrow-rule"></span><span>KHO TÀI NGUYÊN SỐ</span></div>
+            <h1>Chọn tài nguyên.<br><span>Nhận quyền truy cập.</span></h1>
+            <p>Tài khoản streaming, công cụ AI và dịch vụ MMO được kiểm tra trước khi đưa lên kho. Chọn sản phẩm để xem chi tiết và tạo đơn.</p>
+          </div>
+          <div class="heading-readout">
+            <div class="readout-label"><span class="signal-dot"></span>LIVE INVENTORY</div>
+            <div class="readout-value" data-product-count>--</div>
+            <div class="readout-caption">SẢN PHẨM ĐANG MỞ BÁN</div>
+            <div class="readout-foot"><span>SYNC</span><span data-sync-time>--:--:--</span></div>
+          </div>
+        </div>
+
+        <section class="catalog-panel" id="catalog" data-reveal>
+          <div class="panel-header">
+            <div>
+              <div class="panel-index">CATALOG / 001</div>
+              <h2>Sản phẩm sẵn sàng giao</h2>
+            </div>
+            <div class="panel-actions">
+              <button class="icon-action" type="button" data-refresh-products aria-label="Làm mới kho" title="Làm mới kho"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+              <span class="catalog-status" data-catalog-status>Đang tải kho sản phẩm...</span>
+            </div>
+          </div>
+          <div class="catalog-toolbar">
+            <label class="search-field">
+              <i data-lucide="search" aria-hidden="true"></i>
+              <span class="sr-only">Tìm sản phẩm</span>
+              <input type="search" placeholder="Tìm theo tên sản phẩm hoặc dịch vụ" data-search>
+            </label>
+            <div class="category-tabs" data-category-tabs aria-label="Danh mục sản phẩm"></div>
+          </div>
+          <div class="product-grid" data-product-grid></div>
+        </section>
+
+        <section class="operations-strip" data-reveal>
+          <div class="operation-cell"><span class="operation-index">01</span><i data-lucide="shield-check" aria-hidden="true"></i><div><strong>Kho có kiểm soát</strong><p>Sản phẩm và số lượng được cập nhật theo dữ liệu thực.</p></div></div>
+          <div class="operation-cell"><span class="operation-index">02</span><i data-lucide="qr-code" aria-hidden="true"></i><div><strong>QR riêng từng đơn</strong><p>Nội dung chuyển khoản được tạo riêng để đối soát tự động.</p></div></div>
+          <div class="operation-cell"><span class="operation-index">03</span><i data-lucide="key-round" aria-hidden="true"></i><div><strong>Giao ngay sau duyệt</strong><p>Tài khoản và thông tin giao nằm trong lịch sử mua.</p></div></div>
+        </section>
+
+        <section class="orders-panel-section" id="orders" data-reveal>
+          <div class="panel-header orders-header">
+            <div>
+              <div class="panel-index">ACCOUNT / 002</div>
+              <h2>Đơn hàng của tôi</h2>
+            </div>
+            <button class="text-action" type="button" data-refresh-orders><i data-lucide="refresh-cw" aria-hidden="true"></i><span>Làm mới</span></button>
+          </div>
+          <div class="orders-panel" data-orders-panel>
+            <div class="empty-state"><i data-lucide="log-in" aria-hidden="true"></i><h3>Đăng nhập để xem đơn</h3><p>Tài khoản của bạn lưu trạng thái thanh toán và thông tin sản phẩm đã mua.</p><button class="primary-button" type="button" data-auth-trigger>Mở đăng nhập <i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div>
+          </div>
+        </section>
+
+        <footer class="app-footer"><span>MMO MARKET / DIGITAL ACCESS</span><span>Thanh toán QR <b></b> Giao tự động <b></b> Hỗ trợ 24/7</span></footer>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" data-modal-backdrop hidden>
+    <section class="modal auth-modal" data-modal="auth" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+      <button class="icon-button modal-close" type="button" data-close-modal aria-label="Đóng"><i data-lucide="x" aria-hidden="true"></i></button>
+      <div class="modal-code">ACCOUNT / AUTH</div>
+      <h2 id="auth-title">Vào tài khoản của bạn</h2>
+      <p class="modal-intro">Đăng nhập để tạo đơn, theo dõi QR thanh toán và xem dữ liệu giao sau khi đơn hoàn tất.</p>
+      <div class="auth-tabs"><button class="auth-tab is-active" type="button" data-auth-mode="login">Đăng nhập</button><button class="auth-tab" type="button" data-auth-mode="register">Tạo tài khoản</button></div>
+      <form class="auth-form" data-auth-form>
+        <label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" placeholder="ten_cua_ban"></label>
+        <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="Tối thiểu 8 ký tự"></label>
+        <button class="primary-button form-submit" type="submit"><span data-auth-submit>Đăng nhập</span><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+        <button class="logout-button" type="button" data-logout hidden>Đăng xuất tài khoản hiện tại</button>
+        <p class="form-message" data-auth-message></p>
+      </form>
+    </section>
+
+    <section class="modal product-modal" data-modal="product" role="dialog" aria-modal="true" aria-labelledby="product-title" hidden>
+      <button class="icon-button modal-close" type="button" data-close-modal aria-label="Đóng"><i data-lucide="x" aria-hidden="true"></i></button>
+      <div data-product-detail></div>
+    </section>
+
+    <section class="modal payment-modal" data-modal="payment" role="dialog" aria-modal="true" aria-labelledby="payment-title" hidden>
+      <button class="icon-button modal-close" type="button" data-close-modal aria-label="Đóng"><i data-lucide="x" aria-hidden="true"></i></button>
+      <div data-payment-detail></div>
+    </section>
+
+    <section class="modal info-modal" data-modal="info" role="dialog" aria-modal="true" aria-labelledby="info-title" hidden>
+      <button class="icon-button modal-close" type="button" data-close-modal aria-label="Đóng"><i data-lucide="x" aria-hidden="true"></i></button>
+      <div class="modal-code">FLOW / 03 STEPS</div>
+      <h2 id="info-title">Mua hàng trong ba bước</h2>
+      <div class="info-list"><div><span>01</span><p>Đăng ký hoặc đăng nhập tài khoản khách hàng.</p></div><div><span>02</span><p>Chọn sản phẩm, gói thời hạn và tạo đơn.</p></div><div><span>03</span><p>Quét QR đúng số tiền và nội dung. Cửa sổ đơn sẽ tự cập nhật khi hệ thống nhận giao dịch.</p></div></div>
+    </section>
+  </div>
+  <div class="toast-stack" data-toast-stack aria-live="polite"></div>
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="/assets/shop/shop.js?v=2"></script>
+</body>
+</html>

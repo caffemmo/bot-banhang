@@ -15,6 +15,7 @@ pub mod i18n;
 pub mod giot_viet;
 pub mod orders;
 pub mod products;
+pub mod shop;
 pub mod stats;
 pub mod users;
 pub mod wallet;
@@ -42,6 +43,7 @@ pub fn router(ctx: Arc<AppContext>) -> Router<Arc<AppContext>> {
 
     Router::new()
         .merge(auth::api::router())
+        .merge(shop::router())
         .merge(client::api::router())
         .merge(childbot::api::router())
         .merge(giot_viet::router())

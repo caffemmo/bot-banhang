@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Chocode Store, cửa hàng tài nguyên số dùng ngay cho công việc và dự án của bạn.">
+  <meta name="theme-color" content="#f4f7f2">
+  <title>Chocode Store | Tài nguyên số dùng ngay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/dashboard/dashboard.css?v=20260725-storefront">
+</head>
+
+<body>
+  <a class="skip-link" href="#products">Đi đến danh sách sản phẩm</a>
+  <div class="site-noise" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="/dashboard" aria-label="Chocode Store">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span class="brand-wordmark">CHOCODE</span>
+      </a>
+
+      <nav class="desktop-nav" aria-label="Điều hướng chính">
+        <a class="nav-link is-active" href="#products">Cửa hàng</a>
+        <a class="nav-link" href="#trust">Cam kết</a>
+        <a class="nav-link" href="#connect">Kết nối API</a>
+      </nav>
+
+      <div class="header-actions">
+        <button class="wallet-chip" id="open-connect" type="button" title="Kết nối ví mua hàng">
+          <span class="wallet-glyph" aria-hidden="true">+</span>
+          <span>
+            <small>Ví của bạn</small>
+            <strong id="wallet-balance">Chưa kết nối</strong>
+          </span>
+        </button>
+        <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Mở menu" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+    <div class="mobile-nav" id="mobile-nav" aria-hidden="true">
+      <a href="#products">Cửa hàng</a>
+      <a href="#trust">Cam kết</a>
+      <a href="#connect">Kết nối API</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-section">
+      <div class="container hero-grid">
+        <div class="hero-copy reveal-on-load">
+          <p class="eyebrow"><span class="eyebrow-line"></span>Cửa hàng tài nguyên số</p>
+          <h1>Công cụ tốt giúp bạn <em>làm nhanh hơn.</em></h1>
+          <p class="hero-description">Mua tool, script và tài nguyên số được tuyển chọn. Nhận sản phẩm ngay sau khi thanh toán.</p>
+
+          <form class="hero-search" id="hero-search-form" role="search">
+            <span class="search-glyph" aria-hidden="true"></span>
+            <label class="sr-only" for="hero-search">Tìm sản phẩm</label>
+            <input id="hero-search" type="search" placeholder="Tìm tool, script, tài nguyên..." autocomplete="off">
+            <button type="submit">Tìm kiếm</button>
+          </form>
+
+          <div class="hero-links">
+            <button class="text-action" id="browse-products" type="button">Xem sản phẩm <span aria-hidden="true">↗</span></button>
+            <a class="text-action muted-action" href="#connect">Bạn đã có API key?</a>
+          </div>
+
+          <div class="hero-proof" aria-label="Thông tin tin cậy">
+            <span class="proof-mark" aria-hidden="true">✓</span>
+            <span>Giao tự động</span>
+            <span class="proof-separator"></span>
+            <span>Thanh toán qua ví</span>
+            <span class="proof-separator"></span>
+            <span>Hỗ trợ sau mua</span>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal-on-load" aria-label="Không gian làm việc số" role="img">
+          <div class="hero-media-shell">
+            <div class="hero-media-frame">
+              <img src="/images/buoc1.png" alt="Hướng dẫn bắt đầu sử dụng tài nguyên số" loading="eager">
+              <div class="media-shade"></div>
+              <div class="media-caption">
+                <span class="media-kicker">Sẵn sàng để dùng</span>
+                <strong>Từ ý tưởng đến kết quả</strong>
+              </div>
+            </div>
+          </div>
+          <div class="hero-float-note">
+            <span class="float-icon" aria-hidden="true">↗</span>
+            <span><small>Thư viện đang mở</small><strong>Khám phá sản phẩm</strong></span>
+          </div>
+          <div class="hero-index" aria-hidden="true">01 <span>/</span> 04</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="catalog-section" id="products">
+      <div class="container">
+        <div class="section-heading reveal-on-scroll">
+          <div>
+            <p class="eyebrow">Danh mục sản phẩm</p>
+            <h2>Chọn đúng thứ bạn cần.</h2>
+          </div>
+          <div class="catalog-tools">
+            <span class="catalog-mode" id="catalog-mode">Đang xem sản phẩm mẫu</span>
+            <button class="filter-button" id="clear-filters" type="button">Đặt lại bộ lọc</button>
+          </div>
+        </div>
+
+        <div class="category-list reveal-on-scroll" id="category-list" aria-label="Danh mục sản phẩm"></div>
+        <div class="catalog-status" id="catalog-status" role="status" aria-live="polite"></div>
+        <div class="products-grid" id="products-grid" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="trust-section" id="trust">
+      <div class="container trust-layout">
+        <div class="trust-intro reveal-on-scroll">
+          <p class="eyebrow">Mua một lần, dùng rõ ràng</p>
+          <h2>Để phần công cụ làm việc cho bạn.</h2>
+          <p>Chocode tập trung vào sản phẩm có cách giao minh bạch, mô tả ngắn gọn và hỗ trợ thực tế sau khi mua.</p>
+        </div>
+        <div class="trust-list reveal-on-scroll">
+          <article class="trust-row">
+            <span class="trust-number">01</span>
+            <div><h3>Giao đúng thứ đã chọn</h3><p>Kho sản phẩm và gói dịch vụ được hiển thị theo trạng thái thực tế.</p></div>
+            <span class="row-arrow" aria-hidden="true">↗</span>
+          </article>
+          <article class="trust-row">
+            <span class="trust-number">02</span>
+            <div><h3>Thanh toán có kiểm soát</h3><p>Đơn hàng đi qua ví trong hệ thống và có mã giao dịch rõ ràng.</p></div>
+            <span class="row-arrow" aria-hidden="true">↗</span>
+          </article>
+          <article class="trust-row">
+            <span class="trust-number">03</span>
+            <div><h3>Hỗ trợ khi cần</h3><p>Nếu sản phẩm cần thông tin kích hoạt, bạn sẽ được hỏi đúng phần cần thiết.</p></div>
+            <span class="row-arrow" aria-hidden="true">↗</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="connect-section" id="connect">
+      <div class="container connect-card reveal-on-scroll">
+        <div class="connect-copy">
+          <p class="eyebrow">Kết nối trải nghiệm mua hàng</p>
+          <h2>Đăng nhập bằng API key để mua ngay trong web.</h2>
+          <p>Gửi lệnh <code>/newapi</code> trong bot Telegram, sau đó dán API key vào đây. Website sẽ hiển thị số dư ví và gửi đơn trực tiếp đến hệ thống.</p>
+        </div>
+        <button class="primary-button" id="connect-cta" type="button">Kết nối API key <span class="button-arrow" aria-hidden="true">↗</span></button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div><a class="brand footer-brand" href="/dashboard"><span class="brand-mark" aria-hidden="true"><span></span></span><span class="brand-wordmark">CHOCODE</span></a><p>Tài nguyên số cho những việc cần làm xong.</p></div>
+      <div class="footer-links"><a href="#products">Sản phẩm</a><a href="#trust">Cam kết</a><a href="#connect">Kết nối</a><a href="/admin">Quản trị</a></div>
+      <span class="footer-copy">© 2026 Chocode</span>
+    </div>
+  </footer>
+
+  <div class="modal" id="connect-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-panel connect-panel">
+      <button class="modal-close" type="button" data-close-modal aria-label="Đóng">×</button>
+      <p class="eyebrow">Kết nối bảo mật</p>
+      <h2 id="connect-title">Kết nối ví mua hàng.</h2>
+      <p class="modal-lead">API key chỉ được lưu trong trình duyệt này và được gửi qua kết nối hiện tại đến backend của bạn.</p>
+      <form id="connect-form">
+        <label for="api-key-input">API key</label>
+        <input id="api-key-input" type="password" placeholder="Ví dụ: 123456789:..." autocomplete="off" required>
+        <p class="field-help">Lấy key bằng cách gửi <code>/newapi</code> trong bot Telegram.</p>
+        <div class="form-error" id="connect-error" role="alert"></div>
+        <button class="primary-button full-button" type="submit">Lưu và kiểm tra <span class="button-arrow" aria-hidden="true">↗</span></button>
+      </form>
+      <button class="disconnect-button" id="disconnect-key" type="button">Xóa API key đã lưu</button>
+    </div>
+  </div>
+
+  <div class="modal" id="product-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="product-modal-title">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-panel product-panel" id="product-modal-content"></div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/dashboard/dashboard.js?v=20260725-storefront"></script>
+</body>
+
+</html>

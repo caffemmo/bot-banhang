@@ -20,7 +20,10 @@ pub async fn serve(ctx: Arc<AppContext>) -> Result<()> {
             "/uploads",
             ServeDir::new("storage/uploads").fallback(ServeDir::new("public/uploads")),
         )
+        .route_service("/", ServeFile::new("public/shop.html"))
+        .route_service("/shop", ServeFile::new("public/shop.html"))
         .route_service("/admin", ServeFile::new("public/admin.html"))
+        .route_service("/dashboard", ServeFile::new("public/dashboard.html"))
         .route_service("/chat.html", ServeFile::new("public/chat.html"))
         .route_service("/chat", ServeFile::new("public/chat.html"))
         .fallback_service(ServeDir::new("public"))

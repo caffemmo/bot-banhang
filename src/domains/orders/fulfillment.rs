@@ -225,8 +225,18 @@ pub async fn fulfill_paid_order(
     order_with_product.order.delivered_data = Some(delivered_data.clone());
     order_with_product.order.reserved_item_ids = reserved_ids;
 
-    if let Err(err) = send_product_file(&ctx, &order_with_product, &delivered_data).await {
-        error!("send product file failed for order {order_id}: {err}");
+    let is_web_order = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM orders WHERE id = ? AND web_customer_id IS NOT NULL",
+    )
+    .bind(order_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap_or(0)
+        > 0;
+    if !is_web_order {
+        if let Err(err) = send_product_file(&ctx, &order_with_product, &delivered_data).await {
+            error!("send product file failed for order {order_id}: {err}");
+        }
     }
     if let Err(err) =
         notify_admins_order_paid(&ctx, &order_with_product, payment_ref, paid_at, &source).await
