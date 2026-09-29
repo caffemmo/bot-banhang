@@ -2080,11 +2080,8 @@ pub(crate) async fn send_products(
     let uncategorized_products = uncategorized_products_from_products(&products_with_stock);
     let raw_keyboard =
         build_shop_home_keyboard_json(&ctx, lang, &categories, &uncategorized_products);
-    let wallet_balance = wallet_repo::get_or_create_wallet(&ctx.pool, chat_id.0)
-        .await
-        .map(|wallet| wallet.balance)
-        .unwrap_or(0);
-    let text = format_product_list_text(&ctx, lang, &products_with_stock, 0, wallet_balance);
+    let _ = wallet_repo::get_or_create_wallet(&ctx.pool, chat_id.0).await;
+    let text = format_shop_home_text(&ctx, lang);
 
     if let Some(msg_id) = target_message {
         send_raw_product_list_message(&ctx, chat_id, Some(msg_id), &text, raw_keyboard).await?;
@@ -2988,16 +2985,7 @@ fn format_product_list_text(
     _page: i64,
     _wallet_balance: i64,
 ) -> String {
-    let mut lines = vec![
-        tl(ctx, lang, "shop_list_title", "📋 MENU SẢN PHẨM"),
-        "━━━━━━━━━━━━━━━━━━━━".to_string(),
-        tl(
-            ctx,
-            lang,
-            "shop_digital_warning",
-            "🎁 NẠP VÍ BONUS 5-10% 🔥\n👇 CHỌN SẢN PHẨM BÊN DƯỚI:",
-        ),
-    ];
+    let mut lines = shop_menu_header_lines(ctx, lang);
 
     let mut categories = Vec::new();
     for (product, _stock) in products {
@@ -3025,6 +3013,23 @@ fn format_product_list_text(
     }
 
     lines.join("\n")
+}
+
+fn format_shop_home_text(ctx: &AppContext, lang: &str) -> String {
+    shop_menu_header_lines(ctx, lang).join("\n")
+}
+
+fn shop_menu_header_lines(ctx: &AppContext, lang: &str) -> Vec<String> {
+    vec![
+        tl(ctx, lang, "shop_list_title", "📋 MENU SẢN PHẨM"),
+        "━━━━━━━━━━━━━━━━━━━━".to_string(),
+        tl(
+            ctx,
+            lang,
+            "shop_digital_warning",
+            "🎁 NẠP VÍ BONUS 5-10% 🔥\n👇 CHỌN SẢN PHẨM BÊN DƯỚI:",
+        ),
+    ]
 }
 
 fn shop_product_list_bold_entities(text: &str) -> Vec<MessageEntity> {
@@ -3838,6 +3843,17 @@ mod tests {
         assert!(text.contains("MEITU"));
         assert!(text.contains("• Meitu SVIP — 70.000đ (✅ có sẵn)"));
         assert!(!text.contains("💵 Số dư"));
+    }
+
+    #[tokio::test]
+    async fn shop_home_text_hides_product_listing() {
+        let ctx = test_ctx();
+
+        let text = format_shop_home_text(&ctx, "vi");
+
+        assert!(text.contains("MENU SẢN PHẨM"));
+        assert!(!text.contains("• "));
+        assert!(!text.contains("CHATGPT PLUS"));
     }
 
     #[test]
