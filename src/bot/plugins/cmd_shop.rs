@@ -2891,8 +2891,8 @@ fn build_category_product_keyboard_json(
     products: &[(Product, i64)],
 ) -> Value {
     let mut rows = Vec::new();
-    for (product, _stock) in products {
-        rows.push(vec![product_buy_button_json(product)]);
+    for (product, stock) in products {
+        rows.push(vec![category_product_button_json(product, *stock)]);
     }
     rows.push(vec![i18n::inline_button_callback_json(
         ctx,
@@ -2903,6 +2903,19 @@ fn build_category_product_keyboard_json(
     )]);
 
     json!({ "inline_keyboard": rows })
+}
+
+fn category_product_button_json(product: &Product, stock: i64) -> Value {
+    let mut button = product_buy_button_json(product);
+    if product_is_out_of_stock(product, stock)
+        && let Some(text) = button.get("text").and_then(Value::as_str)
+    {
+        let unavailable_text = format!("❌ {text}");
+        if let Some(object) = button.as_object_mut() {
+            object.insert("text".to_string(), json!(unavailable_text));
+        }
+    }
+    button
 }
 
 fn product_buy_button_json(product: &Product) -> Value {
@@ -2985,7 +2998,7 @@ fn format_product_list_text(
     _page: i64,
     _wallet_balance: i64,
 ) -> String {
-    let mut lines = shop_menu_header_lines(ctx, lang);
+    let mut lines = Vec::new();
 
     let mut categories = Vec::new();
     for (product, _stock) in products {
@@ -2996,21 +3009,26 @@ fn format_product_list_text(
     }
 
     for category in categories {
-        lines.push(String::new());
-        lines.push(category.to_uppercase());
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(format!("┌─ {}", category.to_uppercase()));
 
         for (product, stock) in products {
             if product_category(product, ctx, lang) != category {
                 continue;
             }
-            lines.push(format!(
-                "• {} — {} ({})",
-                product.name.trim(),
-                format_vnd(product.price),
-                product_stock_display(product, *stock, ctx, lang),
-            ));
+            lines.push(String::new());
+            lines.push(format!("⌛ {}", product.name.trim()));
+            lines.push(format!("💵 Giá: {}", format_vnd(product.price)));
+            lines.push(product_stock_status_line(product, *stock, ctx, lang));
         }
+
+        lines.push("└────────────────────".to_string());
     }
+
+    lines.push(String::new());
+    lines.push(tl(ctx, lang, "shop_choose_plan_hint", "👇 Chọn gói bên dưới:"));
 
     lines.join("\n")
 }
@@ -3035,13 +3053,11 @@ fn shop_menu_header_lines(ctx: &AppContext, lang: &str) -> Vec<String> {
 fn shop_product_list_bold_entities(text: &str) -> Vec<MessageEntity> {
     let mut entities = Vec::new();
     let mut offset = 0usize;
-    for (idx, line) in text.split('\n').enumerate() {
+    for line in text.split('\n') {
         let len = line.encode_utf16().count();
-        let is_bold_line = idx <= 1
-            || (!line.is_empty()
-                && !line.starts_with('•')
-                && !line.starts_with("🎁")
-                && !line.starts_with("👇"));
+        let is_bold_line = line.starts_with("📋")
+            || line.starts_with("┌─")
+            || line.starts_with("⌛");
         if is_bold_line && len > 0 {
             entities.push(MessageEntity::bold(offset, len));
         }
@@ -3054,13 +3070,20 @@ fn shop_product_list_price_entities(text: &str) -> Vec<MessageEntity> {
     let mut entities = Vec::new();
     let mut offset = 0usize;
     for line in text.split('\n') {
-        if line.starts_with('•')
-            && let Some(price_start) = line.find(" — ").map(|idx| idx + " — ".len())
-        {
-            let price_end = line[price_start..]
-                .find(" (")
-                .map(|idx| price_start + idx)
-                .unwrap_or(line.len());
+        let price_range = if line.starts_with('•') {
+            line.find(" — ").map(|idx| {
+                let start = idx + " — ".len();
+                let end = line[start..]
+                    .find(" (")
+                    .map(|offset| start + offset)
+                    .unwrap_or(line.len());
+                (start, end)
+            })
+        } else {
+            line.strip_prefix("💵 Giá: ")
+                .map(|price| ("💵 Giá: ".len(), "💵 Giá: ".len() + price.len()))
+        };
+        if let Some((price_start, price_end)) = price_range {
             if price_end > price_start {
                 let price_offset = offset + line[..price_start].encode_utf16().count();
                 let price_len = line[price_start..price_end].encode_utf16().count();
@@ -3234,6 +3257,39 @@ fn product_stock_display(product: &Product, stock: i64, ctx: &AppContext, lang: 
         lang,
         "shop_stock_auto",
         "còn {stock}",
+        &[("stock", stock.max(0).to_string())],
+    )
+}
+
+fn product_is_out_of_stock(product: &Product, stock: i64) -> bool {
+    !matches!(
+        orders_api::product_delivery_type(product),
+        "manual_input" | "external_api"
+    ) && stock <= 0
+}
+
+fn product_stock_status_line(
+    product: &Product,
+    stock: i64,
+    ctx: &AppContext,
+    lang: &str,
+) -> String {
+    if product_is_out_of_stock(product, stock) {
+        return tl(ctx, lang, "shop_stock_out", "❌ Hết hàng");
+    }
+
+    if matches!(
+        orders_api::product_delivery_type(product),
+        "manual_input" | "external_api"
+    ) {
+        return tl(ctx, lang, "shop_stock_available", "✅ Còn hàng");
+    }
+
+    trl(
+        ctx,
+        lang,
+        "shop_stock_remaining",
+        "✅ Còn {stock}",
         &[("stock", stock.max(0).to_string())],
     )
 }
@@ -3836,12 +3892,16 @@ mod tests {
         let ctx = test_ctx();
         let text = format_product_list_text(&ctx, "vi", &products, 0, 0);
 
-        assert!(text.contains("📋 MENU SẢN PHẨM"));
-        assert!(text.contains("━━━━━━━━━━━━━━━━━━━━"));
-        assert!(text.contains("GEMINI PRO"));
-        assert!(text.contains("• Gemini Pro + 5TB Pixel mail — 35.000đ (còn 2)"));
-        assert!(text.contains("MEITU"));
-        assert!(text.contains("• Meitu SVIP — 70.000đ (✅ có sẵn)"));
+        assert!(text.contains("┌─ GEMINI PRO"));
+        assert!(text.contains("⌛ Gemini Pro + 5TB Pixel mail"));
+        assert!(text.contains("💵 Giá: 35.000đ"));
+        assert!(text.contains("✅ Còn 2"));
+        assert!(text.contains("┌─ MEITU"));
+        assert!(text.contains("⌛ Meitu SVIP"));
+        assert!(text.contains("💵 Giá: 70.000đ"));
+        assert!(text.contains("✅ Còn hàng"));
+        assert!(text.contains("└────────────────────"));
+        assert!(text.contains("👇 Chọn gói bên dưới:"));
         assert!(!text.contains("💵 Số dư"));
     }
 
@@ -4262,13 +4322,20 @@ mod tests {
             show_sold_count: Some(0),
         };
         let ctx = test_ctx();
-        let keyboard = build_category_product_keyboard_json(&ctx, "vi", &[(product, 4)]);
+        let keyboard =
+            build_category_product_keyboard_json(&ctx, "vi", &[(product.clone(), 4)]);
         let rows = keyboard["inline_keyboard"].as_array().unwrap();
 
         assert_eq!(rows[0][0]["text"], "1️⃣ Gói 1 — 60.000đ");
         assert_eq!(rows[0][0]["callback_data"], "buy:42");
         assert_eq!(rows[1][0]["text"], "◀️ Quay lại");
         assert_eq!(rows[1][0]["callback_data"], "start:shop");
+
+        let unavailable = build_category_product_keyboard_json(&ctx, "vi", &[(product, 0)]);
+        assert_eq!(
+            unavailable["inline_keyboard"][0][0]["text"],
+            "❌ 1️⃣ Gói 1 — 60.000đ"
+        );
     }
 
     #[test]
