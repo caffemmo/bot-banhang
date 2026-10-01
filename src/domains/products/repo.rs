@@ -1,4 +1,6 @@
 use anyhow::{Result, anyhow};
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use sqlx::{Executor, FromRow, QueryBuilder, Sqlite, SqlitePool, Transaction};
 
@@ -382,6 +384,32 @@ pub async fn count_product_items(pool: &SqlitePool, product_id: i64) -> Result<i
     .fetch_one(pool)
     .await?;
     Ok(count)
+}
+
+pub async fn count_product_items_bulk(
+    pool: &SqlitePool,
+    product_ids: &[i64],
+) -> Result<HashMap<i64, i64>> {
+    if product_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT product_id, COUNT(1) AS stock FROM product_items WHERE is_buy = 0 AND product_id IN (",
+    );
+    {
+        let mut separated = builder.separated(", ");
+        for product_id in product_ids {
+            separated.push_bind(product_id);
+        }
+    }
+    builder.push(") GROUP BY product_id");
+
+    let rows = builder
+        .build_query_as::<(i64, i64)>()
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().collect())
 }
 
 #[allow(dead_code)]
@@ -1016,6 +1044,45 @@ mod tests {
         assert_eq!(available.len(), 1);
         assert_eq!(available[0].content, "available");
         assert_eq!(available[0].is_buy, Some(0));
+    }
+
+    #[tokio::test]
+    async fn bulk_product_item_counts_include_only_available_items() {
+        let pool = test_pool().await;
+        let first_id = sqlx::query("INSERT INTO products (name, price) VALUES ('First', 10000)")
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        let second_id =
+            sqlx::query("INSERT INTO products (name, price) VALUES ('Second', 20000)")
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        insert_product_items(
+            &pool,
+            first_id,
+            &["available-1".to_string(), "sold".to_string()],
+        )
+        .await
+        .unwrap();
+        insert_product_items(&pool, second_id, &["available-2".to_string()])
+            .await
+            .unwrap();
+        sqlx::query("UPDATE product_items SET is_buy = 1 WHERE content = 'sold'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let counts = count_product_items_bulk(&pool, &[first_id, second_id, 999])
+            .await
+            .unwrap();
+
+        assert_eq!(counts.get(&first_id), Some(&1));
+        assert_eq!(counts.get(&second_id), Some(&1));
+        assert_eq!(counts.get(&999), None);
     }
 
     #[tokio::test]

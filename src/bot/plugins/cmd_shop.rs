@@ -2070,11 +2070,7 @@ pub(crate) async fn send_products(
     }
 
     let products = repo::list_products(&ctx.pool, total, 0).await?;
-    let mut products_with_stock = Vec::new();
-    for p in products {
-        let stock = product_stock_for_display(&ctx, &p).await;
-        products_with_stock.push((p, stock));
-    }
+    let products_with_stock = products_with_stock_for_display(&ctx, products).await;
 
     let categories = category_buttons_from_products(&products_with_stock);
     let uncategorized_products = uncategorized_products_from_products(&products_with_stock);
@@ -2100,11 +2096,7 @@ async fn send_products_for_category(
     lang: &str,
 ) -> Result<()> {
     let products = repo::list_products_by_category(&ctx.pool, category).await?;
-    let mut products_with_stock = Vec::new();
-    for p in products {
-        let stock = product_stock_for_display(&ctx, &p).await;
-        products_with_stock.push((p, stock));
-    }
+    let products_with_stock = products_with_stock_for_display(&ctx, products).await;
 
     let keyboard = build_category_product_keyboard_json(&ctx, lang, &products_with_stock);
     let text = if products_with_stock.is_empty() {
@@ -2152,11 +2144,7 @@ async fn handle_product_search_message(
     }
 
     let products = repo::search_products(&ctx.pool, query, 30).await?;
-    let mut products_with_stock = Vec::new();
-    for product in products {
-        let stock = product_stock_for_display(&ctx, &product).await;
-        products_with_stock.push((product, stock));
-    }
+    let products_with_stock = products_with_stock_for_display(&ctx, products).await;
 
     let keyboard = build_search_product_keyboard_json(&ctx, lang, &products_with_stock);
     let text = if products_with_stock.is_empty() {
@@ -3300,6 +3288,32 @@ async fn product_stock_for_display(ctx: &AppContext, product: &Product) -> i64 {
     }
 
     repo::count_product_items(&ctx.pool, product.id).await.unwrap_or(0)
+}
+
+async fn products_with_stock_for_display(
+    ctx: &AppContext,
+    products: Vec<Product>,
+) -> Vec<(Product, i64)> {
+    let product_ids = products
+        .iter()
+        .filter(|product| orders_api::product_delivery_type(product) != "external_api")
+        .map(|product| product.id)
+        .collect::<Vec<_>>();
+    let stock_by_product = repo::count_product_items_bulk(&ctx.pool, &product_ids)
+        .await
+        .unwrap_or_default();
+
+    products
+        .into_iter()
+        .map(|product| {
+            let stock = if orders_api::product_delivery_type(&product) == "external_api" {
+                -1
+            } else {
+                stock_by_product.get(&product.id).copied().unwrap_or(0)
+            };
+            (product, stock)
+        })
+        .collect()
 }
 
 fn truncate_button_text(value: &str, max_chars: usize) -> String {

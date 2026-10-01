@@ -311,12 +311,14 @@ pub async fn run(ctx: Arc<AppContext>) -> Result<()> {
                 None
             };
             async move {
-                let request = bot.answer_callback_query(query.id);
-                if let Some(message) = maintenance_message {
-                    let _ = request.text(message).show_alert(true).await;
-                } else {
-                    let _ = request.await;
-                }
+                tokio::spawn(async move {
+                    let request = bot.answer_callback_query(query.id);
+                    if let Some(message) = maintenance_message {
+                        let _ = request.text(message).show_alert(true).await;
+                    } else {
+                        let _ = request.await;
+                    }
+                });
                 true
             }
         }
